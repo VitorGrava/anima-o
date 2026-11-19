@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>anima-o</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Silkscreen&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/web/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand"><span class="logo">anima-o</span><input id="project-name" class="project-name" spellcheck="false" /></div>
+      <div class="actions">
+        <button id="btn-new" title="Novo projeto">Novo</button>
+        <button id="btn-demo" title="Carregar o slime de demonstração">Demo</button>
+        <button id="btn-open" title="Abrir projeto .anima.json">Abrir</button>
+        <button id="btn-undo" title="Desfazer (Ctrl+Z)">↶</button>
+        <button id="btn-redo" title="Refazer (Ctrl+Shift+Z)">↷</button>
+        <span class="sep"></span>
+        <button id="btn-json">Salvar JSON</button>
+        <button id="btn-png">Spritesheet PNG</button>
+        <button id="btn-gif" class="primary">Exportar GIF</button>
+        <input id="file-input" type="file" accept=".json,application/json" hidden />
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="workspace">
+        <div class="stage-wrap">
+          <div class="toolbar">
+            <div class="tools" role="radiogroup" aria-label="Ferramenta">
+              <button data-tool="pencil" class="active" title="Lápis (B)">Lápis</button>
+              <button data-tool="eraser" title="Borracha (E)">Borracha</button>
+              <button data-tool="fill" title="Balde (G)">Balde</button>
+              <button data-tool="pick" title="Conta-gotas (I)">Conta-gotas</button>
+            </div>
+            <div class="view-opts">
+              <label><input type="checkbox" id="opt-onion" /> Onion skin</label>
+              <label><input type="checkbox" id="opt-grid" checked /> Grade</label>
+              <label>Zoom <input type="range" id="opt-zoom" min="2" max="32" value="14" /></label>
+            </div>
+          </div>
+          <div class="stage" id="stage"><canvas id="canvas"></canvas></div>
+          <div class="playbar">
+            <button id="btn-play" class="primary">▶ Play</button>
+            <span id="frame-label" class="mono">frame 1/1</span>
+            <label>FPS <input type="number" id="fps" min="1" max="60" value="8" /></label>
+            <span id="canvas-size" class="mono muted"></span>
+          </div>
+        </div>
+
+        <div class="panels">
+          <div class="panel">
+            <h3>Paleta</h3>
+            <div id="palette" class="palette"></div>
+          </div>
+          <div class="panel">
+            <h3>Camadas</h3>
+            <ul id="layers" class="layers"></ul>
+          </div>
+        </div>
+
+        <div class="timeline-wrap">
+          <h3>Timeline</h3>
+          <div id="timeline" class="timeline"></div>
+        </div>
+      </section>
+
+      <aside class="chat">
+        <div class="chat-head">
+          <h2>Diretor de animação <span class="muted">· IA</span></h2>
+          <button id="btn-reset-chat" title="Começar nova conversa">Nova conversa</button>
+        </div>
+        <div id="messages" class="messages">
+          <div class="welcome">
+            <p>Descreva a animação e a IA desenha, anima e ajusta para você — pixel por pixel.</p>
+            <div class="suggestions">
+              <button>Crie um slime verde pulando em loop, 24x24</button>
+              <button>Um cavaleiro andando para a direita, 32x32, 6 frames</button>
+              <button>Uma fogueira crepitando em loop</button>
+              <button>Uma moeda dourada girando</button>
+            </div>
+          </div>
+        </div>
+        <form id="chat-form" class="composer">
+          <textarea id="chat-input" rows="3" placeholder="Ex.: deixa o chapéu vermelho e a animação mais rápida"></textarea>
+          <div class="composer-row">
+            <span id="status" class="muted"></span>
+            <button type="button" id="btn-stop" hidden>Parar</button>
+            <button type="submit" id="btn-send" class="primary">Enviar</button>
+          </div>
+        </form>
+      </aside>
+    </main>
+    <script type="module" src="/web/main.ts"></script>
+  </body>
+</html>

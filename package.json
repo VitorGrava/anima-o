@@ -1,0 +1,29 @@
+{
+  "name": "anima-o",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Engine de animação pixel art controlada por IA (Claude)",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --ignore 'src/**' --ignore 'web/**' server/index.ts",
+    "build": "tsc --noEmit && vite build",
+    "start": "NODE_ENV=production tsx server/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.10.0",
+    "gifenc": "^1.0.3",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  },
+  "engines": {
+    "node": ">=21.7"
+  }
+}
