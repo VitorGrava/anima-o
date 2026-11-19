@@ -145,3 +145,26 @@ describe("serialização e exportação", () => {
     expect(sheet.height).toBe(6 * 2);
   });
 });
+
+describe("rotate", () => {
+  it("90° horário leva uma linha horizontal para a vertical, sem perder pixels", () => {
+    const p = createProject({ width: 9, height: 9 });
+    runCommand(p, "set_palette", { colors: [{ key: "r", hex: "#ff0000", name: "vermelho" }] });
+    runCommand(p, "draw_shapes", { shapes: [{ type: "line", x1: 4, y1: 4, x2: 8, y2: 4, color: "r" }] });
+    const r = runCommand(p, "transform", { frames: 0, op: "rotate", angle: 90, cx: 4.5, cy: 4.5 });
+    expect(r.ok).toBe(true);
+    const rows = frameToRows(p, 0);
+    for (let y = 4; y <= 8; y++) expect(rows[y][4]).toBe("r");
+    expect(rows.join("").split("r").length - 1).toBe(5);
+  });
+
+  it("45° mantém uma linha diagonal contínua", () => {
+    const p = createProject({ width: 21, height: 21 });
+    runCommand(p, "set_palette", { colors: [{ key: "r", hex: "#ff0000", name: "vermelho" }] });
+    runCommand(p, "draw_shapes", { shapes: [{ type: "line", x1: 10, y1: 10, x2: 19, y2: 10, color: "r" }] });
+    runCommand(p, "transform", { frames: 0, op: "rotate", angle: -45, cx: 10.5, cy: 10.5 });
+    const rows = frameToRows(p, 0);
+    // cada linha entre o pivô e a ponta tem ao menos um pixel (sem buracos)
+    for (let y = 4; y <= 10; y++) expect(rows[y]).toContain("r");
+  });
+});

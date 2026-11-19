@@ -418,12 +418,16 @@ const transform = def({
     "- flip_horizontal / flip_vertical: espelha",
     "- replace_color: troca a cor `from` por `to`",
     "- outline: contorna automaticamente a silhueta com `color`",
+    "- rotate: gira `angle` graus (positivo = horário) em torno do pivô (cx, cy). Ótimo para braços, armas e objetos girando. Gire sempre a partir de uma cópia limpa (copy_layer_content) em vez de girar várias vezes o mesmo frame, para não acumular distorção.",
     "- clear: apaga tudo",
   ].join("\n"),
   schema: z.object({
     frames: framesSel,
     layer: layerSel,
-    op: z.enum(["shift", "flip_horizontal", "flip_vertical", "replace_color", "outline", "clear"]),
+    op: z.enum(["shift", "flip_horizontal", "flip_vertical", "replace_color", "outline", "rotate", "clear"]),
+    angle: z.number().min(-360).max(360).optional().describe("rotate: graus, positivo = horário"),
+    cx: z.number().optional().describe("rotate: pivô x (padrão: centro do canvas)"),
+    cy: z.number().optional().describe("rotate: pivô y (padrão: centro do canvas)"),
     dx: z.number().int().optional(),
     dy: z.number().int().optional(),
     wrap: z.boolean().optional(),
@@ -454,6 +458,10 @@ const transform = def({
         case "outline":
           if (i.color === undefined) throw new Error("outline precisa de `color`.");
           draw.outline(s, colorIndex(p, i.color), i.diagonal ?? false);
+          break;
+        case "rotate":
+          if (i.angle === undefined) throw new Error("rotate precisa de `angle`.");
+          draw.rotate(s, i.angle, i.cx ?? p.width / 2, i.cy ?? p.height / 2);
           break;
         case "clear":
           s.data.fill(0);

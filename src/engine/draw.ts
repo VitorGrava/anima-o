@@ -160,3 +160,41 @@ export function outline(s: Surface, c: number, diagonal: boolean): number {
   }
   return n;
 }
+
+/**
+ * Gira o conteúdo em torno de (cx, cy). Ângulo em graus, positivo = horário.
+ * Cada pixel de destino amostra 4x4 pontos na origem e fica com a cor opaca
+ * mais votada (estilo RotSprite): linhas finas não somem e não há anti-aliasing.
+ */
+export function rotate(s: Surface, degrees: number, cx: number, cy: number): void {
+  const src = new Uint8Array(s.data);
+  const rad = (-degrees * Math.PI) / 180; // rotação inversa: destino -> origem
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const N = 4;
+  const votes = new Map<number, number>();
+  for (let y = 0; y < s.height; y++) {
+    for (let x = 0; x < s.width; x++) {
+      votes.clear();
+      let opaque = 0;
+      for (let sy = 0; sy < N; sy++) {
+        for (let sx = 0; sx < N; sx++) {
+          const dx = x + (sx + 0.5) / N - cx;
+          const dy = y + (sy + 0.5) / N - cy;
+          const ox = Math.floor(cx + dx * cos - dy * sin);
+          const oy = Math.floor(cy + dx * sin + dy * cos);
+          if (ox < 0 || oy < 0 || ox >= s.width || oy >= s.height) continue;
+          const v = src[oy * s.width + ox];
+          if (!v) continue;
+          opaque++;
+          votes.set(v, (votes.get(v) ?? 0) + 1);
+        }
+      }
+      let best = 0;
+      let bestN = 0;
+      for (const [v, n] of votes) if (n > bestN || (n === bestN && v < best)) [best, bestN] = [v, n];
+      // limiar < 50% preserva contornos de 1px em diagonais
+      s.data[y * s.width + x] = opaque >= (N * N) * 0.375 ? best : 0;
+    }
+  }
+}
