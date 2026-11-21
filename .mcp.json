@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "anima": {
+      "command": "node",
+      "args": ["bin/anima.mjs", "mcp"]
+    }
+  }
+}

@@ -14,5 +14,5 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src", "server", "web", "tests", "examples", "vite.config.ts"]
+  "include": ["src", "server", "web", "tests", "examples", "mcp", "cli", "vite.config.ts"]
 }

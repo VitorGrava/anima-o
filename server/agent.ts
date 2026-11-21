@@ -3,9 +3,8 @@
  * transmite cada passo (texto, ferramenta, novo estado do projeto) para a UI.
  */
 import Anthropic from "@anthropic-ai/sdk";
-import { z } from "zod";
+import { commandTools } from "../src/engine/tools.ts";
 import {
-  COMMANDS,
   describeProject,
   renderCheckRGBA,
   runCommand,
@@ -35,28 +34,13 @@ export interface Session {
 }
 
 /** As ferramentas vêm direto dos schemas Zod da engine — uma única fonte de verdade. */
-export const TOOLS: Anthropic.Beta.BetaTool[] = COMMANDS.map((c) => {
-  const { $schema: _ignored, ...schema } = stripSafeIntBounds(z.toJSONSchema(c.schema, { io: "input" })) as Record<string, unknown>;
-  return {
-    name: c.name,
-    description: c.description,
-    input_schema: schema as Anthropic.Beta.BetaTool.InputSchema,
-    // entradas grandes (draw_rows) chegam em streaming; a validação é feita por runCommand (Zod)
-    eager_input_streaming: true,
-  };
-});
-
-/** Remove os limites ±MAX_SAFE_INTEGER que o Zod adiciona a todo inteiro (só ruído no prompt). */
-function stripSafeIntBounds(node: unknown): unknown {
-  if (Array.isArray(node)) return node.map(stripSafeIntBounds);
-  if (!node || typeof node !== "object") return node;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(node)) {
-    if ((k === "minimum" || k === "maximum") && Math.abs(v as number) === Number.MAX_SAFE_INTEGER) continue;
-    out[k] = stripSafeIntBounds(v);
-  }
-  return out;
-}
+export const TOOLS: Anthropic.Beta.BetaTool[] = commandTools().map((t) => ({
+  name: t.name,
+  description: t.description,
+  input_schema: t.inputSchema as Anthropic.Beta.BetaTool.InputSchema,
+  // entradas grandes (draw_rows) chegam em streaming; a validação é feita por runCommand (Zod)
+  eager_input_streaming: true,
+}));
 
 function toolResultContent(p: Project, r: CommandResult): Anthropic.Beta.BetaToolResultBlockParam["content"] {
   const content: Exclude<Anthropic.Beta.BetaToolResultBlockParam["content"], string | undefined> = [

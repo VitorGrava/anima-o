@@ -130,3 +130,7 @@ input[type="number"] { width: 56px; background: var(--panel-2); color: var(--tex
   .workspace { grid-template-columns: 1fr; padding: 8px 16px; }
   .topbar { padding: 10px 16px; }
 }
+
+.watch-banner {
+  background: var(--accent); color: #fff; text-align: center; padding: 6px 12px; font-size: 13px;
+}

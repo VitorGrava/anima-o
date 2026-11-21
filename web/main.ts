@@ -664,9 +664,32 @@ document.addEventListener("keydown", (e) => {
 
 renderAll();
 updateUndoButtons();
+// ---------------- modo "acompanhar": ver ao vivo o que um agente (Claude Code, Codex) desenha ----------------
+const watchFile = new URLSearchParams(location.search).get("watch");
+if (watchFile) {
+  const banner = document.createElement("div");
+  banner.className = "watch-banner";
+  banner.textContent = `Acompanhando ao vivo: ${watchFile}`;
+  document.body.prepend(banner);
+  const es = new EventSource(`/api/watch?path=${encodeURIComponent(watchFile)}`);
+  let first = true;
+  es.onmessage = (ev) => {
+    try {
+      const wasPlaying = state.playing;
+      stop();
+      setProject(fromJSON(JSON.parse(ev.data)));
+      if (first || wasPlaying) { first = false; if (state.project.frames.length > 1) play(); }
+      banner.textContent = `Acompanhando ao vivo: ${watchFile} · atualizado ${new Date().toLocaleTimeString()}`;
+    } catch (err) {
+      console.warn(err);
+    }
+  };
+  es.onerror = () => { banner.textContent = `Acompanhando: ${watchFile} · reconectando…`; };
+}
+
 fetch("/api/health")
   .then((r) => r.json())
   .then((h: { hasKey: boolean; model: string }) => {
-    if (!h.hasKey) $("status").textContent = "⚠ servidor sem ANTHROPIC_API_KEY (veja o README)";
+    if (!h.hasKey) $("status").textContent = "Chat via API desligado (sem ANTHROPIC_API_KEY). Use o Claude Code/Codex pelo MCP — veja o README.";
   })
   .catch(() => {});

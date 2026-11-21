@@ -28,6 +28,57 @@ Abra http://localhost:5173. Sem chave de API dá para usar o editor manual e o b
 | `npm test` | testes da engine e do loop do agente |
 | `npm run build` e `npm start` | build de produção |
 
+## Usar com Claude Code ou Codex (sem chave de API)
+
+A engine também é uma **ferramenta MCP**: agentes como o Claude Code e o Codex desenham e animam
+usando a sua própria assinatura, sem `ANTHROPIC_API_KEY`. Eles recebem junto as regras de pixel art
+e de animação, e enxergam cada frame como imagem.
+
+Depois do `npm install`, registre o servidor no seu agente (troque `/caminho/anima-o` pelo caminho do repositório):
+
+**Claude Code** (vale para todos os seus projetos):
+
+```bash
+claude mcp add --scope user anima -- node /caminho/anima-o/bin/anima.mjs mcp
+```
+
+Dentro desta pasta não precisa: o arquivo `.mcp.json` já registra o servidor.
+
+**Codex**: adicione ao `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.anima]
+command = "node"
+args = ["/caminho/anima-o/bin/anima.mjs", "mcp"]
+```
+
+Aí é só pedir: *"crie um slime pulando em loop e exporte um GIF"*. O projeto fica num arquivo
+`.anima.json` no diretório em que o agente está, salvo a cada comando.
+
+**Ver ao vivo** enquanto o agente desenha:
+
+```bash
+node /caminho/anima-o/bin/anima.mjs view animacao.anima.json
+```
+
+Abra o endereço que aparecer; o canvas atualiza sozinho a cada comando do agente.
+
+### CLI
+
+Para agentes sem MCP, scripts ou uso manual:
+
+| Comando | O que faz |
+|---|---|
+| `anima mcp` | servidor MCP |
+| `anima view [projeto]` | app no navegador acompanhando o arquivo ao vivo |
+| `anima new <projeto> [LxA] [fps]` | cria um projeto vazio |
+| `anima run <projeto> <comandos.json>` | aplica uma lista de comandos `[{"name", "input"}]` (use `-` para ler do stdin) |
+| `anima show <projeto> [frame] [--png f.png] [--check silhueta]` | mostra o frame como texto e, opcionalmente, como imagem |
+| `anima export <projeto> <saida.gif\|.png\|.json>` | exporta (`--scale`, `--columns`, `--frame`) |
+| `anima tools` | lista os comandos com seus parâmetros |
+
+Rode com `node bin/anima.mjs ...` ou instale o comando com `npm link`.
+
 ## Como funciona
 
 ```

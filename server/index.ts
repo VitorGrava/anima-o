@@ -4,6 +4,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { randomUUID } from "node:crypto";
+import { watch as fsWatch } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
@@ -84,6 +85,38 @@ async function handleChat(req: IncomingMessage, res: ServerResponse): Promise<vo
   res.end();
 }
 
+/** Arquivo de projeto que o navegador pode acompanhar: só .anima.json dentro da pasta onde `anima view` rodou. */
+function watchPath(rel: string | null): string | null {
+  if (!rel) return null;
+  const base = path.resolve(process.env.ANIMA_WATCH_ROOT || process.cwd());
+  const full = path.resolve(base, rel);
+  if (!full.endsWith(".anima.json")) return null;
+  if (full !== base && !full.startsWith(base + path.sep)) return null;
+  return full;
+}
+
+/** SSE: manda o projeto sempre que o arquivo muda (o agente salva a cada comando). */
+function handleWatch(file: string, req: IncomingMessage, res: ServerResponse): void {
+  res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive" });
+  let last = "";
+  const push = async () => {
+    try {
+      const txt = await readFile(file, "utf8");
+      if (txt === last) return;
+      const one = JSON.stringify(JSON.parse(txt)); // uma linha só (SSE); falha = leitura no meio de uma escrita
+      last = txt;
+      res.write(`data: ${one}\n\n`);
+    } catch {
+      /* arquivo ainda não existe ou está sendo escrito */
+    }
+  };
+  void push();
+  // fs.watch no diretório (o agente troca o arquivo por rename) + verificação periódica de segurança
+  const w = fsWatch(path.dirname(file), (_e, name) => { if (!name || name === path.basename(file)) void push(); });
+  const timer = setInterval(push, 1000);
+  req.on("close", () => { w.close(); clearInterval(timer); });
+}
+
 async function main() {
   let vite: import("vite").ViteDevServer | null = null;
   if (!isProd) {
@@ -99,6 +132,11 @@ async function main() {
         const { sessionId } = JSON.parse((await readBody(req)) || "{}");
         sessions.delete(sessionId);
         return void res.writeHead(204).end();
+      }
+      if (url.pathname === "/api/watch") {
+        const file = watchPath(url.searchParams.get("path"));
+        if (!file) return void res.writeHead(403).end("Caminho inválido: use um .anima.json dentro da pasta do projeto.");
+        return handleWatch(file, req, res);
       }
       if (url.pathname === "/api/health") {
         res.writeHead(200, { "content-type": "application/json" });
