@@ -22,19 +22,36 @@ export function frameToRows(p: Project, frameIndex: number): string[] {
   return celToRows(p, flattenFrame(p, frameIndex));
 }
 
-/** Grade com régua de coordenadas, para a IA localizar pixels. */
-export function withRuler(rows: string[]): string {
+/** Região retangular do canvas, em pixels. */
+export interface Region {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Recorta uma região (já validada) de uma grade de linhas. */
+export function cropRows(rows: string[], r: Region): string[] {
+  return rows.slice(r.y, r.y + r.h).map((row) => row.slice(r.x, r.x + r.w));
+}
+
+/**
+ * Grade com régua de coordenadas, para a IA localizar pixels.
+ * Em recortes, (x0, y0) é o canto da região: a régua mostra as coordenadas reais do canvas.
+ */
+export function withRuler(rows: string[], x0 = 0, y0 = 0): string {
   if (!rows.length) return "";
   const w = rows[0].length;
-  const pad = String(rows.length - 1).length;
+  const pad = String(y0 + rows.length - 1).length;
   let tens = " ".repeat(pad + 1);
   let ones = " ".repeat(pad + 1);
   for (let x = 0; x < w; x++) {
-    tens += x % 10 === 0 ? String(Math.floor(x / 10) % 10) : " ";
-    ones += String(x % 10);
+    const ax = x0 + x;
+    tens += ax % 10 === 0 ? String(Math.floor(ax / 10) % 10) : " ";
+    ones += String(ax % 10);
   }
-  const body = rows.map((r, y) => `${String(y).padStart(pad)} ${r}`);
-  return [w >= 10 ? tens : null, ones, ...body].filter((l) => l !== null).join("\n");
+  const body = rows.map((r, y) => `${String(y0 + y).padStart(pad)} ${r}`);
+  return [x0 + w >= 10 ? tens : null, ones, ...body].filter((l) => l !== null).join("\n");
 }
 
 /**

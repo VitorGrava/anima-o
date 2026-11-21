@@ -9,7 +9,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { describeProject, jsonSchemaOf, commandTools, renderCheckRGBA, runCommand, type Project } from "../src/engine/index.ts";
+import { describeProject, jsonSchemaOf, commandTools, renderImages, runCommand, type Project } from "../src/engine/index.ts";
 import { SYSTEM_PROMPT } from "../server/prompt.ts";
 import { encodePNG } from "../server/png.ts";
 import { ProjectStore, exportToFile } from "./store.ts";
@@ -21,7 +21,7 @@ const MCP_NOTES = `
 Como usar estas ferramentas (MCP)
 - O trabalho acontece em um arquivo de projeto .anima.json. Comece com open_project (abre ou cria). Se você não abrir nenhum, o padrão é ./animacao.anima.json no diretório atual.
 - Cada comando que muda o projeto salva o arquivo na hora. O usuário pode acompanhar ao vivo no navegador com: anima view <arquivo>.
-- view devolve a grade de texto e a imagem PNG do frame: use para conferir o seu trabalho.
+- Os comandos de desenho (draw_rows, draw_shapes, transform, copy_layer_content) já devolvem o frame editado como grade de texto + imagem + avisos automáticos: leia o retorno e corrija antes de seguir. view faz zoom (region, grid), diff entre frames (compare) e onion skin; check mede e aponta defeitos em todos os frames; reference traz proporções de anatomia e técnicas de pixel art.
 - Para gerar arquivos (GIF, spritesheet PNG, PNG de um frame ou JSON), use export_file. Só exporte quando o usuário pedir ou ao terminar uma animação.
 - Ao terminar, diga ao usuário onde estão o projeto e os arquivos exportados.`;
 
@@ -91,9 +91,8 @@ export function createAnimaServer(store = new ProjectStore()) {
       if (r.ok && r.changed) await store.save();
       const content: Content[] = [{ type: "text", text: r.text }];
       if (r.ok && r.images) {
-        for (const f of r.images.frames) {
-          const img = renderCheckRGBA(project, f, r.images.scale, r.images.mode ?? "normal");
-          content.push({ type: "text", text: `Imagem do frame ${f}${r.images.mode && r.images.mode !== "normal" ? ` (conferência: ${r.images.mode})` : " (fundo cinza = transparente)"}:` });
+        for (const img of renderImages(project, r.images)) {
+          content.push({ type: "text", text: `Imagem (${img.label}):` });
           content.push({ type: "image", data: encodePNG(img.width, img.height, img.data).toString("base64"), mimeType: "image/png" });
         }
       }

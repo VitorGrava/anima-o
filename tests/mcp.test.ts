@@ -30,9 +30,10 @@ describe("servidor MCP (stdio, como Claude Code/Codex usam)", () => {
   it("anuncia as ferramentas e as instruções com os princípios de animação", async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
-    expect(names).toEqual(expect.arrayContaining(["open_project", "export_file", "draw_rows", "view", "transform"]));
+    expect(names).toEqual(expect.arrayContaining(["open_project", "export_file", "draw_rows", "view", "transform", "check", "reference"]));
     expect(names).not.toContain("export");
     expect(client.getInstructions()).toMatch(/Princípios de animação/);
+    expect(client.getInstructions()).toMatch(/Anatomia/);
   });
 
   it("desenha, salva em disco a cada mudança, mostra imagem e exporta GIF", async () => {
@@ -43,6 +44,9 @@ describe("servidor MCP (stdio, como Claude Code/Codex usam)", () => {
     expect(r.isError).toBeFalsy();
     r = await call("draw_rows", { x: 1, y: 1, rows: [".00.00.", "0rr0rr0", "0rrrrr0", ".0rrr0.", "..0r0..", "...0..."] });
     expect(r.isError).toBeFalsy();
+    // o comando de desenho já devolve o resultado: grade de texto + imagem, sem precisar chamar view
+    expect(r.content[0].text).toMatch(/Frame 0 agora:/);
+    expect(r.content.some((c) => c.type === "image" && c.mimeType === "image/png")).toBe(true);
 
     const saved = JSON.parse(await readFile(path.join(dir, "coracao.anima.json"), "utf8"));
     expect(saved.palette.some((c: { key: string }) => c.key === "r")).toBe(true);
@@ -56,6 +60,17 @@ describe("servidor MCP (stdio, como Claude Code/Codex usam)", () => {
     r = await call("export_file", { format: "gif", path: "saida/coracao.gif", scale: 4 });
     expect(r.content[0].text).toMatch(/Exportado/);
     expect((await stat(path.join(dir, "saida/coracao.gif"))).size).toBeGreaterThan(50);
+  });
+
+  it("check e reference funcionam pelo MCP", async () => {
+    let r = await call("check", {});
+    expect(r.isError).toBeFalsy();
+    expect(r.content[0].text).toMatch(/Medidas do frame 0/);
+    r = await call("reference", { topic: "proporcoes", height: 32 });
+    expect(r.content[0].text).toMatch(/Cabeça ≈ 8\.0 px/);
+    r = await call("view", { region: { x: 0, y: 0, w: 5, h: 4 }, grid: true });
+    expect(r.content[0].text).toMatch(/região x0\.\.4, y0\.\.3/);
+    expect(r.content.some((c) => c.type === "image")).toBe(true);
   });
 
   it("erros voltam como isError com mensagem útil", async () => {

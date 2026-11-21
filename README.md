@@ -72,8 +72,12 @@ Para agentes sem MCP, scripts ou uso manual:
 | `anima mcp` | servidor MCP |
 | `anima view [projeto]` | app no navegador acompanhando o arquivo ao vivo |
 | `anima new <projeto> [LxA] [fps]` | cria um projeto vazio |
-| `anima run <projeto> <comandos.json>` | aplica uma lista de comandos `[{"name", "input"}]` (use `-` para ler do stdin) |
+| `anima run <projeto> <comandos.json> [--png f.png]` | aplica uma lista de comandos `[{"name", "input"}]` (use `-` para ler do stdin); o último comando mostra a prévia (grade, avisos e imagem) |
 | `anima show <projeto> [frame] [--png f.png] [--check silhueta]` | mostra o frame como texto e, opcionalmente, como imagem |
+| `anima show ... --region x,y,w,h --grid` | zoom em uma área, com grade e coordenadas nas margens |
+| `anima show ... --diff a,b` / `--onion` | o que mudou do frame a para o b / frame anterior em azul atrás do atual |
+| `anima check <projeto> [--symmetric] [--png f.png]` | aponta defeitos da arte e da animação, com coordenadas |
+| `anima reference <tópico> [--height N] [--style ...] [--color #hex]` | referências de anatomia e pixel art |
 | `anima export <projeto> <saida.gif\|.png\|.json>` | exporta (`--scale`, `--columns`, `--frame`) |
 | `anima tools` | lista os comandos com seus parâmetros |
 
@@ -98,9 +102,12 @@ Rode com `node bin/anima.mjs ...` ou instale o comando com `npm link`.
 - `draw.ts`: primitivas de pixel art (linha de Bresenham, retângulo, elipse, balde, deslocamento, espelho, contorno automático).
 - `commands.ts`: **a API que a IA controla.** Cada comando tem um schema Zod, que vira a definição de *tool* do Claude, e uma função que aplica o comando. Os comandos são atômicos: se falham, o projeto não muda.
 - `ascii.ts`: a arte como texto, um caractere por pixel. É assim que a IA escreve sprites com precisão (`draw_rows`) e lê o que já existe (`view`).
+- `view.ts`: imagens de conferência: recorte com zoom, grade com coordenadas, diff entre frames, onion skin e marcação de pixels com problema.
+- `analyze.ts`: checagens automáticas (pixels soltos, furos, serrilhado, simetria, cores parecidas, volume que pula entre frames, pés que flutuam, emenda do loop) e medidas por camada.
+- `reference.ts`: referências de anatomia (proporções calculadas em pixels, articulações, rosto e mãos, quadrúpedes, caminhada, corrida, pose) e de pixel art (linhas, sombreamento, paletas prontas, rampas com mudança de matiz).
 - `render.ts`, `gif.ts`, `serialize.ts`: renderização RGBA, spritesheet, GIF animado e o formato `.anima.json`.
 
-**O agente (`server/agent.ts`)** roda o loop de *tool use* com o Claude (`claude-opus-5-5`, pensamento adaptativo, streaming). Depois de desenhar, a IA chama `view` e recebe a grade de texto **e uma imagem PNG** do frame, então consegue ver e corrigir o próprio trabalho.
+**O agente (`server/agent.ts`)** roda o loop de *tool use* com o Claude (`claude-opus-5-5`, pensamento adaptativo, streaming). A IA não enxerga enquanto desenha, então o feedback é automático: todo comando de desenho (`draw_rows`, `draw_shapes`, `transform`, `copy_layer_content`) devolve o frame editado como **grade de texto com régua, uma imagem PNG e avisos das checagens rápidas**, com os pixels problemáticos marcados em magenta. Para conferir de perto ou entre frames há `view` (zoom, grade, diff, onion skin) e `check` (relatório completo). Desligue com `"preview": false` em lotes grandes.
 
 ### Comandos disponíveis para a IA
 
@@ -110,11 +117,13 @@ Rode com `node bin/anima.mjs ...` ou instale o comando com `npm link`.
 | `set_palette`, `remove_colors` | cores. Mudar o hex de uma chave recolore toda a animação |
 | `add_layer`, `update_layer` | camadas: criar, renomear, esconder, reordenar, apagar |
 | `add_frames`, `delete_frames`, `move_frame`, `set_frame_timing` | timeline e tempo de cada frame |
-| `draw_rows` | desenho pixel a pixel por texto |
+| `draw_rows` | desenho pixel a pixel por texto (com prévia automática) |
 | `draw_shapes` | pixels, linhas, retângulos, elipses, balde |
 | `transform` | deslocar (com wrap), espelhar, trocar cor, contornar, limpar |
 | `copy_layer_content` | copiar conteúdo entre frames/camadas com deslocamento |
-| `view`, `get_project_info` | ver o estado (texto + imagem) |
+| `view`, `get_project_info` | ver o estado: texto + imagem, com `region`/`grid` (zoom), `compare` (diff), `onion` |
+| `check` | defeitos da arte e da animação, com coordenadas e medidas por camada |
+| `reference` | proporções em pixels, articulações, ciclos de caminhada/corrida, paletas, rampas de cor |
 | `export` | baixar GIF, spritesheet PNG ou JSON no navegador |
 
 Exemplo de `draw_rows` (um coração 7×6):

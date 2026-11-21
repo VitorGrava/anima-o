@@ -18,12 +18,17 @@ node bin/anima.mjs export projeto.anima.json saida.gif --scale 6
 node bin/anima.mjs tools                                  # comandos e parâmetros
 ```
 
-Depois de desenhar, confira o resultado (`view` no MCP, ou `show --png` e abra a imagem).
+Depois de desenhar, confira o resultado: os comandos de desenho já devolvem o frame (grade, imagem
+e avisos). Use `view` (com `region`+`grid` para zoom, `compare` para diff, `onion`), `check` para
+um relatório com coordenadas e `reference` para proporções de anatomia e técnicas de pixel art.
+Na CLI: `show --region x,y,w,h --grid --png f.png`, `show --diff 0,1`, `check projeto`,
+`reference proporcoes --height 32`.
 O usuário pode acompanhar ao vivo com `node bin/anima.mjs view projeto.anima.json`.
 
 ## Para mexer no código
 
 - Engine (TypeScript puro): `src/engine/` — comandos em `commands.ts` (schemas Zod viram as ferramentas).
 - Servidor MCP: `mcp/`. CLI: `cli/anima.ts`. Chat via API e app web: `server/`, `web/`.
-- Princípios de animação usados pela IA: `server/prompt.ts`.
+- Princípios de animação e anatomia usados pela IA: `server/prompt.ts`; referências sob demanda: `src/engine/reference.ts`.
+- Feedback visual e checagens: `src/engine/view.ts` (imagens), `src/engine/analyze.ts` (check).
 - Testes: `npm test`. Tipos: `npm run typecheck`.

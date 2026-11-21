@@ -6,3 +6,6 @@ export * from "./commands.ts";
 export { exportGIF } from "./gif.ts";
 export * as draw from "./draw.ts";
 export * from "./tools.ts";
+export * from "./view.ts";
+export * from "./analyze.ts";
+export * from "./reference.ts";

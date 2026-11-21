@@ -6,9 +6,12 @@
  * Claude como "tool") e uma função que aplica o comando ao projeto.
  */
 import { z } from "zod";
-import { celToRows, drawRows, frameToRows, withRuler } from "./ascii.ts";
+import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.ts";
+import { celToRows, cropRows, drawRows, frameToRows, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
+import { REFERENCE_TOPICS, reference } from "./reference.ts";
 import type { CheckMode } from "./render.ts";
+import { autoScale, clampRegion, diffRows, type ImageRequest } from "./view.ts";
 import {
   KEY_CHARS,
   MAX_COLORS,
@@ -33,7 +36,7 @@ export interface CommandResult {
   /** O projeto mudou? (a UI só redesenha nesse caso) */
   changed: boolean;
   /** Pedido de imagens de pré-visualização para a IA ver o resultado. */
-  images?: { frames: number[]; scale: number; mode?: CheckMode };
+  images?: ImageRequest;
   /** Efeito colateral para o cliente (ex. baixar um arquivo). */
   effect?: { type: "export"; format: ExportFormat; scale: number; columns?: number; filename: string };
 }
@@ -91,6 +94,41 @@ const colorRef = z
   .describe('Cor: a chave (1 caractere), o nome da cor na paleta, ou "." para transparente (borracha).');
 
 const fmtList = (xs: number[]) => (xs.length > 6 ? `${xs.length} frames` : `frame${xs.length > 1 ? "s" : ""} ${xs.join(", ")}`);
+
+const previewFlag = z
+  .boolean()
+  .default(true)
+  .describe("Devolve o frame editado (grade de texto + imagem) e avisos de problemas junto com a resposta. Deixe ligado: é assim que você enxerga o que desenhou.");
+
+/** Canvas grande demais para despejar a grade inteira em texto. */
+const MAX_PREVIEW_TEXT = 64;
+
+/**
+ * Feedback automático dos comandos de desenho: devolve o frame editado como grade
+ * de texto com régua, a imagem e os avisos das checagens rápidas, sem a IA precisar
+ * lembrar de chamar `view`.
+ */
+function withPreview(p: Project, summary: string, frames: number[], layer?: string): CommandResult {
+  const shown = frames.slice(0, 1);
+  const f = shown[0];
+  const parts = [summary];
+  if (frames.length > 1) parts.push(`Prévia só do frame ${f} (editou ${frames.length}); use view para os outros.`);
+  const rows = layer ? celToRows(p, getCel(p, f, findLayer(p, layer).id)) : frameToRows(p, f);
+  if (p.width <= MAX_PREVIEW_TEXT && p.height <= MAX_PREVIEW_TEXT) {
+    parts.push(`Frame ${f} agora:\n${withRuler(rows)}`);
+  }
+  const issues = analyzeFrame(p, f).filter((i) => i.severity !== "info");
+  if (issues.length) parts.push(`Checagem automática do frame ${f}:\n${formatIssues(issues, 4).join("\n")}`);
+  return {
+    changed: true,
+    text: parts.join("\n\n"),
+    images: { frames: shown, scale: autoScale(p), highlight: issues.flatMap((i) => i.points ?? []) },
+  };
+}
+
+function result(p: Project, summary: string, frames: number[], preview: boolean, layer?: string): CommandResult {
+  return preview ? withPreview(p, summary, frames, layer) : { changed: true, text: summary };
+}
 
 // ---------- comandos ----------
 
@@ -338,13 +376,14 @@ const drawRowsCmd = def({
       .boolean()
       .default(true)
       .describe('true: "." apaga o pixel. false: "." também preserva o pixel (útil para sobrepor).'),
+    preview: previewFlag,
   }),
   run(p, i) {
     const layer = findLayer(p, i.layer);
     const list = resolveFrames(p, i.frames);
     let n = 0;
     for (const f of list) n = drawRows(p, getCel(p, f, layer.id), i.rows, i.x, i.y, i.dot_is_transparent);
-    return { changed: true, text: `${n} pixels escritos em "${layer.name}", ${fmtList(list)}.` };
+    return result(p, `${n} pixels escritos em "${layer.name}", ${fmtList(list)}.`, list, i.preview);
   },
 });
 
@@ -380,6 +419,7 @@ const drawShapes = def({
     frames: framesSel.optional().describe("Padrão: frame 0"),
     layer: layerSel,
     shapes: z.array(shape).min(1).max(200),
+    preview: previewFlag,
   }),
   run(p, i) {
     const layer = findLayer(p, i.layer);
@@ -407,7 +447,7 @@ const drawShapes = def({
         }
       }
     }
-    return { changed: true, text: `${i.shapes.length} forma(s) desenhada(s) em "${layer.name}", ${fmtList(list)}.` };
+    return result(p, `${i.shapes.length} forma(s) desenhada(s) em "${layer.name}", ${fmtList(list)}.`, list, i.preview);
   },
 });
 
@@ -436,6 +476,7 @@ const transform = def({
     to: colorRef.optional(),
     color: colorRef.optional(),
     diagonal: z.boolean().optional().describe("outline: incluir diagonais"),
+    preview: previewFlag,
   }),
   run(p, i) {
     const layer = findLayer(p, i.layer);
@@ -469,7 +510,7 @@ const transform = def({
           break;
       }
     }
-    return { changed: true, text: `${i.op} aplicado em "${layer.name}", ${fmtList(list)}.` };
+    return result(p, `${i.op} aplicado em "${layer.name}", ${fmtList(list)}.`, list, i.preview);
   },
 });
 
@@ -485,6 +526,7 @@ const copyCel = def({
     dx: z.number().int().default(0),
     dy: z.number().int().default(0),
     mode: z.enum(["replace", "over"]).default("replace").describe("replace: substitui o destino. over: cola por cima (transparente não apaga)."),
+    preview: previewFlag,
   }),
   run(p, i) {
     const fromLayer = findLayer(p, i.from_layer);
@@ -498,20 +540,36 @@ const copyCel = def({
       if (i.mode === "replace") dst.set(moved.data);
       else for (let k = 0; k < dst.length; k++) if (moved.data[k]) dst[k] = moved.data[k];
     }
-    return { changed: true, text: `Conteúdo de "${fromLayer.name}"@${i.from_frame} copiado para "${toLayer.name}", ${fmtList(list)}.` };
+    return result(p, `Conteúdo de "${fromLayer.name}"@${i.from_frame} copiado para "${toLayer.name}", ${fmtList(list)}.`, list, i.preview);
   },
 });
 
+const regionSchema = z
+  .object({
+    x: z.number().int().min(0),
+    y: z.number().int().min(0),
+    w: z.number().int().min(1),
+    h: z.number().int().min(1),
+  })
+  .describe("Área do canvas (x, y = canto superior esquerdo; w, h = largura e altura em pixels).");
+
 const view = def({
   name: "view",
-  description:
-    "Mostra o estado atual como texto (grade de chaves de cor com régua de coordenadas) e, opcionalmente, como imagem. SEMPRE use depois de desenhar para conferir o resultado e corrigir erros, e antes de editar arte existente.",
+  description: [
+    "Mostra o estado atual como texto (grade de chaves de cor com régua de coordenadas) e como imagem. Use depois de desenhar para conferir e antes de editar arte existente.",
+    "Para olhar de perto: `region` recorta e amplia uma área (olhos, mãos, articulações) e `grid` desenha a grade com números de coordenada nas margens, para você apontar o pixel exato a corrigir.",
+    "Para animação: `compare` {a, b} mostra o que mudou entre dois frames (vermelho = sumiu, verde = apareceu, amarelo = trocou de cor); `onion` mostra o frame anterior em azul translúcido atrás do atual.",
+  ].join("\n"),
   schema: z.object({
     frames: framesSel.optional().describe("Padrão: frame 0"),
-    layer: z.string().optional().describe("Mostra só esta camada. Omitido = todas as camadas visíveis combinadas."),
+    layer: z.string().optional().describe("Mostra só esta camada (na grade de texto). Omitido = todas as camadas visíveis combinadas."),
+    region: regionSchema.optional(),
+    grid: z.boolean().default(false).describe("Grade e coordenadas nas margens da imagem (use com region para zoom)."),
+    compare: z.object({ a: z.number().int().min(0), b: z.number().int().min(0) }).optional().describe("Diff do frame a para o frame b."),
+    onion: z.boolean().default(false).describe("Onion skin: frame anterior em azul atrás do atual (o do loop, no frame 0)."),
     as_text: z.boolean().default(true),
     as_image: z.boolean().default(true),
-    image_scale: z.number().int().min(1).max(16).optional().describe("Ampliação da imagem (padrão: automático)"),
+    image_scale: z.number().int().min(1).max(32).optional().describe("Ampliação da imagem (padrão: automático)"),
     check: z
       .enum(["normal", "cinza", "luz_sombra", "silhueta"])
       .default("normal")
@@ -520,21 +578,94 @@ const view = def({
       ),
   }),
   run(p, i) {
-    const list = resolveFrames(p, i.frames).slice(0, 8);
+    const region = i.region ? clampRegion(p, i.region) : undefined;
+    const scale = i.image_scale ?? autoScale(p, region);
     const parts: string[] = [];
+    const legend = `Legenda: . = transparente, ${p.palette.map((c) => `${c.key}=${c.name}`).join(", ")}`;
+
+    if (i.compare) {
+      const { a, b } = i.compare;
+      resolveFrames(p, [a, b]);
+      const d = diffRows(p, a, b);
+      const r = region ?? clampRegion(p);
+      if (i.as_text) {
+        parts.push(
+          `Diff do frame ${a} para o ${b}: ${d.added} apareceram (+), ${d.removed} sumiram (-), ${d.changed} trocaram de cor (~).\n${withRuler(cropRows(d.rows, r), r.x, r.y)}`,
+          "Legenda: # = igual, . = vazio nos dois, + = apareceu, - = sumiu, ~ = outra cor.",
+        );
+      }
+      return {
+        changed: false,
+        text: parts.join("\n\n"),
+        images: i.as_image ? { frames: [b], scale, region, grid: i.grid, compare: { a, b } } : undefined,
+      };
+    }
+
+    const list = resolveFrames(p, i.frames).slice(0, 8);
     if (i.as_text) {
+      const r = region ?? clampRegion(p);
       for (const f of list) {
         const rows = i.layer ? celToRows(p, getCel(p, f, findLayer(p, i.layer).id)) : frameToRows(p, f);
-        parts.push(`Frame ${f}${i.layer ? ` (camada ${i.layer})` : ""}:\n${withRuler(rows)}`);
+        const where = region ? ` (região x${r.x}..${r.x + r.w - 1}, y${r.y}..${r.y + r.h - 1})` : "";
+        parts.push(`Frame ${f}${i.layer ? ` (camada ${i.layer})` : ""}${where}:\n${withRuler(cropRows(rows, r), r.x, r.y)}`);
       }
     }
-    parts.push(`Legenda: . = transparente, ${p.palette.map((c) => `${c.key}=${c.name}`).join(", ")}`);
-    const scale = i.image_scale ?? Math.max(1, Math.min(16, Math.floor(256 / Math.max(p.width, p.height))));
+    parts.push(legend);
     return {
       changed: false,
       text: parts.join("\n\n"),
-      images: i.as_image ? { frames: list, scale, mode: i.check } : undefined,
+      images: i.as_image ? { frames: list, scale, mode: i.check, region, grid: i.grid, onion: i.onion } : undefined,
     };
+  },
+});
+
+const check = def({
+  name: "check",
+  description: [
+    "Checagem automática da arte: aponta defeitos com coordenadas em vez de você ter que achá-los no olho. Rode ao terminar uma etapa, e sempre antes de exportar.",
+    "Arte: pixels soltos, furos na silhueta, serrilhado irregular, assimetria (com symmetric), cores quase iguais, cores sem uso.",
+    "Animação: volume que pula entre frames (anatomia 'pulando'), base/pés que mudam, largura, e a emenda do último para o primeiro frame.",
+    "Também devolve as medidas da silhueta e de cada camada (altura da cabeça, do tronco...) para comparar com as proporções do comando reference.",
+    "É heurístico: corrija o que for defeito e ignore o que for intencional (faíscas, squash & stretch).",
+  ].join("\n"),
+  schema: z.object({
+    frames: framesSel.optional().describe('Padrão: "all"'),
+    symmetric: z.boolean().default(false).describe("true: o sprite deveria ser simétrico (de frente/costas); aponta pixels sem par no lado oposto."),
+    loop: z.boolean().default(true).describe("Confere também a transição do último para o primeiro frame."),
+    as_image: z.boolean().default(true).describe("Devolve a imagem com os pixels problemáticos marcados em magenta."),
+  }),
+  run(p, i) {
+    const list = resolveFrames(p, i.frames ?? "all");
+    const r = analyze(p, list, { symmetric: i.symmetric, loop: i.loop });
+    const marked = r.issues.find((x) => x.points?.length && x.frame !== undefined);
+    const f = marked?.frame ?? list[0];
+    const highlight = r.issues.filter((x) => x.frame === f).flatMap((x) => x.points ?? []);
+    return {
+      changed: false,
+      text: formatAnalysis(p, r),
+      images: i.as_image && highlight.length ? { frames: [f], scale: autoScale(p), highlight } : undefined,
+    };
+  },
+});
+
+const referenceCmd = def({
+  name: "reference",
+  description: [
+    "Consulta referências de anatomia e pixel art. Use ANTES de desenhar um personagem e quando a anatomia ou o estilo estiver em dúvida.",
+    `Tópicos: ${REFERENCE_TOPICS.join(", ")}.`,
+    "- proporcoes: tabela em pixels (cabeça, ombros, cintura, joelhos, braços, mãos, pés) para a altura do seu sprite e o estilo (realista, estilizado, chibi).",
+    "- articulacoes: amplitude e sentido de dobra de cada junta. rosto_mao: rosto e mãos em poucos pixels. quadrupede, caminhada, corrida, pose: anatomia em movimento.",
+    "- linhas_curvas, sombreamento, tamanhos: técnica de pixel art. paletas: paletas prontas (Sweetie 16, DB16, PICO-8). rampa: rampa de cor com mudança de matiz a partir de base_color. estudo: onde estudar.",
+  ].join("\n"),
+  schema: z.object({
+    topic: z.enum(REFERENCE_TOPICS),
+    height: z.number().int().min(8).max(256).optional().describe("proporcoes: altura total do sprite em px (padrão: altura do canvas)"),
+    style: z.enum(["realista", "estilizado", "chibi"]).optional().describe("proporcoes: padrão estilizado (4 cabeças)"),
+    base_color: z.string().optional().describe("rampa: cor base em hex"),
+    steps: z.number().int().min(3).max(7).optional().describe("rampa: número de tons (padrão 5)"),
+  }),
+  run(p, i) {
+    return { changed: false, text: reference(i.topic, { ...i, height: i.height ?? p.height }) };
   },
 });
 
@@ -582,6 +713,8 @@ export const COMMANDS = [
   transform,
   copyCel,
   view,
+  check,
+  referenceCmd,
   info,
   exportCmd,
 ] as CommandDef[];

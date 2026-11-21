@@ -6,7 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { commandTools } from "../src/engine/tools.ts";
 import {
   describeProject,
-  renderCheckRGBA,
+  renderImages,
   runCommand,
   toJSON,
   type CommandResult,
@@ -46,15 +46,14 @@ function toolResultContent(p: Project, r: CommandResult): Anthropic.Beta.BetaToo
   const content: Exclude<Anthropic.Beta.BetaToolResultBlockParam["content"], string | undefined> = [
     { type: "text", text: r.text },
   ];
-  for (const f of r.images?.frames ?? []) {
-    const mode = r.images!.mode ?? "normal";
-    const img = renderCheckRGBA(p, f, r.images!.scale, mode);
-    const legend = mode === "normal" ? "fundo cinza = transparente" : `modo de conferência: ${mode}`;
-    content.push({ type: "text", text: `Imagem do frame ${f} (${legend}):` });
-    content.push({
-      type: "image",
-      source: { type: "base64", media_type: "image/png", data: encodePNG(img.width, img.height, img.data).toString("base64") },
-    });
+  if (r.images) {
+    for (const img of renderImages(p, r.images)) {
+      content.push({ type: "text", text: `Imagem (${img.label}):` });
+      content.push({
+        type: "image",
+        source: { type: "base64", media_type: "image/png", data: encodePNG(img.width, img.height, img.data).toString("base64") },
+      });
+    }
   }
   return content;
 }
