@@ -67,3 +67,36 @@ export function renderSpritesheetRGBA(
   });
   return { width: W, height: H, data };
 }
+
+export type CheckMode = "normal" | "cinza" | "luz_sombra" | "silhueta";
+
+/**
+ * Imagem de conferência de um frame (técnica do "olhar novo"): em cinza para
+ * checar contraste e leitura sem cor; em luz/sombra (sombras e contornos pretos,
+ * luzes brancas) para checar se a sombra é consistente; em silhueta para checar
+ * se a pose se lê só pelo contorno. Transparente vira `background`.
+ */
+export function renderCheckRGBA(
+  p: Project,
+  frameIndex: number,
+  scale: number,
+  mode: CheckMode,
+  background = "#7f8c8d",
+): { width: number; height: number; data: Uint8ClampedArray<ArrayBuffer> } {
+  const img = renderFrameRGBA(p, frameIndex, scale);
+  const bg = hexToRgb(mode === "silhueta" || mode === "luz_sombra" ? "#ffffff" : background);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] === 0) {
+      d[i] = bg[0]; d[i + 1] = bg[1]; d[i + 2] = bg[2]; d[i + 3] = 255;
+      continue;
+    }
+    const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    let v: number | null = null;
+    if (mode === "cinza") v = Math.round(lum);
+    else if (mode === "luz_sombra") v = lum < 110 ? 0 : 255;
+    else if (mode === "silhueta") v = 0;
+    if (v !== null) { d[i] = d[i + 1] = d[i + 2] = v; }
+  }
+  return img;
+}

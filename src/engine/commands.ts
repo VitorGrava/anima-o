@@ -8,6 +8,7 @@
 import { z } from "zod";
 import { celToRows, drawRows, frameToRows, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
+import type { CheckMode } from "./render.ts";
 import {
   KEY_CHARS,
   MAX_COLORS,
@@ -32,7 +33,7 @@ export interface CommandResult {
   /** O projeto mudou? (a UI só redesenha nesse caso) */
   changed: boolean;
   /** Pedido de imagens de pré-visualização para a IA ver o resultado. */
-  images?: { frames: number[]; scale: number };
+  images?: { frames: number[]; scale: number; mode?: CheckMode };
   /** Efeito colateral para o cliente (ex. baixar um arquivo). */
   effect?: { type: "export"; format: ExportFormat; scale: number; columns?: number; filename: string };
 }
@@ -511,6 +512,12 @@ const view = def({
     as_text: z.boolean().default(true),
     as_image: z.boolean().default(true),
     image_scale: z.number().int().min(1).max(16).optional().describe("Ampliação da imagem (padrão: automático)"),
+    check: z
+      .enum(["normal", "cinza", "luz_sombra", "silhueta"])
+      .default("normal")
+      .describe(
+        "Imagem de conferência: cinza = contraste e leitura sem cor; luz_sombra = sombras/contornos pretos e luzes brancas (a sombra está consistente?); silhueta = forma preta (a pose se lê só pelo contorno?)",
+      ),
   }),
   run(p, i) {
     const list = resolveFrames(p, i.frames).slice(0, 8);
@@ -526,7 +533,7 @@ const view = def({
     return {
       changed: false,
       text: parts.join("\n\n"),
-      images: i.as_image ? { frames: list, scale } : undefined,
+      images: i.as_image ? { frames: list, scale, mode: i.check } : undefined,
     };
   },
 });

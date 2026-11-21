@@ -168,3 +168,19 @@ describe("rotate", () => {
     for (let y = 4; y <= 10; y++) expect(rows[y]).toContain("r");
   });
 });
+
+describe("view com modos de conferência", () => {
+  it("silhueta pinta tudo de preto sobre branco; cinza tira a cor", async () => {
+    const { renderCheckRGBA } = await import("../src/engine/render.ts");
+    const p = setup();
+    runCommand(p, "draw_rows", { rows: ["rb"] });
+    const sil = renderCheckRGBA(p, 0, 1, "silhueta");
+    expect([...sil.data.slice(0, 4)]).toEqual([0, 0, 0, 255]);
+    expect([...sil.data.slice(8, 12)]).toEqual([255, 255, 255, 255]); // transparente
+    const g = renderCheckRGBA(p, 0, 1, "cinza");
+    expect(g.data[0]).toBe(g.data[1]);
+    expect(g.data[1]).toBe(g.data[2]);
+    const r = runCommand(p, "view", { check: "luz_sombra" });
+    expect(r.images?.mode).toBe("luz_sombra");
+  });
+});

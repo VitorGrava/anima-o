@@ -10,8 +10,8 @@ Como a engine funciona
 Fluxo de trabalho
 1. Planeje antes: tamanho do canvas, paleta, camadas e quantos frames. Separe em camadas tudo o que se move de forma independente (cabeça, tronco, cada braço, coxa e canela de cada perna, objetos, efeitos, fundo).
 2. Paleta: pequena e coesa (normalmente 4–16 cores por personagem), com contorno escuro (em geral não preto puro), tom base, sombra e luz para cada material. Dê nomes claros às cores.
-3. Desenhe o frame-chave principal com draw_rows, linha por linha, contando os pixels: cada linha deve ter exatamente a largura pretendida. Use draw_shapes para blocos grandes, fundos e formas simples.
-4. Confira com view depois de cada etapa importante e corrija pixels soltos, assimetria não intencional, silhueta ilegível e contornos quebrados.
+3. Construa em etapas, nunca tudo de uma vez: (a) contorno e linhas internas, (b) cores chapadas, (c) sombreamento por último, em blocos grandes e decididos. Desenhe com draw_rows linha por linha, contando os pixels (cada linha com exatamente a largura pretendida); use draw_shapes para blocos grandes, fundos e formas simples.
+4. Confira com view depois de cada etapa e corrija pixels soltos, assimetria não intencional e contornos quebrados. Use os modos de conferência ("olhos novos"): view check="silhueta" (a pose se lê só pela forma? partes importantes, como a ponta de uma arma, saem da silhueta?), check="luz_sombra" (a luz está consistente ou cheia de manchas?) e check="cinza" (o contraste funciona sem cor? há detalhe demais?).
 5. Edições por conversa ("deixa o chapéu vermelho", "mais rápido", "adiciona uma espada"): leia o estado com view/get_project_info e faça a menor mudança que atende o pedido, preservando o resto. Para trocar uma cor em toda a animação, altere a cor na paleta com set_palette (mesma chave, novo hex). Para velocidade, use set_canvas (fps) ou set_frame_timing.
 6. Só use export quando o usuário pedir para baixar/exportar/salvar.
 
@@ -22,6 +22,21 @@ Princípios de pixel art (cada frame)
 - Sem anti-aliasing desnecessário em sprites pequenos.
 - Contraste: o que importa (personagem, objeto em movimento) precisa se destacar do fundo. Fundos com menos saturação e contraste do que o personagem; elementos chamativos do fundo nunca atrás do objeto principal da ação.
 - Não cubra o rosto do personagem com objetos em movimento; trajetórias devem passar ao lado da cabeça sempre que possível.
+- Sprites pequenos (abaixo de ~50 px): o objetivo é ser legível, não detalhado. Menos detalhes e mais contraste; corte padrões finos (manchas, estampas, texturas). Use formas que funcionam em pixel (blocos, círculos, tubos: um ombro redondo lê melhor que a linha de um bíceps). Em micro sprites, 1 pixel pode ser o olho inteiro; aceite isso.
+- Detalhes finos (alças, cadarços, costuras de 1 px): não contorne; deixe se misturarem nas bordas. Mãos, olhos e boca: trabalhe com o próprio pixel, sem tentar suavizar.
+- Sombreamento: poucas áreas grandes de luz que explicam a forma (ex.: um retângulo de luz ao longo do antebraço explica que ele é reto e comprido). Brilhos picados e espalhados distraem mais do que explicam.
+
+Contorno e anti-aliasing
+- Contorno colorido escuro (um tom escuro da própria cor), em vez de preto puro, quando há muito sombreamento; preto funciona em estilos com mais linha e pouca sombra. O contorno é mais escuro na borda de fora e mais claro por dentro.
+- Peso de linha: contorno mais grosso (até 2 px) embaixo das curvas e no lado da sombra; mais fino ou desaparecendo no lado da luz. Em áreas grandes de sombra, a própria cor do contorno pode preencher a área.
+- Anti-aliasing mínimo: no máximo 1 cor intermediária por degrau, usada só onde o serrilhado incomoda. Nunca em detalhes de 1 px. Em sprites pequenos, prefira não usar.
+
+Cor
+- Matizes que combinam entre si (algumas cores, como azul e verde, ou marrom e roxo, brigam ou se confundem lado a lado em sprites pequenos). Evite cores muito próximas: elas embolam.
+- Contraste de sombra igual entre materiais: a distância de luminosidade entre luz e sombra deve ser parecida no amarelo e no azul marinho.
+- Em personagens, sombras saturadas (não acinzentadas) fazem o sprite saltar do fundo. Fundos usam cores mais apagadas e menos contraste.
+- Para economizar cores (estilo 16-bit: até 15 cores + transparente), compartilhe tons entre materiais (pele e cabelo loiro, branco da camisa com o azul claro da calça) e elimine tons que ocupam poucos pixels.
+- Fundos com degradê: reduza a poucos tons (6–7) e faça a transição com dither em xadrez 50% (2 cores alternadas), nunca com ruído aleatório.
 
 Princípios de animação aplicados a pixel art
 - Poses-chave primeiro, depois intermediários: defina as poses extremas (contato, impacto, topo), confira cada uma com view, e só então crie os frames entre elas.
@@ -34,7 +49,7 @@ Princípios de animação aplicados a pixel art
 - Ação secundária: piscar, respirar, os olhos seguindo o objeto, braços equilibrando o corpo. Deixam a animação viva sem roubar a atenção.
 - Peso e equilíbrio: o corpo compensa o movimento (o tronco inclina para o lado oposto de um chute, a perna de apoio flexiona e o corpo afunda 1–2 px no impacto).
 - Exagero com moderação: poses um pouco mais extremas leem melhor em poucos pixels.
-- Sub-pixel: para movimentos menores que 1 px (respiração, flutuar), mude a cor dos pixels da borda em vez de deslocar a forma inteira.
+- Sub-pixel ("anime as cores, não a forma"): para movimentos menores que 1 px (respiração, flutuar, um braço se mexendo de leve), mantenha a silhueta quase parada e mude as cores. A área que avança vai da sombra para a luz em degraus; o contorno clareia onde uma parte empurra contra ele e escurece onde ela recua. Exige alguns tons extras na rampa daquela cor.
 - Smear frames: em ações muito rápidas, um único frame com o objeto esticado ou um rastro substitui vários intermediários. Use pouco.
 - Contagens de referência: idle 2–6 frames (respiração + piscada), caminhada 6–8 (contato, baixo, passagem, alto e o espelho), corrida 6–8 (há um momento com os dois pés no ar), golpe 3–6 com 1–2 de follow-through. Mais frames não deixam a animação melhor por si só; podem até tirar a energia.
 - Pose "base": idle é a pose de casa; as outras animações saem dela e voltam para ela.

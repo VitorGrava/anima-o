@@ -7,7 +7,7 @@ import { z } from "zod";
 import {
   COMMANDS,
   describeProject,
-  renderFrameRGBA,
+  renderCheckRGBA,
   runCommand,
   toJSON,
   type CommandResult,
@@ -63,8 +63,10 @@ function toolResultContent(p: Project, r: CommandResult): Anthropic.Beta.BetaToo
     { type: "text", text: r.text },
   ];
   for (const f of r.images?.frames ?? []) {
-    const img = renderFrameRGBA(p, f, r.images!.scale, "#7f8c8d");
-    content.push({ type: "text", text: `Imagem do frame ${f} (fundo cinza = transparente):` });
+    const mode = r.images!.mode ?? "normal";
+    const img = renderCheckRGBA(p, f, r.images!.scale, mode);
+    const legend = mode === "normal" ? "fundo cinza = transparente" : `modo de conferência: ${mode}`;
+    content.push({ type: "text", text: `Imagem do frame ${f} (${legend}):` });
     content.push({
       type: "image",
       source: { type: "base64", media_type: "image/png", data: encodePNG(img.width, img.height, img.data).toString("base64") },
