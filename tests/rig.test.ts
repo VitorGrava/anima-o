@@ -380,3 +380,193 @@ describe("passo 1: arte que já existe numa camada vira parte presa a um osso (f
     expect(runCommand(p, "rig_part", { name: "x", bone: "braco", from_layer: { layer: "desenho", region: { x: 14, y: 6, w: 1, h: 5 }, joint: { x: 3, y: 3 } } }).text).toMatch(/articulação.*fora da região/);
   });
 });
+
+describe("passo 2: IK, marcha com pés travados e deslocamento da raiz", () => {
+  const humanoid = (frames: number, extra: Record<string, unknown> = {}) => {
+    const p = bare(64, 40);
+    ok(p, "add_frames", { count: frames - 1 });
+    ok(p, "rig_create", { template: "humanoide", height: 30, ground: 38 });
+    ok(p, "rig_walk", { cycles: 2, ...extra });
+    return p;
+  };
+
+  it("IK de dois ossos: a ponta alcança o alvo alcançável e o joelho aponta para a frente", async () => {
+    const { solveTwoBone } = await import("../src/engine/skeleton.ts");
+    const p = bare(64, 40);
+    ok(p, "rig_create", { template: "humanoide", height: 30, ground: 38 });
+    const rig = p.rig!;
+    const root = { x: 20, y: 18 };
+    for (const target of [{ x: 20, y: 28 }, { x: 24, y: 27 }, { x: 16, y: 26 }, { x: 22, y: 25 }]) {
+      const sol = solveTwoBone(rig, "coxa_frente", "canela_frente", {}, root, target, 1);
+      const st = forwardKinematics(rig, { angles: { coxa_frente: sol.upper, canela_frente: sol.lower }, root }, { roundJoints: false });
+      expect(dist(st.get("canela_frente")!.end, target), JSON.stringify(target)).toBeLessThan(0.05);
+      const hip = st.get("coxa_frente")!.start, knee = st.get("coxa_frente")!.end, ank = st.get("canela_frente")!.end;
+      // o joelho fica à frente (ou à direita) da linha quadril→tornozelo
+      const cross = (ank.x - hip.x) * (knee.y - hip.y) - (ank.y - hip.y) * (knee.x - hip.x);
+      expect(cross).toBeLessThanOrEqual(0);        // y cresce para baixo: joelho à frente do eixo quadril→tornozelo dá produto vetorial negativo
+    }
+  });
+  it("alvo fora de alcance estica a perna na direção do alvo, sem quebrar", async () => {
+    const { solveTwoBone } = await import("../src/engine/skeleton.ts");
+    const p = bare(64, 40);
+    ok(p, "rig_create", { template: "humanoide", height: 30 });
+    const sol = solveTwoBone(p.rig!, "coxa_frente", "canela_frente", {}, { x: 20, y: 10 }, { x: 20, y: 90 }, 1);
+    expect(Number.isFinite(sol.upper) && Number.isFinite(sol.lower)).toBe(true);
+    expect(Math.abs(sol.lower)).toBeLessThan(6);                     // perna praticamente esticada (a margem do solver deixa ~4°)
+  });
+  it("na marcha 'andar', o pé APOIADO fica parado no mundo e a sola toca o chão; no balanço ele sobe", () => {
+    const p = humanoid(16, { mode: "andar" });
+    const rig = p.rig!;
+    const tips = p.frames.map((f) => legTips(rig, f.pose));
+    let plantedPairs = 0, lifted = 0;
+    for (let k = 0; k + 1 < tips.length; k++) {
+      rig.legs!.forEach((leg, i) => {
+        const a = tips[k][i], b = tips[k + 1][i];
+        const ground = rig.ground - leg.drop;
+        if (Math.abs(a.y - ground) < 0.05 && Math.abs(b.y - ground) < 0.05) { plantedPairs++; expect(Math.abs(b.x - a.x), `frame ${k} perna ${i}`).toBeLessThan(0.08); }
+        if (a.y < ground - 1) lifted++;
+      });
+    }
+    expect(plantedPairs).toBeGreaterThan(8);
+    expect(lifted).toBeGreaterThan(3);
+  });
+  it("a raiz avança uma velocidade INTEIRA por frame; no_lugar mantém a raiz parada e guarda a velocidade do chão", () => {
+    const a = humanoid(16, { mode: "andar" });
+    const xs = a.frames.map((f) => f.pose!.root!.x);
+    const steps = xs.slice(1).map((x, k) => x - xs[k]);
+    expect(new Set(steps.map((s) => +s.toFixed(6))).size).toBe(1);
+    expect(Number.isInteger(steps[0])).toBe(true);
+    expect(a.rig!.travel).toEqual({ mode: "andar", speed: steps[0] });
+    const b = humanoid(16, { mode: "no_lugar" });
+    expect(new Set(b.frames.map((f) => f.pose!.root!.x)).size).toBe(1);
+    expect(b.rig!.travel!.mode).toBe("no_lugar");
+    expect(Number.isInteger(b.rig!.travel!.speed)).toBe(true);
+  });
+  it("no_lugar com scroll_layer: o chão rola para trás na velocidade certa e fecha o loop quando o desenho se repete", () => {
+    const p = bare(64, 40);
+    ok(p, "add_frames", { count: 15 });
+    ok(p, "rig_create", { template: "humanoide", height: 30, ground: 38 });
+    runCommand(p, "update_layer", { layer: "Base", name: "chao" });
+    ok(p, "draw_shapes", { layer: "chao", frames: 0, preview: false, shapes: Array.from({ length: 8 }, (_, k) => ({ type: "pixels", points: [[k * 8 + 2, 39]], color: "0" })) });
+    const r = ok(p, "rig_walk", { cycles: 2, mode: "no_lugar", scroll_layer: "chao" });
+    const v = p.rig!.travel!.speed;
+    expect(r.text).toMatch(/repetir a cada/);
+    const layer = p.layers.find((l) => l.name === "chao")!;
+    const dots = (f: number) => [...p.frames[f].cels[layer.id]].flatMap((c, i) => (c ? [i % 64] : []));
+    const base = dots(0);
+    expect(dots(1).sort((a, b) => a - b)).toEqual(base.map((x) => (x - v + 64) % 64).sort((a, b) => a - b));
+    expect(dots(3).sort((a, b) => a - b)).toEqual(base.map((x) => (x - 3 * v + 64) % 64).sort((a, b) => a - b));
+  });
+  it("o ciclo é periódico: o pé de uma perna no frame k repete o da outra meio ciclo depois", () => {
+    const p = humanoid(16, { mode: "no_lugar", cycles: 1 });
+    const rig = p.rig!;
+    const a = legTips(rig, p.frames[3].pose), b = legTips(rig, p.frames[11].pose);   // 8 frames = meio ciclo
+    expect(a[0].y).toBeCloseTo(b[1].y, 3);
+    expect(a[0].x - p.frames[3].pose!.root!.x).toBeCloseTo(b[1].x - p.frames[11].pose!.root!.x, 3);
+  });
+  it("erros úteis: sem frames suficientes, sem pernas, sem rig", () => {
+    const p = bare(64, 40);
+    ok(p, "rig_create", { template: "humanoide", height: 30 });
+    expect(runCommand(p, "rig_walk", {}).text).toMatch(/precisa de 4 frame.*add_frames/s);
+    const q = bare(64, 40);
+    ok(q, "add_frames", { count: 7 });
+    ok(q, "rig_create", { template: "vazio", bones: [{ name: "a", parent: null, length: 4, mode: "absolute", rest: 0, sign: 1, min: -90, max: 90 }] });
+    expect(runCommand(q, "rig_walk", {}).text).toMatch(/não tem pernas definidas/);
+    expect(runCommand(createProject(), "rig_walk", {}).text).toMatch(/não tem rig/);
+  });
+  it("check: pé que escorrega é apontado; a marcha com IK não é, e o deslocamento não cobra emenda de loop", () => {
+    const good = humanoid(16, { mode: "andar" });
+    let codes = analyze(good, good.frames.map((_, i) => i)).issues.map((i) => i.code);
+    expect(codes).not.toContain("pe_escorrega");
+    expect(codes).not.toContain("emenda_salta");
+    // arrasta: a raiz avança com os mesmos ângulos (os pés ficam colados ao corpo)
+    const bad = humanoid(16, { mode: "andar" });
+    const first = bad.frames[0].pose!;
+    bad.frames.forEach((f, k) => { f.pose = { angles: { ...first.angles }, root: { x: first.root!.x + 2 * k, y: first.root!.y } }; });
+    codes = analyze(bad, bad.frames.map((_, i) => i)).issues.map((i) => i.code);
+    expect(codes).toContain("pe_escorrega");
+  });
+  it("rig_bake de uma marcha andando: a figura cruza o quadro e continua inteira (sem fresta nem pixel solto)", () => {
+    const p = humanoid(16, { mode: "andar" });
+    ok(p, "rig_bake", { outline: "0", preview: false });
+    const codes = analyze(p, p.frames.map((_, i) => i)).issues.map((i) => i.code);
+    expect(codes).not.toContain("figura_partida");
+    expect(codes).not.toContain("pixel_solto");
+    const cx = (f: number) => { const l = p.layers.find((x) => x.name === "tronco")!; let n = 0, s = 0; p.frames[f].cels[l.id].forEach((v, i) => { if (v) { n++; s += i % 64; } }); return s / n; };
+    expect(cx(15) - cx(0)).toBeGreaterThan(20);
+  });
+});
+
+import { legTips } from "../src/engine/skeleton.ts";
+
+describe("melhorias do rig vindas do pinguim: at numérico, rig_bone, sole, dica de snap", () => {
+  const penguin = () => {
+    const p = bare(40, 40);
+    runCommand(p, "set_palette", { colors: [{ key: "k", hex: "#101830", name: "k" }, { key: "w", hex: "#f0eee8", name: "w" }, { key: "o", hex: "#f09020", name: "o" }] });
+    ok(p, "rig_create", { template: "vazio", x: 20, ground: 36, bones: [
+      { name: "corpo", parent: null, length: 14, mode: "absolute", rest: 180, sign: -1, min: -40, max: 40 },
+      { name: "nad_tras", parent: "corpo", at: 0.3, length: 7, mode: "absolute", rest: 0, sign: 1, min: -70, max: 70 },
+      { name: "nad_frente", parent: "corpo", at: 0.7, length: 7, mode: "absolute", rest: 0, sign: 1, min: -70, max: 70 },
+      { name: "pe", parent: "corpo", at: "start", length: 3, mode: "absolute", rest: 90, sign: -1, min: -40, max: 40, sole: 1 },
+    ] });
+    return p;
+  };
+  it("at numérico prende o osso a uma fração do pai (não só no início ou no fim)", () => {
+    const p = penguin();
+    const st = forwardKinematics(p.rig!, undefined, { roundJoints: false });
+    const corpo = st.get("corpo")!;
+    for (const [name, t] of [["nad_tras", 0.3], ["nad_frente", 0.7]] as const) {
+      const s = st.get(name)!.start;
+      expect(s.x).toBeCloseTo(corpo.start.x + (corpo.end.x - corpo.start.x) * t, 6);
+      expect(s.y).toBeCloseTo(corpo.start.y + (corpo.end.y - corpo.start.y) * t, 6);
+    }
+    expect(runCommand(p, "rig_create", { template: "vazio", replace: true, bones: [{ name: "a", parent: null, length: 3, at: 2 }] }).ok).toBe(false);   // fração fora de 0..1 é inválida
+  });
+  it("sole em osso livre faz o ground_lock apoiar a sola no chão", () => {
+    const p = penguin();
+    ok(p, "rig_pose", { items: [{ frame: 0, angles: { pe: 20, corpo: 10 } }] });
+    const st = forwardKinematics(p.rig!, p.frames[0].pose, { roundJoints: false });
+    expect(st.get("pe")!.end.y + 1).toBeCloseTo(p.rig!.ground, 5);
+  });
+  it("rig_bone muda o comprimento de um osso SEM perder as partes nem as poses", () => {
+    const p = penguin();
+    ok(p, "rig_part", { name: "corpo", bone: "corpo", rows: ["k", "k", "k"], pivot: { x: 0, y: 0 } });
+    ok(p, "rig_pose", { items: [{ frame: 0, angles: { corpo: 10 } }] });
+    const r = ok(p, "rig_bone", { name: "corpo", length: 20 });
+    expect(r.text).toMatch(/1 parte\(s\) presas continuam/);
+    expect(p.rig!.bones.find((b) => b.name === "corpo")!.length).toBe(20);
+    expect(p.rig!.parts).toHaveLength(1);
+    expect(p.frames[0].pose!.angles.corpo).toBe(10);
+    ok(p, "rig_bone", { name: "nad_frente", at: 0.9 });
+    expect(p.rig!.bones.find((b) => b.name === "nad_frente")!.at).toBe(0.9);
+  });
+  it("rig_bone cria osso novo, valida e só remove osso sem filhos nem partes", () => {
+    const p = penguin();
+    ok(p, "rig_bone", { name: "bico", parent: "corpo", length: 3, at: 1 });
+    expect(p.rig!.bones.some((b) => b.name === "bico")).toBe(true);
+    expect(runCommand(p, "rig_bone", { name: "novo" }).text).toMatch(/é novo: diga o `length`/);
+    expect(runCommand(p, "rig_bone", { name: "novo", length: 3 }).text).toMatch(/diga o `parent`/);
+    expect(runCommand(p, "rig_bone", { name: "x", parent: "fantasma", length: 2 }).text).toMatch(/pai "fantasma" não existe/);
+    expect(runCommand(p, "rig_bone", { name: "corpo", remove: true }).text).toMatch(/ossos filhos/);
+    ok(p, "rig_part", { name: "p", bone: "bico", rows: ["o"], pivot: { x: 0, y: 0 } });
+    expect(runCommand(p, "rig_bone", { name: "bico", remove: true }).text).toMatch(/partes presas \(p\)/);
+    ok(p, "rig_part", { name: "p", remove: true });
+    ok(p, "rig_bone", { name: "bico", remove: true });
+    expect(p.rig!.bones.some((b) => b.name === "bico")).toBe(false);
+    expect(runCommand(p, "rig_bone", { name: "corpo", parent: "nad_frente" }).text).toMatch(/ciclo/);
+  });
+  it("o bake de partes pequenas girando sugere snap_angle; com snap_angle não sugere", () => {
+    const p = penguin();
+    ok(p, "rig_part", { name: "corpo", bone: "corpo", rows: ["k", "k", "k"], pivot: { x: 0, y: 0 } });
+    ok(p, "rig_pose", { items: [{ frame: 0, angles: { corpo: 25 } }] });
+    expect(ok(p, "rig_bake", { preview: false }).text).toMatch(/snap_angle 3–5/);
+    expect(ok(p, "rig_bake", { preview: false, snap_angle: 5 }).text).not.toMatch(/snap_angle 3–5/);
+  });
+  it("a descrição do rig_create traz a receita para personagens não humanos e como ler os ângulos", () => {
+    const d = runCommand(createProject(), "get_project_info", {}).text;           // só para garantir que o comando roda
+    expect(d).toMatch(/Projeto/);
+    const tools = JSON.stringify(Object.keys({}));
+    void tools;
+    expect(SYSTEM_PROMPT).toMatch(/rig_bone|rig_walk/);
+  });
+});

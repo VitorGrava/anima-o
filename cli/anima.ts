@@ -79,7 +79,7 @@ const USAGE = `anima — engine de animação pixel art
                                          aplica comandos [{"name": "...", "input": {...}}] EM CIMA do projeto existente (para recomeçar, rode "new", que sobrescreve); o último mostra a prévia; -q/--quiet não mostra a folha de frames
   anima show <projeto> [frame|all] [--png saida.png] [--check cinza|luz_sombra|silhueta]
              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--bones] [--scale N]
-  anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--max-cores N] [--png saida.png]
+  anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--max-cores N] [--sem codigo,codigo] [--png saida.png]
                                          defeitos da arte e da animação (--max-cores: limite de cores do estilo, ex. 16 para retrô) (--efeito: brilho, chama, fumaça; --tipo rotacao: moeda girando)
   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N]
@@ -90,7 +90,8 @@ const USAGE = `anima — engine de animação pixel art
 process.stdout.on("error", (e: NodeJS.ErrnoException) => { if (e.code !== "EPIPE") throw e; });
 
 export async function main(argv: string[]): Promise<number> {
-  const args = [...argv];
+  // flags aceitam hífen ou sublinhado (--max-cores ou --max_cores): o nome do parâmetro nas ferramentas usa sublinhado
+  const args = argv.map((a) => (a.startsWith("--") ? a.replace(/_/g, "-") : a));
   const cmd = args.shift();
   if (cmd && cmd !== "help" && (args.includes("--help") || args.includes("-h"))) {
     console.log(USAGE);
@@ -210,11 +211,12 @@ export async function main(argv: string[]): Promise<number> {
       const ignorar = flag(args, "ignorar");
       const tipoFlag = flag(args, "tipo");
       const maxCores = flag(args, "max-cores");
+      const semCodigos = flag(args, "sem");
       rejectUnknownFlags(args, "check");
       const [file] = args;
       if (!file) break;
       await store.open(file);
-      const r = runCommand(store.project, "check", { symmetric, tipo: efeito ? "efeito" : tipoFlag === "efeito" || tipoFlag === "rotacao" ? tipoFlag : "personagem", ignore_layers: ignorar ? ignorar.split(",") : undefined, max_cores: maxCores ? Number(maxCores) : undefined });
+      const r = runCommand(store.project, "check", { symmetric, tipo: efeito ? "efeito" : tipoFlag === "efeito" || tipoFlag === "rotacao" ? tipoFlag : "personagem", ignore_layers: ignorar ? ignorar.split(",") : undefined, max_cores: maxCores ? Number(maxCores) : undefined, ignore_codes: semCodigos ? semCodigos.split(",") : undefined });
       console.log(r.text);
       if (png) await saveImages(store.project, r, png);
       return r.ok ? 0 : 1;
@@ -286,7 +288,7 @@ Como isto vira comandos na CLI (sem MCP)
         if (inner?.anyOf?.length) {
           for (const variant of inner.anyOf) {
             const props = variant.properties ?? {};
-            const kindName = (props.type as unknown as { const?: string } | undefined)?.const;
+            const kindName = (props.type as unknown as { const?: string } | undefined)?.const ?? ((variant as unknown as { const?: unknown }).const !== undefined ? JSON.stringify((variant as unknown as { const?: unknown }).const) : variant.type === "integer" || variant.type === "number" ? "um número" : variant.type === "array" ? "uma lista" : undefined);
             const rq = new Set(variant.required ?? []);
             out.push(`${indent}    · ${kindName ?? "variante"}: ${Object.entries(props).filter(([kk]) => kk !== "type").map(([kk, vv]) => `${kk}${rq.has(kk) ? "*" : ""}${vv.enum ? `(${vv.enum.join("|")})` : ""}`).join(", ")}${variant.description ? ` — ${String(variant.description).split("\n")[0].slice(0, 100)}` : ""}`);
           }

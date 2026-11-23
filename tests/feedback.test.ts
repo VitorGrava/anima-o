@@ -381,3 +381,52 @@ describe("ferramentas que os agentes pediram", () => {
 });
 
 const frameToRowsSafe = (p: Project) => frameToRows(p, 0)[0];
+
+describe("capsule, ignore_codes, flags e erros de formas aceitas", () => {
+  const pal = (p: ReturnType<typeof createProject>) => runCommand(p, "set_palette", { colors: [{ key: "o", hex: "#101018", name: "o" }, { key: "b", hex: "#c06030", name: "b" }, { key: "l", hex: "#f0a060", name: "l" }, { key: "s", hex: "#703010", name: "s" }] });
+  it("capsule desenha um segmento grosso com contorno, luz em cima-esquerda e sombra embaixo-direita", () => {
+    const p = createProject({ width: 30, height: 30 });
+    pal(p);
+    const r = runCommand(p, "draw_shapes", { shapes: [{ type: "capsule", x1: 6, y1: 6, x2: 22, y2: 20, r1: 4, r2: 2.5, outline: "o", base: "b", light: "l", shadow: "s" }], preview: false });
+    expect(r.ok).toBe(true);
+    const rows = frameToRows(p, 0);
+    const all = rows.join("");
+    expect(all).toMatch(/o/); expect(all).toMatch(/l/); expect(all).toMatch(/s/);
+    const count = (k: string, test: (x: number, y: number) => boolean) => rows.reduce((n, row, y) => n + [...row].filter((c, x) => c === k && test(x, y)).length, 0);
+    // dois lados do eixo (y = x + 0 aproximado): a luz está do lado de cima-direita? a sombra do oposto
+    const lightSide = count("l", (x, y) => y < x * 0.875 + 0.8), shadowSide = count("s", (x, y) => y > x * 0.875 + 0.8);
+    expect(lightSide).toBeGreaterThan(0); expect(shadowSide).toBeGreaterThan(0);
+    // as duas pontas existem e há contorno contínuo (nenhum pixel preenchido sem vizinho)
+    expect(rows[6][6]).not.toBe("."); expect(rows[20][22]).not.toBe(".");
+  });
+  it("ignore_codes silencia avisos intencionais", () => {
+    const p = createProject({ width: 20, height: 20 });
+    pal(p);
+    runCommand(p, "draw_rows", { x: 3, y: 3, rows: ["oooooo", "obbbbo", "obbobo", "obbbbo", "oooooo"], preview: false });
+    runCommand(p, "draw_rows", { x: 3, y: 3, rows: ["      ", "      ", "   .  ", "      ", "      "], preview: false });
+    const base = runCommand(p, "check", { as_image: false }).text;
+    expect(base).toMatch(/furo/);
+    expect(runCommand(p, "check", { as_image: false, ignore_codes: ["furo"] }).text).not.toMatch(/furo/);
+  });
+  it("campo obrigatório ausente em formato com várias formas diz que está faltando (set_frame_timing sem frames)", () => {
+    const p = createProject();
+    const r = runCommand(p, "set_frame_timing", { duration_ms: 100 });
+    expect(r.ok).toBe(false);
+    expect(r.text).toMatch(/frames: falta este campo obrigatório/);
+  });
+  it("a CLI aceita --max_cores e --max-cores", async () => {
+    const { execSync } = await import("node:child_process");
+    const { mkdtemp, writeFile } = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const dir = await mkdtemp(path.join(os.tmpdir(), "anima-flags-"));
+    const bin = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../bin/anima.mjs");
+    execSync(`node ${bin} new ${dir}/p.anima.json 8x8 8`);
+    await writeFile(`${dir}/c.json`, JSON.stringify([{ name: "set_palette", input: { colors: [{ key: "a", hex: "#ff0000", name: "a" }, { key: "b", hex: "#00ff00", name: "b" }, { key: "c", hex: "#0000ff", name: "c" }] } }, { name: "draw_rows", input: { rows: ["abc"], preview: false } }]));
+    execSync(`node ${bin} run ${dir}/p.anima.json ${dir}/c.json -q`);
+    for (const flag of ["--max_cores", "--max-cores"]) {
+      const out = execSync(`node ${bin} check ${dir}/p.anima.json ${flag} 2`).toString();
+      expect(out, flag).toMatch(/acima do limite de 2/);
+    }
+  });
+});

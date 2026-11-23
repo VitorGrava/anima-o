@@ -38,8 +38,8 @@ export interface Layer {
 export interface Bone {
   name: string;
   parent: string | null;
-  /** Em que ponta do osso-pai este começa (padrão "end"). */
-  at?: "start" | "end";
+  /** Onde, no osso-pai, este começa: "start", "end" (padrão) ou uma fração 0..1 ao longo do pai (ex.: 0.3 prende a nadadeira de trás um pouco abaixo do início do tronco). */
+  at?: "start" | "end" | number;
   length: number;
   /** absolute: o valor é o ângulo no mundo; relative: soma ao ângulo do pai. */
   mode: "absolute" | "relative";
@@ -68,8 +68,28 @@ export interface RigPart {
   rows: string[];
 }
 
+/** Uma perna para marcha e IK: dois ossos que alcançam o alvo no chão (e, opcionalmente, ossos que seguem). */
+export interface RigLeg {
+  upper: string;
+  lower: string;
+  /** Ossos depois do alcance (canela longa, pata): ajustados para a sola ficar no chão. */
+  follow?: string[];
+  /** Osso do pé (ângulo do tornozelo ao longo do passo). */
+  foot?: string;
+  /** Fase no ciclo (0..1): o frente/trás do humanoide diferem em 0,5; o quadrúpede anda em 0, 0,25, 0,5, 0,75. */
+  phase: number;
+  /** +1: o joelho aponta para a frente (perna); −1: o cotovelo aponta para trás (pata da frente). */
+  bend: 1 | -1;
+  /** Distância vertical da ponta do IK até a sola quando apoiado. */
+  drop: number;
+}
+
 export interface Rig {
   bones: Bone[];
+  /** Pernas para rig_walk. */
+  legs?: RigLeg[];
+  /** Como o corpo se desloca no ciclo: andando (a raiz avança) ou no lugar (o chão rola `speed` px por frame para trás). */
+  travel?: { mode: "andar" | "no_lugar"; speed: number };
   parts: RigPart[];
   facing: "right" | "left";
   /** Início do esqueleto (quadril) quando o frame não define `root`. */

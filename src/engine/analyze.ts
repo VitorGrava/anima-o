@@ -6,6 +6,7 @@
  */
 import { hexToRgb, type Project } from "./project.ts";
 import { flattenFrame } from "./render.ts";
+import { legTips } from "./skeleton.ts";
 
 export type Severity = "erro" | "aviso" | "info";
 
@@ -629,7 +630,7 @@ function checkSegmentLengths(p: Project, frames: number[], moving: Set<string>, 
       issues.push({
         severity: "info",
         code: "segmento_muda",
-        message: `A camada "${l.name}" tem a mesma massa em todos os frames mas o comprimento vai de ${Math.min(...lens).toFixed(0)} a ${Math.max(...lens).toFixed(0)} px. Se é um membro rígido (coxa, canela, braço), o comprimento não pode mudar: gire a partir de uma cópia limpa e confira o pivô.`,
+        message: `A camada "${l.name}" tem a mesma massa em todos os frames mas o comprimento vai de ${Math.min(...lens).toFixed(0)} a ${Math.max(...lens).toFixed(0)} px. Vale para UM segmento rígido por camada (coxa, canela, braço): o comprimento não pode mudar, então gire a partir de uma cópia limpa e confira o pivô. Ignore se a camada tem um membro articulado que dobra (a caixa muda ao dobrar).`,
       });
     }
   }
@@ -898,6 +899,26 @@ function checkRig(p: Project, frames: number[], issues: Issue[]) {
   }
 }
 
+/** Pé apoiado que escorrega: na marcha, a sola apoiada tem de ficar parada em relação ao chão (que pode estar rolando). */
+function checkFootSlide(p: Project, frames: number[], issues: Issue[]) {
+  const rig = p.rig;
+  if (!rig?.legs?.length || !rig.travel) return;
+  const expected = rig.travel.mode === "no_lugar" ? -rig.travel.speed : 0;
+  const posed = frames.filter((f) => p.frames[f].pose);
+  const bad: string[] = [];
+  for (let k = 0; k + 1 < posed.length; k++) {
+    if (posed[k + 1] !== posed[k] + 1) continue;
+    const a = legTips(rig, p.frames[posed[k]].pose), b = legTips(rig, p.frames[posed[k + 1]].pose);
+    rig.legs.forEach((leg, i) => {
+      const planted = (t: { y: number }) => Math.abs(t.y - (rig.ground - leg.drop)) <= 0.4;      // um pé que já subiu 0,4 px está no balanço
+      if (!planted(a[i]) || !planted(b[i])) return;
+      const slip = Math.abs(b[i].x - a[i].x - expected);
+      if (slip > 1.6) bad.push(`frames ${posed[k]}→${posed[k + 1]} (${leg.lower}: ${slip.toFixed(1)} px)`);
+    });
+  }
+  if (bad.length) issues.push({ severity: "aviso", code: "pe_escorrega", message: `O pé apoiado escorrega no chão em ${bad.slice(0, 4).join("; ")}${bad.length > 4 ? "..." : ""}. Com a raiz ${rig.travel.mode === "andar" ? "avançando" : "parada"}, a sola apoiada devia ${rig.travel.mode === "andar" ? "ficar parada" : `acompanhar o chão (${-rig.travel.speed} px por frame)`}: use rig_walk, que trava os pés por IK.` });
+}
+
 // ---------- API ----------
 
 /** Checagens de um único frame (rápidas: usadas no preview automático dos comandos de desenho). */
@@ -986,7 +1007,10 @@ export function analyze(p: Project, frames: number[], opts: AnalyzeOptions = {})
   if (frames.length > 1) checkContrastAndLight(p, frames, moving, issues);
   checkPalette(p, frames, issues, opts.maxColors);
   checkRig(p, frames, issues);
+  checkFootSlide(p, frames, issues);
   let principles: PrincipleStatus[] | undefined;
+  const travelling = p.rig?.travel?.mode === "andar";           // a raiz atravessa o quadro: não é um loop contínuo por definição
+  if (travelling) opts = { ...opts, loop: false };
   if (frames.length > 1) {
     const articulated = [...moving].filter((id) => !empty(id)).length >= 3;
     checkSequence(p, metrics, opts.loop ?? true, issues, opts.tipo ?? "personagem", articulated);

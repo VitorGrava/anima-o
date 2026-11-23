@@ -199,7 +199,7 @@ describe("contrato: o prompt da IA ensina cada regra que o check cobra", () => {
 describe("portão de qualidade: animações geradas pelos agentes (bench/out)", () => {
   const dir = path.join(ROOT, "bench/out");
   // pastas que começam com "_" guardam saídas antigas (histórico) que já motivaram correções e não entram no portão
-  const ids = existsSync(dir) ? readdirSync(dir).filter((d) => !d.startsWith("_") && existsSync(path.join(dir, d, "anim.anima.json"))) : [];
+  const ids = existsSync(dir) ? readdirSync(dir).filter((d) => !d.startsWith("_") && existsSync(path.join(dir, d, "anim.anima.json")) && existsSync(path.join(dir, d, "anim.gif"))) : [];   // só animações terminadas: o GIF é a última coisa que o agente exporta
   it("existe ao menos uma animação no bench", () => expect(ids.length).toBeGreaterThan(0));
   for (const id of ids) {
     it(`${id}: sem erros, tempos variados e emenda do loop suave`, () => {

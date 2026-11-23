@@ -10,7 +10,7 @@ import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.t
 import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
 import { REFERENCE_TOPICS, bodyProportions, darkOutline, makeRamp, reference } from "./reference.ts";
-import { HUMANOID_BONES, boneSegments, capsuleArt, clampAngles, humanoidAngles, humanoidBones, groundedRoot, ellipseArt, renderRigFrame } from "./skeleton.ts";
+import { HUMANOID_BONES, walkPoses, boneSegments, capsuleArt, clampAngles, humanoidAngles, humanoidBones, groundedRoot, ellipseArt, renderRigFrame } from "./skeleton.ts";
 import { DEFAULT_POSE, FIGURE_LAYERS, PRESETS as POSE_PRESETS, WALK_CYCLE, clampPose, lerpPose, renderFigure, swapSides, type Pose, type Ramp } from "./rig.ts";
 import type { CheckMode } from "./render.ts";
 import { autoScale, clampRegion, diffRows, type ImageRequest } from "./view.ts";
@@ -691,13 +691,14 @@ function ensureGeneratedLayers(p: Project, names: string[]): Map<string, string>
 const boneSchema = z.object({
   name: z.string().min(1).max(30),
   parent: z.string().nullable().default(null),
-  at: z.enum(["start", "end"]).default("end").describe("em que ponta do osso-pai este começa"),
+  at: z.union([z.enum(["start", "end"]), z.number().min(0).max(1)]).default("end").describe('onde, no osso-pai, este começa: "start", "end" ou uma fração 0..1 ao longo do pai (0.3 = 30% do caminho do início ao fim)'),
   length: z.number().min(0.5).max(200),
   mode: z.enum(["absolute", "relative"]).default("relative").describe("absolute: o valor é o ângulo no mundo (ombro, quadril); relative: soma ao ângulo do pai (cotovelo, joelho)"),
   rest: z.number().default(0).describe("ângulo em repouso, em graus a partir de 'para baixo' (osso para cima = 180)"),
   sign: z.union([z.literal(1), z.literal(-1)]).default(1).describe("+1: valor positivo gira para a frente; −1: para trás (joelho)"),
   min: z.number().default(-180),
   max: z.number().default(180),
+  sole: z.number().min(0).max(20).optional().describe("distância da ponta do osso até a sola; só ossos com sola (pés) encostam no chão no ground_lock"),
 });
 
 const rigCreate = def({
@@ -705,8 +706,10 @@ const rigCreate = def({
   description: [
     "Cria um ESQUELETO invisível (opcional: sem isto o projeto não tem rig e nada muda). Os ossos ditam o movimento; a arte de cada parte é presa a um osso e o rig_bake a desenha em cada frame. A anatomia sai certa porque os ossos têm comprimento fixo e limites de articulação; o movimento sai bom porque você pensa em ÂNGULOS (poses-chave + tween com ease).",
     'template "humanoide": 13 ossos (tronco, pescoco, cabeca, braco/antebraco e coxa/canela/pe, frente e tras), com proporções de reference proporcoes. Com auto_art=true (padrão) já cria partes de arte provisórias (cápsulas com luz) EDITÁVEIS: troque qualquer uma pela sua arte com rig_part. `weapon_length` acrescenta o osso "espada" preso ao antebraço da frente.',
-    'template "vazio" + `bones`: esqueleto livre (cachorro, monstro, qualquer coisa). Cada osso: parent, at (start|end do pai), length, mode (absolute|relative), rest, sign, min, max. Ângulo: graus a partir de "para baixo", + = para a frente; osso para cima = 180.',
-    "Depois: rig_pose (poses e tween) → rig_bake (renderiza) → view bones=true (vê o esqueleto por cima).",
+    'template "vazio" + `bones`: esqueleto livre (pinguim, monstro, robô, qualquer coisa). Cada osso: parent, at ("start", "end" ou uma fração 0..1 ao longo do pai), length, mode (absolute|relative), rest, sign, min, max, sole (só nos pés). Ângulo: graus a partir de "para baixo", + = para a frente; osso para cima = rest 180.',
+    'COMO LER OS ÂNGULOS: o valor de cada osso em rig_pose é o DESVIO do repouso (0 = repouso). mode "absolute": o ângulo no mundo é rest + sign×valor (ombro, quadril, tronco). mode "relative": soma ao ângulo do pai (cotovelo, joelho, cabeça). sign +1 gira para a frente; −1 para trás (joelho dobra para trás: sign −1 e o valor é a flexão).',
+    'RECEITA para um personagem com poucas partes (ex.: pinguim): ossos corpo (absolute, rest 180, sign −1, length do tronco), cabeca (relative, at "end", rest 0), nadadeira_frente e nadadeira_tras (absolute, rest 0, at 0.6 do corpo, mínimos e máximos ±70), perna_frente/perna_tras (absolute, rest 0) e pe_* (absolute, rest 90, sign −1, sole 1). Depois rig_part com a arte de cada parte (ou from_layer) e rig_pose com ângulos pequenos.',
+    "Depois: rig_pose (poses e tween) → rig_bake (renderiza) → view bones=true (vê o esqueleto por cima; na CLI: `anima show <projeto> <frame> --bones --png f.png`). Para mudar um osso sem perder a arte: rig_bone.",
   ].join("\n"),
   schema: z.object({
     template: z.enum(["humanoide", "vazio"]).default("humanoide"),
@@ -734,7 +737,10 @@ const rigCreate = def({
       for (const b of bones) if (b.parent && !bones.some((o) => o.name === b.parent)) throw new Error(`O osso "${b.name}" tem pai "${b.parent}", que não existe.`);
       if (new Set(bones.map((b) => b.name)).size !== bones.length) throw new Error("Há ossos com o mesmo nome.");
     }
-    p.rig = { bones, parts: [], facing: i.facing, root: { x, y: ground - Math.round((i.height ?? p.height * 0.7) * 0.5) }, ground };
+    const legs = i.template === "humanoide"
+      ? (["frente", "tras"] as const).map((side, k) => ({ upper: `coxa_${side}`, lower: `canela_${side}`, foot: `pe_${side}`, phase: k * 0.5, bend: 1 as const, drop: bones.find((b) => b.name === `pe_${side}`)?.sole ?? 1 }))
+      : undefined;
+    p.rig = { bones, legs, parts: [], facing: i.facing, root: { x, y: ground - Math.round((i.height ?? p.height * 0.7) * 0.5) }, ground };
     for (const f of p.frames) f.pose = undefined;
     let parts = 0;
     if (i.template === "humanoide" && i.auto_art) {
@@ -1000,7 +1006,117 @@ const rigBake = def({
         }
       }
     }
-    return result(p, `Rig renderizado em ${fmtList(list)}: ${rig.parts.length} partes em ${names.length} camada(s) geradas (${names.join(", ")}).`, list, i.preview);
+    const small = rig.parts.every((x) => Math.max(x.rows.length, ...x.rows.map((r) => [...r].length)) <= 24);
+    const rotated = list.some((f) => Object.values(p.frames[f].pose?.angles ?? {}).some((v) => Math.abs(v) > 2));
+    const tip = small && rotated && !i.snap_angle ? "\nDica: as partes são pequenas (≤ 24 px) e giram: girar arte minúscula serrilha e pode soltar pixels. Tente snap_angle 3–5 (arredonda os ângulos) ou revise as partes mais finas." : "";
+    return result(p, `Rig renderizado em ${fmtList(list)}: ${rig.parts.length} partes em ${names.length} camada(s) geradas (${names.join(", ")}).${tip}`, list, i.preview);
+  },
+});
+
+const rigBone = def({
+  name: "rig_bone",
+  description: "Cria, EDITA ou remove um osso SEM perder a arte das partes: muda comprimento, repouso, limites, pai ou ponto de fixação (`at`) e as partes presas continuam (o pivô fica o mesmo; só a distância entre juntas muda). Se o osso não existe, cria (precisa de `parent` e `length`). `remove: true` só funciona se nenhum osso filho e nenhuma parte dependerem dele.",
+  schema: z.object({
+    name: z.string().min(1).max(30),
+    parent: z.string().nullable().optional(),
+    at: z.union([z.enum(["start", "end"]), z.number().min(0).max(1)]).optional(),
+    length: z.number().min(0.5).max(200).optional(),
+    mode: z.enum(["absolute", "relative"]).optional(),
+    rest: z.number().optional(),
+    sign: z.union([z.literal(1), z.literal(-1)]).optional(),
+    min: z.number().optional(),
+    max: z.number().optional(),
+    sole: z.number().min(0).max(20).nullable().optional(),
+    remove: z.boolean().default(false),
+  }),
+  run(p, i) {
+    const rig = needRig(p);
+    const idx = rig.bones.findIndex((b) => b.name === i.name);
+    if (i.remove) {
+      if (idx < 0) throw new Error(`O osso "${i.name}" não existe. Ossos: ${rig.bones.map((b) => b.name).join(", ")}.`);
+      const kids = rig.bones.filter((b) => b.parent === i.name).map((b) => b.name);
+      const parts = rig.parts.filter((x) => x.bone === i.name).map((x) => x.name);
+      if (kids.length || parts.length) throw new Error(`Não dá para remover "${i.name}": ${kids.length ? `ossos filhos (${kids.join(", ")})` : ""}${kids.length && parts.length ? " e " : ""}${parts.length ? `partes presas (${parts.join(", ")})` : ""}. Remova ou mova antes.`);
+      rig.bones.splice(idx, 1);
+      for (const f of p.frames) if (f.pose) delete f.pose.angles[i.name];
+      return { changed: true, text: `Osso "${i.name}" removido.` };
+    }
+    if (i.parent && !rig.bones.some((b) => b.name === i.parent)) throw new Error(`O pai "${i.parent}" não existe. Ossos: ${rig.bones.map((b) => b.name).join(", ")}.`);
+    if (i.parent === i.name) throw new Error("Um osso não pode ser pai de si mesmo.");
+    if (idx >= 0) {
+      const b = rig.bones[idx];
+      if (i.parent !== undefined) b.parent = i.parent;
+      for (const k of ["at", "length", "mode", "rest", "sign", "min", "max"] as const) if (i[k] !== undefined) (b as unknown as Record<string, unknown>)[k] = i[k];
+      if (i.sole !== undefined) b.sole = i.sole ?? undefined;
+      // sem ciclo de pais
+      for (let cur: Bone | undefined = b, n = 0; cur?.parent; cur = rig.bones.find((x) => x.name === cur!.parent), n++) if (n > rig.bones.length) throw new Error("Esta mudança cria um ciclo de ossos pai/filho.");
+      return { changed: true, text: `Osso "${i.name}" atualizado (${[...Object.keys(i)].filter((k) => !["name", "remove"].includes(k) && (i as Record<string, unknown>)[k] !== undefined).join(", ") || "nada"}); as ${rig.parts.filter((x) => x.bone === i.name).length} parte(s) presas continuam. Rode rig_bake para ver.` };
+    }
+    if (i.length === undefined) throw new Error(`O osso "${i.name}" é novo: diga o \`length\` (e o \`parent\`, se não for a raiz).`);
+    if (i.parent === undefined && rig.bones.length) throw new Error(`O osso "${i.name}" é novo: diga o \`parent\` (ou null para uma segunda raiz).`);
+    rig.bones.push({ name: i.name, parent: i.parent ?? null, at: i.at ?? "end", length: i.length, mode: i.mode ?? "relative", rest: i.rest ?? 0, sign: i.sign ?? 1, min: i.min ?? -180, max: i.max ?? 180, ...(i.sole != null ? { sole: i.sole } : {}) });
+    return { changed: true, text: `Osso "${i.name}" criado (filho de ${i.parent ?? "nada"}, ${i.length} px). Prenda arte a ele com rig_part.` };
+  },
+});
+
+const rigWalk = def({
+  name: "rig_walk",
+  description: [
+    "Gera uma MARCHA com PÉS TRAVADOS NO CHÃO por IK de dois ossos: cada perna tem uma fase; quando apoiada, a sola fica PARADA no mundo (nada de pé que escorrega); no balanço o pé sobe em arco e avança. O corpo sobe e desce (bob), os braços balançam contra as pernas e, no quadrúpede, a cauda e a cabeça acompanham.",
+    '`mode: "andar"`: a raiz avança (o personagem cruza o quadro). `mode: "no_lugar"`: a raiz fica parada e o CHÃO rola para trás; passe `scroll_layer` (uma camada com o chão/fundo desenhada no frame inicial) e a engine rola essa camada na mesma velocidade, sem deslize.',
+    "A velocidade é ajustada para um número INTEIRO de px por frame (o chão rola em pixels inteiros, sem deslizar o pé); o `stride` pode ser corrigido um pouco e a resposta diz qual. Precisa dos frames criados (add_frames) e de um rig com pernas (humanoide ou quadrúpede).",
+  ].join("\n"),
+  schema: z.object({
+    start: z.number().int().min(0).default(0).describe("primeiro frame"),
+    frames: z.number().int().min(4).max(128).optional().describe("quantos frames (padrão: do start até o fim)"),
+    cycles: z.number().int().min(1).max(8).default(1).describe("ciclos completos de marcha nesses frames"),
+    stride: z.number().min(2).max(120).optional().describe("quanto o pé percorre no apoio, em px (padrão: ~55% do comprimento da perna)"),
+    lift: z.number().min(0).max(60).optional().describe("altura do pé no balanço, em px"),
+    bob: z.number().min(0).max(30).optional().describe("quanto o corpo sobe e desce, em px"),
+    duty: z.number().min(0.3).max(0.9).optional().describe("fração do ciclo com o pé no chão (bípede ~0,55; quadrúpede ~0,72)"),
+    mode: z.enum(["andar", "no_lugar"]).default("andar"),
+    arm_swing: z.number().min(0).max(80).default(28).describe("balanço dos braços (humanoide), em graus"),
+    lean: z.number().min(-20).max(30).default(3).describe("inclinação do tronco para a frente (humanoide)"),
+    x0: z.number().optional().describe("x inicial da raiz"),
+    scroll_layer: z.string().optional().describe('com mode "no_lugar": camada do chão/fundo que a engine rola para trás, sem deslize, usando o conteúdo do frame `start`'),
+    preview: previewFlag,
+  }),
+  run(p, i) {
+    const rig = needRig(p);
+    if (!rig.legs?.length) throw new Error("Este rig não tem pernas definidas para a marcha (o humanoide e o quadrúpede têm). Num esqueleto livre, informe `legs` em rig_create.");
+    const N = i.frames ?? p.frames.length - i.start;
+    if (N < 4 || i.start + N > p.frames.length) throw new Error(`A marcha precisa de ${Math.max(N, 4)} frame(s) a partir do ${i.start}, e o projeto tem ${p.frames.length}. Rode add_frames antes.`);
+    const reach = Math.max(...rig.legs.map((l) => rig.bones.find((b) => b.name === l.upper)!.length + rig.bones.find((b) => b.name === l.lower)!.length));
+    const duty = i.duty ?? (rig.legs.length >= 4 ? 0.72 : 0.55);
+    const Nc = N / i.cycles;
+    const stride0 = i.stride ?? Math.max(3, Math.round(reach * 0.55));
+    const speed = Math.max(1, Math.round(stride0 / (duty * Nc)));
+    const stride = speed * duty * Nc;
+    const total = speed * (N - 1);
+    const x0 = i.x0 ?? (i.mode === "andar" ? Math.round(rig.root.x - total / 2) : rig.root.x);
+    const poses = walkPoses(rig, { frames: N, cycles: i.cycles, stride, lift: i.lift ?? Math.max(1, +(reach * 0.14).toFixed(1)), bob: i.bob ?? +(reach * 0.04).toFixed(1), duty, mode: i.mode, armSwing: i.arm_swing, lean: i.lean, x0, speed });
+    const warns = new Set<string>();
+    poses.forEach((ps, k) => {
+      const { angles, warnings } = clampAngles(rig, ps.angles);
+      warnings.forEach((w) => warns.add(w));
+      const full = Object.fromEntries(rig.bones.map((b) => [b.name, angles[b.name] ?? 0]));
+      p.frames[i.start + k].pose = { angles: full, root: ps.root };
+    });
+    rig.travel = { mode: i.mode, speed };
+    let scrolled = "";
+    if (i.mode === "no_lugar" && i.scroll_layer) {
+      const layer = findLayer(p, i.scroll_layer);
+      const base = new Uint8Array(getCel(p, i.start, layer.id));
+      for (let k = 0; k < N; k++) {
+        const cel = getCel(p, i.start + k, layer.id);
+        cel.set(base);
+        draw.shift({ width: p.width, height: p.height, data: cel }, -speed * k, 0, true);
+      }
+      scrolled = ` A camada "${layer.name}" foi rolada ${speed} px por frame para trás (com wrap). Para o loop fechar sem emenda, o desenho do chão deve se repetir a cada ${[...Array(speed * N).keys()].map((x) => x + 1).filter((d) => (speed * N) % d === 0).slice(0, 6).join(", ")} px ou um múltiplo (divisores de ${speed * N}).`;
+    }
+    const adj = Math.abs(stride - stride0) > 0.6 ? ` O stride foi ajustado de ${stride0} para ${stride.toFixed(1)} px para a velocidade ser inteira.` : "";
+    const how = i.mode === "andar" ? `A raiz avança ${speed} px por frame (${total} px no total).` : `A raiz fica parada e o chão deve rolar ${speed} px por frame para trás.${scrolled || " Passe scroll_layer para a engine rolar uma camada de chão, ou desenhe o chão rolando você mesmo com transform shift wrap."}`;
+    return { changed: true, text: `Marcha em ${N} frames (${i.cycles} ciclo(s), ${rig.legs.length} pernas, pés travados no chão por IK). ${how}${adj} Rode rig_bake.${warns.size ? `\nATENÇÃO (limites anatômicos): ${[...warns].slice(0, 4).join(" ")}` : ""}` };
   },
 });
 
@@ -1039,6 +1155,13 @@ const shape = z.discriminatedUnion("type", [
     squareness: z.number().min(2).max(6).default(2.4).describe("2 = elipse; 3–4 = bloco arredondado (slime, gota); 6 = quase retângulo"),
     anchor: z.enum(["corner", "center"]).default("corner").describe('"corner": x,y = canto superior esquerdo. "center": x,y = o CENTRO da forma (útil para centralizar e para animar o squash e o stretch mantendo o centro/base). w e h SEMPRE incluem o contorno.'),
   }).describe("Forma orgânica pronta: superelipse com contorno, luz de cima-esquerda e sombra embaixo/direita, sem pillow shading. Use para bolas, slimes, frutas, cabeças, pedras."),
+  z.object({
+    type: z.literal("capsule"),
+    x1: z.number().int(), y1: z.number().int(), x2: z.number().int(), y2: z.number().int(),
+    r1: z.number().min(0.5).max(40).describe("raio no ponto 1 (px)"),
+    r2: z.number().min(0.5).max(40).optional().describe("raio no ponto 2 (padrão: igual ao r1)"),
+    outline: colorRef, base: colorRef, light: colorRef, shadow: colorRef,
+  }).describe("Segmento grosso (membro, tronco, cauda, antena) entre dois pontos, com raios, contorno escuro de 1 px e luz de cima-esquerda. Para braço, perna, rabo: não precisa escrever um gerador."),
   z.object({ type: z.literal("fill"), x: z.number().int(), y: z.number().int(), color: colorRef }).describe("Balde de tinta a partir de (x, y)"),
 ]);
 
@@ -1071,6 +1194,36 @@ function drawBlob(s: { width: number; height: number; data: Uint8Array }, b: Blo
   }
 }
 
+interface CapsuleSpec { x1: number; y1: number; x2: number; y2: number; r1: number; r2?: number; outline: string; base: string; light: string; shadow: string }
+
+/** Segmento grosso entre dois pontos, com contorno de 1 px e sombreamento direcional (luz de cima-esquerda). */
+function drawCapsule(s: { width: number; height: number; data: Uint8Array }, c: CapsuleSpec, idx: (ref: string) => number): void {
+  const r2 = c.r2 ?? c.r1;
+  const dx = c.x2 - c.x1, dy = c.y2 - c.y1, len2 = Math.max(1e-6, dx * dx + dy * dy), len = Math.sqrt(len2);
+  let nx = -dy / (len || 1), ny = dx / (len || 1);
+  const L = { x: -0.55, y: -0.65 };
+  if (nx * L.x + ny * L.y < 0) { nx = -nx; ny = -ny; }
+  const rmax = Math.max(c.r1, r2) + 2;
+  const inside = (x: number, y: number) => {
+    const px = x + 0.5 - (c.x1 + 0.5), py = y + 0.5 - (c.y1 + 0.5);
+    const t = Math.max(0, Math.min(1, (px * dx + py * dy) / len2));
+    return Math.hypot(px - dx * t, py - dy * t) <= c.r1 + (r2 - c.r1) * t;
+  };
+  const set = (x: number, y: number, ref: string) => { if (x >= 0 && y >= 0 && x < s.width && y < s.height) s.data[y * s.width + x] = idx(ref); };
+  for (let y = Math.floor(Math.min(c.y1, c.y2) - rmax); y <= Math.ceil(Math.max(c.y1, c.y2) + rmax); y++) {
+    for (let x = Math.floor(Math.min(c.x1, c.x2) - rmax); x <= Math.ceil(Math.max(c.x1, c.x2) + rmax); x++) {
+      if (!inside(x, y)) continue;
+      const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+      if (edge) { set(x, y, c.outline); continue; }
+      const px = x + 0.5 - (c.x1 + 0.5), py = y + 0.5 - (c.y1 + 0.5);
+      const t = Math.max(0, Math.min(1, (px * dx + py * dy) / len2));
+      const r = c.r1 + (r2 - c.r1) * t;
+      const sd = ((px - dx * t) * nx + (py - dy * t) * ny) / Math.max(r, 1e-6);
+      set(x, y, sd > 0.3 ? c.light : sd < -0.3 ? c.shadow : c.base);
+    }
+  }
+}
+
 const drawShapes = def({
   name: "draw_shapes",
   description:
@@ -1087,7 +1240,7 @@ const drawShapes = def({
     for (const f of list) {
       const s = { width: p.width, height: p.height, data: getCel(p, f, layer.id) };
       for (const sh of i.shapes) {
-        const c = sh.type === "blob" ? 0 : colorIndex(p, sh.color);
+        const c = sh.type === "blob" || sh.type === "capsule" ? 0 : colorIndex(p, sh.color);
         switch (sh.type) {
           case "pixels":
             for (const pt of sh.points) { const [x, y] = Array.isArray(pt) ? pt : [pt.x, pt.y]; draw.setPixel(s, x!, y!, c); }
@@ -1103,6 +1256,9 @@ const drawShapes = def({
             break;
           case "blob":
             drawBlob(s, sh, (ref) => colorIndex(p, ref));
+            break;
+          case "capsule":
+            drawCapsule(s, sh, (ref) => colorIndex(p, ref));
             break;
           case "fill":
             draw.floodFill(s, sh.x, sh.y, c);
@@ -1320,6 +1476,7 @@ const check = def({
       .default("personagem")
       .describe('"efeito" (brilho, chama, fumaça, estrela...) muda de tamanho de propósito e emite luz: não cobra volume, base, largura, contorno nem pillow. "rotacao" (moeda girando, objeto virando): a largura muda sozinha e o centro fica parado: não cobra volume, base, largura nem movimento. "personagem": cobra tudo.'),
     ignore_layers: z.array(z.string()).optional().describe("Camadas a deixar fora das medidas (ex.: faíscas e efeitos que se mexem de propósito, ou o fundo)."),
+    ignore_codes: z.array(z.string()).optional().describe('Códigos de aviso a silenciar porque são INTENCIONAIS (ex.: "furo" para um vão de propósito, "serrilhado", "banding", "pixel_solto"). Os códigos aparecem no relatório de `check --json`; use com parcimônia.'),
     max_cores: z.number().int().min(2).max(255).optional().describe("Limite de cores do ESTILO pedido (ex.: 16 para visual retrô/16-bit). Sem isso o número de cores não é cobrado: estilos detalhados usam muitas."),
     as_image: z.boolean().default(true).describe("Devolve a imagem com os pixels problemáticos marcados em magenta."),
   }),
@@ -1327,6 +1484,7 @@ const check = def({
     const list = resolveFrames(p, i.frames ?? "all");
     const ignore = (i.ignore_layers ?? []).map((n) => findLayer(p, n).id);
     const r = analyze(p, list, { symmetric: i.symmetric, loop: i.loop, tipo: i.tipo, ignoreLayers: ignore, maxColors: i.max_cores });
+    if (i.ignore_codes?.length) r.issues = r.issues.filter((x) => !i.ignore_codes!.includes(x.code));
     const marked = r.issues.find((x) => x.points?.length && x.frame !== undefined);
     const f = marked?.frame ?? list[0];
     const highlight = r.issues.filter((x) => x.frame === f).flatMap((x) => x.points ?? []);
@@ -1405,6 +1563,8 @@ export const COMMANDS = [
   rigPart,
   rigPose,
   rigBake,
+  rigBone,
+  rigWalk,
   drawShapes,
   transform,
   copyCel,
@@ -1477,10 +1637,11 @@ function unknownKeys(schema: z.ZodType, input: unknown): string | null {
 }
 
 /** Erros de validação do Zod em português, com o caminho do campo e o que fazer. */
-function describeIssues(name: string, error: z.ZodError): string {
+function describeIssues(name: string, error: z.ZodError, input?: unknown): string {
   const lines = error.issues.slice(0, 5).map((i) => {
     const where = i.path.length ? i.path.map((q, k) => (typeof q === "number" ? `[${q}]` : k ? `.${String(q)}` : String(q))).join("") : "(entrada)";
-    const missing = i.code === "invalid_type" && /received undefined/.test(i.message);
+    const valueAt = i.path.reduce<unknown>((o, k) => (o && typeof o === "object" ? (o as Record<string | number, unknown>)[k as string | number] : undefined), input);
+    const missing = (i.code === "invalid_type" && /received undefined/.test(i.message)) || (i.code === "invalid_union" && i.path.length > 0 && valueAt === undefined);
     const isFrames = /(^|\.)frames$/.test(where) && i.code === "invalid_union";
     return `- ${where}: ${missing ? "falta este campo obrigatório" : isFrames ? 'formato inválido; "frames" aceita: um número (0), uma lista ([0, 2, 4]), "all" ou um intervalo {"from": 0, "to": 3}' : i.code === "invalid_union" ? "não bate com nenhuma das formas aceitas (veja `anima tools` para as formas possíveis)" : i.message}`;
   });
@@ -1496,7 +1657,7 @@ export function runCommand(p: Project, name: string, input: unknown): CommandRes
   if (unknown) return { ok: false, changed: false, text: `Entrada inválida para ${name}: ${unknown}` };
   const parsed = cmd.schema.safeParse(input ?? {});
   if (!parsed.success) {
-    return { ok: false, changed: false, text: describeIssues(name, parsed.error) };
+    return { ok: false, changed: false, text: describeIssues(name, parsed.error, input) };
   }
   // Executa numa cópia: se o comando falhar no meio, o projeto fica intacto.
   const work = cloneProject(p);
