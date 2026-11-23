@@ -32,8 +32,21 @@ describe("servidor MCP (stdio, como Claude Code/Codex usam)", () => {
     const names = tools.map((t) => t.name);
     expect(names).toEqual(expect.arrayContaining(["open_project", "export_file", "draw_rows", "view", "transform", "check", "reference"]));
     expect(names).not.toContain("export");
+    expect(names).toEqual(expect.arrayContaining(["import_image", "compare_image", "avaliar", "polish", "batch", "habilitar_ferramentas"]));
+    // rig e figura humana ficam escondidos até alguém pedir (poupa tokens)
+    for (const n of ["draw_figure", "rig_create", "rig_pose", "rig_bake"]) expect(names).not.toContain(n);
     expect(client.getInstructions()).toMatch(/Princípios de animação/);
     expect(client.getInstructions()).toMatch(/Anatomia/);
+  });
+
+  it("rig_* e draw_figure: erro útil enquanto desligados; habilitar_ferramentas liga e avisa a lista", async () => {
+    let r = await call("rig_create", { template: "humanoide" });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toMatch(/habilitar_ferramentas/);
+    r = await call("habilitar_ferramentas", { grupo: "rig" });
+    expect(r.isError).toBeFalsy();
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    for (const n of ["draw_figure", "rig_create", "rig_pose", "rig_bake", "rig_walk"]) expect(names).toContain(n);
   });
 
   it("desenha, salva em disco a cada mudança, mostra imagem e exporta GIF", async () => {

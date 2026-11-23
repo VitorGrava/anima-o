@@ -25,6 +25,7 @@ Como usar estas ferramentas (MCP)
 - Cada comando que muda o projeto salva o arquivo na hora. O usuário pode acompanhar ao vivo no navegador com: anima view <arquivo>.
 - Os comandos de desenho (draw_rows, draw_shapes, transform, copy_layer_content) já devolvem o frame editado como grade de texto + imagem + avisos automáticos: leia o retorno e corrija antes de seguir. view faz zoom (region, grid), diff entre frames (compare) e onion skin; check mede e aponta defeitos em todos os frames; reference traz proporções de anatomia e técnicas de pixel art.
 - Para gerar arquivos (GIF, spritesheet PNG, PNG de um frame ou JSON), use export_file. Exporte quando o usuário pedir ou quando o pedido for um arquivo/entrega (GIF, spritesheet); fora disso, não.
+- rig_* e draw_figure ficam ESCONDIDOS por padrão (poupam tokens): chame habilitar_ferramentas só quando o pedido for um humano ou um personagem com esqueleto por ângulos.
 - Ao terminar, diga ao usuário onde estão o projeto e os arquivos exportados.`;
 
 const OpenProject = z.object({
@@ -40,6 +41,10 @@ const OpenProject = z.object({
     .describe("Se o arquivo não existir, cria um projeto novo com estas opções"),
   overwrite: z.boolean().default(false).describe("true: cria um projeto novo mesmo se o arquivo existir (apaga o anterior)"),
 });
+
+/** ferramentas pesadas e raras: ficam fora da lista até alguém pedir (economiza ~7 mil tokens por sessão) */
+export const RIG_TOOLS = ["draw_figure", "rig_create", "rig_part", "rig_pose", "rig_bake", "rig_bone", "rig_walk"];
+const EnableTools = z.object({ grupo: z.enum(["rig", "tudo"]).default("rig").describe('"rig": esqueleto por ossos (rig_*) e draw_figure (humano por ângulos). Chame só quando o pedido for uma figura humana ou um personagem com esqueleto/pose por ângulos.') });
 
 const ImportImage = z.object({
   path: z.string().min(1).describe("PNG a importar (relativo ao diretório atual). WebP/JPG: converta para PNG antes."),
@@ -75,10 +80,16 @@ type Content = { type: "text"; text: string } | { type: "image"; data: string; m
 export function createAnimaServer(store = new ProjectStore()) {
   const server = new Server(
     { name: "anima-o", version: VERSION },
-    { capabilities: { tools: {} }, instructions: SYSTEM_PROMPT + MCP_NOTES },
+    { capabilities: { tools: { listChanged: true } }, instructions: SYSTEM_PROMPT + MCP_NOTES },
   );
 
+  let rigOn = process.env.ANIMA_TOOLS === "all" || process.env.ANIMA_RIG === "1";
   const tools = [
+    {
+      name: "habilitar_ferramentas",
+      description: "Liga o grupo de ferramentas de ESQUELETO (rig_create, rig_part, rig_pose, rig_bake, rig_bone, rig_walk) e de FIGURA HUMANA (draw_figure). Ficam escondidas por padrão para poupar tokens; chame antes de usá-las.",
+      inputSchema: jsonSchemaOf(EnableTools),
+    },
     {
       name: "open_project",
       description: "Abre um projeto .anima.json (ou cria um novo, se não existir). Todos os outros comandos atuam no projeto aberto e salvam nele.",
@@ -103,7 +114,7 @@ export function createAnimaServer(store = new ProjectStore()) {
     ...commandTools(["export"]),
   ];
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: tools.filter((t) => rigOn || !RIG_TOOLS.includes(t.name)) }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: args } = req.params;
@@ -114,6 +125,13 @@ export function createAnimaServer(store = new ProjectStore()) {
         const { created } = await store.open(i.path, i.create, i.overwrite);
         return reply([{ type: "text", text: `${created ? "Projeto criado" : "Projeto aberto"}: ${store.path}\n${describeProject(store.project)}` }]);
       }
+      if (name === "habilitar_ferramentas") {
+        EnableTools.parse(args ?? {});
+        rigOn = true;
+        await server.sendToolListChanged();
+        return reply([{ type: "text", text: `Ferramentas ligadas: ${RIG_TOOLS.join(", ")}. Use "anima tools <nome>" na CLI ou o schema atualizado da lista para ver os parâmetros.` }]);
+      }
+      if (!rigOn && RIG_TOOLS.includes(name)) return reply([{ type: "text", text: `A ferramenta ${name} está desligada por padrão (economiza tokens). Chame habilitar_ferramentas {"grupo":"rig"} primeiro e repita.` }], true);
       const project: Project = await store.current();
       if (name === "import_image") {
         const i = ImportImage.parse(args ?? {});
