@@ -62,7 +62,7 @@ export class ProjectStore {
 
 export async function exportToFile(
   p: Project,
-  o: { format: "gif" | "spritesheet_png" | "frame_png" | "json"; path: string; scale?: number; columns?: number; frame: number; fundo?: string; margem?: number; sombra?: boolean; vaiEVolta?: boolean },
+  o: { format: "gif" | "spritesheet_png" | "frame_png" | "json"; path: string; scale?: number; columns?: number; frame: number; fundo?: string; margem?: number; sombra?: boolean; vaiEVolta?: boolean; meta?: boolean },
   cwd = process.cwd(),
 ): Promise<string> {
   const out = path.resolve(cwd, o.path);
@@ -82,6 +82,10 @@ export async function exportToFile(
     const fw = frames[0].width, fh = frames[0].height, W = fw * cols, H = fh * rows, buf = new Uint8ClampedArray(W * H * 4);
     frames.forEach((fr, k) => { const rgba = presentedToRGBA(fr), ox = (k % cols) * fw, oy = Math.floor(k / cols) * fh; for (let y = 0; y < fh; y++) buf.set(rgba.subarray(y * fw * 4, (y + 1) * fw * 4), ((oy + y) * W + ox) * 4); });
     data = encodePNG(W, H, buf);
+    if (o.meta) {
+      const metaFile = out.replace(/\.png$/i, "") + ".json";
+      await writeFile(metaFile, JSON.stringify({ image: path.basename(out), frameWidth: fw, frameHeight: fh, columns: cols, rows, fps: p.fps, frames: order.map((i, k) => ({ index: i, x: (k % cols) * fw, y: Math.floor(k / cols) * fh, w: fw, h: fh, duration: p.frames[i].duration ?? Math.round(1000 / p.fps) })) }, null, 1));
+    }
   }
   await writeFile(out, data);
   return out;

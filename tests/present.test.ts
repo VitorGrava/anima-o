@@ -39,3 +39,32 @@ describe("apresentação para exportar", () => {
     expect(comFundo.length).toBeGreaterThan(0);
   });
 });
+
+describe("folha com metadados e check cenário", () => {
+  it("--meta grava o JSON da folha com posição e duração de cada frame", async () => {
+    const { exportToFile } = await import("../mcp/store.ts");
+    const { mkdtempSync, readFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+    const dir = mkdtempSync(path.join(tmpdir(), "anima-meta-"));
+    const p = proj();
+    runCommand(p, "add_frames", { count: 2, copy_from: 0 });
+    runCommand(p, "set_frame_timing", { duration_ms: [100, 150, 200] });
+    await exportToFile(p, { format: "spritesheet_png", path: "folha.png", scale: 2, columns: 2, frame: 0, meta: true }, dir);
+    const meta = JSON.parse(readFileSync(path.join(dir, "folha.json"), "utf8"));
+    expect(meta).toMatchObject({ frameWidth: 32, frameHeight: 32, columns: 2, rows: 2 });
+    expect(meta.frames[1]).toMatchObject({ x: 32, y: 0, duration: 150 });
+    expect(meta.frames[2]).toMatchObject({ x: 0, y: 32, duration: 200 });
+  });
+  it("check tipo cenario não acusa emenda do loop nem volume; e blob em canvas pequeno gera aviso", () => {
+    const p = proj();
+    runCommand(p, "add_frames", { count: 2, copy_from: 0 });
+    const r = runCommand(p, "check", { tipo: "cenario", as_image: false });
+    expect(r.ok).toBe(true);
+    expect(r.text).not.toMatch(/Emenda do loop/);
+    const q = createProject({ width: 16, height: 16 });
+    runCommand(q, "set_palette", { colors: [{ key: "a", hex: "#d84a3a", name: "a" }, { key: "b", hex: "#3a6ad8", name: "b" }, { key: "c", hex: "#fff0c0", name: "c" }, { key: "d", hex: "#7a2a22", name: "d" }] });
+    const w = runCommand(q, "draw_shapes", { shapes: [{ type: "blob", x: 2, y: 2, w: 10, h: 10, outline: "d", base: "a", light: "c", shadow: "b" }] });
+    expect(w.text).toMatch(/blob\/capsule geram contorno grosso/);
+  });
+});

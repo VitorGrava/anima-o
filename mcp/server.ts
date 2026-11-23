@@ -71,6 +71,7 @@ const ExportFile = z.object({
   margem: z.number().int().min(0).max(64).optional().describe("Margem em volta, em pixels do canvas"),
   sombra: z.boolean().optional().describe("Sombra elíptica no chão sob a figura"),
   vai_e_volta: z.boolean().optional().describe("GIF/folha em ida e volta (0..n-1..1)"),
+  meta: z.boolean().optional().describe("spritesheet_png: grava também <arquivo>.json com a posição, o tamanho e a duração de cada frame (para engines de jogo)"),
   columns: z.number().int().min(1).max(128).optional().describe("spritesheet_png: colunas (padrão: todos em uma linha)"),
   frame: z.number().int().min(0).default(0).describe("frame_png: qual frame"),
 });
@@ -153,7 +154,7 @@ export function createAnimaServer(store = new ProjectStore()) {
       }
       if (name === "export_file") {
         const i = ExportFile.parse(args ?? {});
-        const out = await exportToFile(project, { ...i, vaiEVolta: i.vai_e_volta });
+        const out = await exportToFile(project, { ...i, vaiEVolta: i.vai_e_volta, meta: i.meta });
         return reply([{ type: "text", text: `Exportado: ${out}` }]);
       }
       const r = runCommand(project, name, args ?? {});

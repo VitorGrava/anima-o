@@ -1454,7 +1454,8 @@ const drawShapes = def({
         }
       }
     }
-    return result(p, `${i.shapes.length} forma(s) desenhada(s) em "${layer.name}", ${fmtList(list)}.`, list, i.preview);
+    const thick = Math.max(p.width, p.height) <= 48 && i.shapes.some((sh) => sh.type === "blob" || sh.type === "capsule") ? "\nAviso: blob/capsule geram contorno grosso e volumes inchados em canvas pequeno (≤ 48 px). Para sprites assim desenhe com draw_rows (pixel a pixel, contorno=seletivo) e use blob/capsule só em rascunho." : "";
+    return result(p, `${i.shapes.length} forma(s) desenhada(s) em "${layer.name}", ${fmtList(list)}.${thick}`, list, i.preview);
   },
 });
 
@@ -1964,9 +1965,9 @@ const check = def({
     symmetric: z.boolean().default(false).describe("true: o sprite deveria ser simétrico (de frente/costas); aponta pixels sem par no lado oposto."),
     loop: z.boolean().default(true).describe("Confere também a transição do último para o primeiro frame."),
     tipo: z
-      .enum(["personagem", "efeito", "rotacao"])
+      .enum(["personagem", "efeito", "rotacao", "cenario"])
       .default("personagem")
-      .describe('"efeito" (brilho, chama, fumaça, estrela...) muda de tamanho de propósito e emite luz: não cobra volume, base, largura, contorno nem pillow. "rotacao" (moeda girando, objeto virando): a largura muda sozinha e o centro fica parado: não cobra volume, base, largura nem movimento. "personagem": cobra tudo.'),
+      .describe('"cenario" (paisagem/fundo animado com fumaça, água, estrelas): não cobra volume, base, largura, movimento, contorno nem a emenda do loop (elementos que recomeçam, como a fumaça, não são defeito); cobra só os defeitos de arte. "efeito" (brilho, chama, fumaça, estrela...) muda de tamanho de propósito e emite luz: não cobra volume, base, largura, contorno nem pillow. "rotacao" (moeda girando, objeto virando): a largura muda sozinha e o centro fica parado: não cobra volume, base, largura nem movimento. "personagem": cobra tudo.'),
     ignore_layers: z.array(z.string()).optional().describe("Camadas a deixar fora das medidas (ex.: faíscas e efeitos que se mexem de propósito, ou o fundo)."),
     ignore_codes: z.array(z.string()).optional().describe('Códigos de aviso a silenciar porque são INTENCIONAIS (ex.: "furo" para um vão de propósito, "serrilhado", "banding", "pixel_solto"). Os códigos aparecem no relatório de `check --json`; use com parcimônia.'),
     max_cores: z.number().int().min(2).max(255).optional().describe("Limite de cores do ESTILO pedido (ex.: 16 para visual retrô/16-bit). Sem isso o número de cores não é cobrado: estilos detalhados usam muitas."),
@@ -1975,7 +1976,7 @@ const check = def({
   run(p, i) {
     const list = resolveFrames(p, i.frames ?? "all");
     const ignore = (i.ignore_layers ?? []).map((n) => findLayer(p, n).id);
-    const r = analyze(p, list, { symmetric: i.symmetric, loop: i.loop, tipo: i.tipo, ignoreLayers: ignore, maxColors: i.max_cores });
+    const r = analyze(p, list, { symmetric: i.symmetric, loop: i.tipo === "cenario" ? false : i.loop, tipo: i.tipo === "cenario" ? "efeito" : i.tipo, ignoreLayers: ignore, maxColors: i.max_cores });
     if (i.ignore_codes?.length) r.issues = r.issues.filter((x) => !i.ignore_codes!.includes(x.code));
     const marked = r.issues.find((x) => x.points?.length && x.frame !== undefined);
     const f = marked?.frame ?? list[0];
