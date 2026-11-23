@@ -11,3 +11,7 @@
 | r06 | 92 / visual melhor | MELHOR: 3 planos de montanha com névoa crescente (longe rosado, perto escuro), mais profundidade e harmonia com o céu | `transform haze` |
 | r07 | 92 / visual melhor | MELHOR: protagonista (abelha do projeto abelha32), pinheiro grande em 1º plano, vaga-lumes; defeitos: vaga-lumes grandes, abelha sobre a água | alfabeto de chaves de cor ampliado (80 → ~270), camadas até 32 |
 | r08 | 95 | MELHOR: abelha no campo, vaga-lumes pequenos, pinheiro com luz de borda e agulhas, vinheta em dither nos cantos, paleta enxuta | `reduce_colors` (quantização por fusão), check `paleta_duplicada` |
+| r09 | 95 | MELHOR: cena ANIMADA de 8 frames (estrelas cintilam, fumaça sobe em ciclo, brilho da água muda, abelha bate asa e flutua, vaga-lumes em órbita); vinheta ainda pesada | scatter `variar_por_frame`; abelha por frame do projeto abelha32 |
+| r10 (final) | 92 (régua) / melhor visual | FINAL: vinheta leve e paleta sem duplicata. A nota caiu 3 pontos porque o dithering pesado da vinheta (r09) quebrava as áreas lisas do céu e a régua `areas_chapadas` contou isso como textura; escolhida pelo julgamento visual (borda limpa, menos peso nos cantos) | — |
+
+Resumo: 79 → 86 → 92 → 92 → 92(+reflexo) → 92(+névoa) → 92(+protagonista) → 95 → 95 → 92*. Um retrocesso real (r05a, reflexo com dither desde o começo) foi revertido e refeito. Limite honesto da régua: satura perto de 92–95 e não vê reflexo, névoa nem composição; as decisões das rodadas 4–7 e 10 foram visuais.

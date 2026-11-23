@@ -21,6 +21,7 @@ export const REFERENCE_TOPICS = [
   "tamanhos",
   "estudo",
   "circulos",
+  "cenario",
 ] as const;
 export type ReferenceTopic = (typeof REFERENCE_TOPICS)[number];
 
@@ -158,7 +159,21 @@ function proportions(height: number, style: NonNullable<ReferenceOptions["style"
 
 // ---------- tópicos de texto ----------
 
+const CENARIO = [
+  "Receita de CENÁRIO / PAISAGEM (testada numa cena 320x180 que foi de 79 a 95 no avaliar tipo=cena). Tamanho: cenas inteiras funcionam bem entre 160 e 320 px de largura; 10–12 fps se animar.",
+  "1. Camadas de trás para frente, uma por plano: ceu, estrelas, nuvens, montanhas3 (longe), montanhas2, montanhas1 (perto), lago, reflexo, floresta, campo, construções, detalhes, sombras, personagem, efeitos (fumaça, vaga-lumes), primeiro_plano, vinheta.",
+  "2. Céu e água: NUNCA faixas retas. draw_shapes type=gradient com a rampa de cima para baixo e dither bayer4 (suavidade 0.6–0.75, ondas 2). Degradê com dither fraco (< 10%) vira poeira: a engine já arredonda isso.",
+  "3. Sol e brilhos: gradient direction=radial; termine a rampa com a cor \".\" (transparente) para o brilho se DISSOLVER no céu em vez de recortar um disco. Reflexo do sol na água: o mesmo radial + scatter forma=onda nas cores do sol.",
+  "4. Relevo: polygon com o contorno do terreno (deslocamento do ponto médio, rugosidade 0.55) + os cantos de baixo. Um polígono por plano; depois transform op=haze em cada plano com força crescente com a distância (longe 0.4, meio 0.2, perto 0.05) na cor do horizonte: é a perspectiva atmosférica, a coisa que mais dá profundidade.",
+  "5. Reflexo na água: transform op=reflect (fonte = montanhas e floresta, y = margem, alto curto, onda 1–1.6, mistura 0.5): sólido e só o final dissolve; reflexo longo demais e pontilhado enche o lago de ruído.",
+  "6. Textura: draw_shapes type=scatter (grama forma=tufo, flores/estrelas forma=cruz, água forma=onda, pedras forma=traco) com distancia >= 3 e seed diferente por plano; use evitar:[camadas] para não cair sobre construções e only:cor para ficar dentro de um plano. Planos grandes e lisos ('papel recortado') são o defeito nº 1: o avaliar acusa como areas_chapadas.",
+  "7. Primeiro plano que ENQUADRA (árvore grande de silhueta, capim escuro) cria profundidade; vinheta leve (radial com \".\" no centro e cor escura na ponta, dither) concentra o olhar. Protagonista pequeno e legível, com sombra no chão (radial dissolvendo).",
+  "8. Cor: poucos matizes por plano, sombras mais frias e luzes mais quentes; o céu dá a cor do ar para todo o resto (haze, reflexo e sombras puxam para ela). Feche com reduce_colors (ex.: 90–110 cores numa cena rica) e avaliar tipo=cena.",
+  "9. Animar cenário: poucos loops independentes de períodos diferentes (fumaça sobe em ciclo de 8 frames, brilho da água com scatter variar_por_frame, estrelas em grupos de fases, vaga-lumes em órbita). Nada parado por mais de 1 s; o aviso de emenda do loop do check é falso positivo para elementos que recomeçam (fumaça).",
+].join("\n");
+
 const TEXT: Record<Exclude<ReferenceTopic, "proporcoes" | "rampa" | "paletas" | "circulos">, string> = {
+  cenario: CENARIO,
   principios: `Os 12 princípios da animação (Disney: Frank Thomas, Ollie Johnston e John Lounsbery, anos 1930) e como aplicá-los nesta engine.
 Definições a partir do artigo "Os 12 princípios da animação" (Alura): https://www.alura.com.br/artigos/12-principios-animacao
 O comando check imprime um painel (✓ / ! / –) dos que dá para medir; os outros pedem o seu olho.
