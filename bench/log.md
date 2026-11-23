@@ -172,3 +172,12 @@ Dois agentes novos, só com o pedido e o guia, usaram `draw_figure` por conta pr
 - Feito (cada item com teste): `import_image`/`anima import` (PNG → grade, detecta o pixel, fundo, median cut; decodePNG), `compare_image`/`anima compare` (silhueta, erro de cor, painel), exportação bonita (escala automática, `--fundo --margem --sombra --vai-e-volta --meta`, aviso de fundo que engole o contorno), MCP com rig/draw_figure escondidos (−7k tokens/sessão; `habilitar_ferramentas`), prompt mais enxuto, `draw_rows contorno=seletivo`, `reference processo` (o fluxo que funcionou), `check tipo=cenario` + painel de princípios compacto, `curve` (espessura variável), `transform shift dx_lista/dy_lista`, aviso de blob/capsule em canvas pequeno, paleta vazia explicada, `tools` mostra as formas (oneOf), uso por comando.
 - Teste com agentes comuns (Sonnet, só com guia e CLAUDE.md): gato 32x32 animado = 7/10 e poção 16x16 = 7/10 em ~2 min cada; atritos relatados viraram os itens acima.
 - Pendências conhecidas: `shade` que siga a forma (volume interno), timing automático de idle, `scene`/`item` como comando único, gerador de dados sintéticos para o ML (adiado a pedido).
+
+### Teste de 4 agentes comuns (Sonnet, só com guia e CLAUDE.md), tarefas novas
+| tarefa | nota do agente | o que ficou fraco | atritos que viraram correção |
+|---|---|---|---|
+| gato 32x32 animado (6 frames) | 7 | rabo em tubo, miolo chapado | painel de princípios compacto, `shift` por frame, `curve`, contagem de pixels |
+| poção 16x16 (4 frames) | 7 | contorno some em fundo escuro | aviso de fundo escuro, uso por comando, `tools` mostra as formas |
+| floresta 160x90 | 7 | névoa em faixa dura, pinheiros repetidos | `terrain`, `forest`, `only` composto, aviso quando scatter não desenha, `haze` com faixa/perfil, `reflect dissolver` |
+| cavaleiro 64x64 andando (rig) | 6,5 | torso em bloco, braços quase parados | ossos travados no rig_walk, `rig_info`, aviso de osso novo, `cabeca_reta`, período do chão correto |
+- Pendente (maior): arte do rig por faixa de ângulo (variantes pré-desenhadas) para escudo/cabeça não borrarem; `shade` que siga o volume; preset `cenario_paisagem` em um comando.
