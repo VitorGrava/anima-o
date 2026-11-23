@@ -398,11 +398,23 @@ const setTiming = def({
   schema: z.object({
     frames: framesSel.optional().describe('Padrão: "all"'),
     duration_ms: z
-      .union([z.number().int().min(10).max(10000), z.null(), z.array(z.number().int().min(10).max(10000)).min(1)])
-      .describe("Um número (todos os frames escolhidos), null (volta ao fps global) ou uma LISTA com uma duração por frame, na mesma ordem de `frames`. Ex.: frames \"all\" e [120, 90, 100, 90]."),
+      .union([z.number().int().min(10).max(10000), z.null(), z.literal("auto"), z.array(z.number().int().min(10).max(10000)).min(1)])
+      .describe("\"auto\" mede o movimento entre frames: pouco movimento (extremos, poses seguradas) fica mais tempo, muito movimento fica mais rápido (slow in/slow out), em torno do fps do projeto. Ou um número (todos os frames escolhidos), null (volta ao fps global) ou uma LISTA com uma duração por frame, na mesma ordem de `frames`. Ex.: frames \"all\" e [120, 90, 100, 90]."),
   }),
   run(p, i) {
     const list = resolveFrames(p, i.frames ?? "all");
+    if (i.duration_ms === "auto") {
+      if (p.frames.length < 3) throw new Error("auto precisa de pelo menos 3 frames.");
+      const n = p.frames.length, base = 1000 / p.fps;
+      const flats = p.frames.map((_, k) => flattenFrame(p, k));
+      const diff = (a: number, b: number) => { let d = 0; for (let k = 0; k < flats[a].length; k++) if (flats[a][k] !== flats[b][k]) d++; return d; };
+      // movimento em torno de cada frame = média das mudanças de/para os vizinhos (ciclo fecha)
+      const mv = flats.map((_, k) => (diff(k, (k + n - 1) % n) + diff(k, (k + 1) % n)) / 2);
+      const mean = mv.reduce((a, b) => a + b, 0) / n;
+      if (mean === 0) throw new Error("os frames são idênticos: nada a temporizar.");
+      for (const j of list) { const r = Math.min(1.8, Math.max(0.65, 1.5 - mv[j] / mean * 0.5)); p.frames[j].duration = Math.round(base * r / 10) * 10 || 10; }
+      return { changed: true, text: `Tempo automático (slow in/out): ${list.map((j) => `${j}:${p.frames[j].duration}ms`).join(" ")}.` };
+    }
     if (Array.isArray(i.duration_ms)) {
       if (i.duration_ms.length !== list.length) throw new Error(`A lista tem ${i.duration_ms.length} duração(ões), mas ${list.length} frame(s) foram escolhidos (${fmtList(list)}). Mande uma duração por frame.`);
       list.forEach((j, k) => { p.frames[j].duration = (i.duration_ms as number[])[k]; });

@@ -184,3 +184,20 @@ describe("view com modos de conferência", () => {
     expect(r.images?.mode).toBe("luz_sombra");
   });
 });
+
+describe("set_frame_timing auto", () => {
+  it("segura frames de pouco movimento e acelera os de muito movimento", () => {
+    const p = createProject({ width: 16, height: 8, fps: 10 });
+    runCommand(p, "set_palette", { colors: [{ key: "r", hex: "#d84a3a", name: "r" }] });
+    runCommand(p, "add_frames", { count: 3 });
+    runCommand(p, "draw_shapes", { frames: 0, shapes: [{ type: "rect", x: 0, y: 0, w: 2, h: 2, color: "r", fill: true }] });
+    runCommand(p, "draw_shapes", { frames: 1, shapes: [{ type: "rect", x: 1, y: 0, w: 2, h: 2, color: "r", fill: true }] });
+    runCommand(p, "draw_shapes", { frames: 2, shapes: [{ type: "rect", x: 8, y: 4, w: 4, h: 4, color: "r", fill: true }] });
+    runCommand(p, "draw_shapes", { frames: 3, shapes: [{ type: "rect", x: 1, y: 0, w: 2, h: 2, color: "r", fill: true }] });
+    const r = runCommand(p, "set_frame_timing", { duration_ms: "auto" });
+    expect(r.ok, r.text).toBe(true);
+    const d = p.frames.map((f) => f.duration ?? 0);
+    expect(Math.min(...d)).toBeGreaterThanOrEqual(60);
+    expect(d[2]).toBeLessThan(d[0]);          // o frame do salto grande é o mais rápido
+  });
+});
