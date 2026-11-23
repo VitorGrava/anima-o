@@ -2,3 +2,8 @@ node_modules/
 dist/
 .env
 *.log
+
+# projetos de cena gerados (12 MB cada): regenere com examples/cena/run.sh
+examples/cena/cena.anima.json
+examples/cena/final/cena.anima.json
+examples/cena/cmds.json
