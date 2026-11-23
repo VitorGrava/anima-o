@@ -105,6 +105,19 @@ const USAGE = `anima — engine de animação pixel art
 // `anima run ... | head` fecha o pipe no meio da saída: isso não pode derrubar o processo antes de salvar o projeto
 process.stdout.on("error", (e: NodeJS.ErrnoException) => { if (e.code !== "EPIPE") throw e; });
 
+/** Par de frames mais distinto + imagem de diferença (movimento de 1 px não aparece numa folha de frames). */
+async function writeDiff(p: Project, diffPath: string): Promise<[number, number]> {
+  const flats = p.frames.map((_, k) => flattenFrame(p, k));
+  let best: [number, number] = [0, 1], bestD = -1;
+  for (let a = 0; a < flats.length; a++) for (let b = a + 1; b < flats.length; b++) {
+    let d = 0; for (let i = 0; i < flats[a].length; i++) if (flats[a][i] !== flats[b][i]) d++;
+    if (d > bestD) { bestD = d; best = [a, b]; }
+  }
+  const r = runCommand(p, "view", { frames: best[0], compare: { a: best[0], b: best[1] } });
+  await saveImages(p, r, diffPath);
+  return best;
+}
+
 export async function main(argv: string[]): Promise<number> {
   // flags aceitam hífen ou sublinhado (--max-cores ou --max_cores): o nome do parâmetro nas ferramentas usa sublinhado
   const args = argv.map((a) => (a.startsWith("--") ? a.replace(/_/g, "-") : a));
@@ -295,6 +308,8 @@ export async function main(argv: string[]): Promise<number> {
       await exportToFile(p, { format: "frame_png", path: png, frame });
       let sheet = "";
       if (p.frames.length > 1) { sheet = `${base}.r${n}-folha.png`; await exportToFile(p, { format: "spritesheet_png", path: sheet, frame: 0, scale: undefined, columns: Math.min(p.frames.length, 8) }); }
+      let diffTxt = "";
+      if (p.frames.length > 1) { const dp = `${base}.r${n}-diff.png`; const best = await writeDiff(p, dp); diffTxt = `\nDiff dos frames mais distintos (${best[0]}↔${best[1]}; amarelo = textura trocando de cor = boiling): ${path.resolve(dp)}`; }
       await writeFile(snap, JSON.stringify(toJSON(p)));
       const av = evaluateBeauty(p, [frame]);
       const chk = runCommand(p, "check", { as_image: false, painel_completo: false });
@@ -312,7 +327,7 @@ export async function main(argv: string[]): Promise<number> {
       await writeFile(histFile, JSON.stringify(hist, null, 1));
       const delta = prev ? `${av.score - prev.avaliar >= 0 ? "+" : ""}${av.score - prev.avaliar} contra a rodada ${prev.n}` : "primeira rodada";
       const piorou = prev && ((iou !== undefined && prev.iou !== undefined && iou < prev.iou - 0.02) || (nota && prev.nota !== undefined && Number(nota) < prev.nota)) ? `\nATENÇÃO: PIOROU em relação à rodada ${prev.n}. Restaure com: anima restaurar ${file} ${prev.n}` : "";
-      console.log(`Rodada ${n}: avaliar ${av.score}/100 (${delta}; mede só defeitos mecânicos), check ${cnt ? `${cnt[1]} erro(s) e ${cnt[2]} aviso(s)` : "sem resumo"}.${nota ? ` Nota do crítico: ${nota}/10${prev?.nota !== undefined ? ` (antes ${prev.nota})` : ""}.` : ""}${cmpTxt}${piorou}\nImagem: ${path.resolve(png)}${sheet ? `\nFolha: ${path.resolve(sheet)}` : ""}\nPiores achados do avaliar: ${av.findings.slice(0, 3).map((x) => `${x.code} — ${String(x.message).slice(0, 140)}`).join(" | ") || "nenhum"}.\nAgora: (1) LEIA a imagem e compare com a referência; (2) liste os 5 piores defeitos; (3) corrija SÓ isso; (4) rode anima rodada de novo${nota ? "" : " (use --nota N com a nota do crítico independente: anima critico gera o pedido)"}. Voltar: anima restaurar ${file} <n>.`);
+      console.log(`Rodada ${n}: avaliar ${av.score}/100 (${delta}; mede só defeitos mecânicos), check ${cnt ? `${cnt[1]} erro(s) e ${cnt[2]} aviso(s)` : "sem resumo"}.${nota ? ` Nota do crítico: ${nota}/10${prev?.nota !== undefined ? ` (antes ${prev.nota})` : ""}.` : ""}${cmpTxt}${piorou}\nImagem: ${path.resolve(png)}${sheet ? `\nFolha: ${path.resolve(sheet)}` : ""}${diffTxt}\nPiores achados do avaliar: ${av.findings.slice(0, 3).map((x) => `${x.code} — ${String(x.message).slice(0, 140)}`).join(" | ") || "nenhum"}.\nAgora: (1) LEIA a imagem e compare com a referência; (2) liste os 5 piores defeitos; (3) corrija SÓ isso; (4) rode anima rodada de novo${nota ? "" : " (use --nota N com a nota do crítico independente: anima critico gera o pedido)"}. Voltar: anima restaurar ${file} <n>.`);
       return 0;
     }
     case "restaurar": {
@@ -340,11 +355,7 @@ export async function main(argv: string[]): Promise<number> {
         const base = out.replace(/\.critico\.png$/, "");
         const sheetP = `${base}.critico-folha.png`, diffP = `${base}.critico-diff.png`;
         await exportToFile(p, { format: "spritesheet_png", path: sheetP, frame: 0, scale: undefined, columns: Math.min(p.frames.length, 8) });
-        const flats = p.frames.map((_, k) => flattenFrame(p, k));
-        let best = [0, 1], bestD = -1;
-        for (let a2 = 0; a2 < flats.length; a2++) for (let b2 = a2 + 1; b2 < flats.length; b2++) { let d = 0; for (let i = 0; i < flats[a2].length; i++) if (flats[a2][i] !== flats[b2][i]) d++; if (d > bestD) { bestD = d; best = [a2, b2]; } }
-        const r = runCommand(p, "view", { frames: best[0], compare: { a: best[0], b: best[1] } });
-        await saveImages(p, r, diffP);
+        const best = await writeDiff(p, diffP);
         animaTxt = ` Para a ANIMAÇÃO leia também a folha de todos os frames ${path.resolve(sheetP)} e o diff entre os frames ${best[0]} e ${best[1]} (os mais distintos: vermelho = sumiu, verde = apareceu, amarelo = trocou, cinza = igual) ${path.resolve(diffP)}: movimentos de 1 px não aparecem na folha mas aparecem no diff; avalie amplitude, antecipação, atraso entre partes (follow through) e se o ciclo fecha. Dê nota separada para a animação.`;
       }
       console.log(`Imagem para a crítica: ${abs}\n\nPEDIDO PRONTO (cole em um agente independente, sem o seu contexto; ele só precisa da ferramenta de leitura de imagens):\n---\nVocê é um diretor de arte de pixel art, rigoroso. Leia (Read) a imagem ${abs}${ref ? ` e compare com a REFERÊNCIA profissional ${path.resolve(ref)}` : ""}: um sprite/cena ${p.width}x${p.height} px ampliado. Responda em português, curto e específico: 1) nota 0-10${ref ? " do sprite e da referência (para calibrar)" : ""}; 2) os 5 piores defeitos, cada um com a região (x0..x1,y0..y1 em coordenadas do canvas = coordenada da imagem / escala) e a correção concreta em pixels; 3) o que NÃO mexer; 4) a maior diferença para o nível de um jogo comercial. ${animaTxt} Use SOMENTE Read nesses arquivos.\n---\nDepois: corrija só o que ele apontar, compare com a versão anterior (às cegas, se puder) e descarte o que piorar.`);
