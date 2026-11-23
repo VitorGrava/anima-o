@@ -11,7 +11,7 @@ import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } fro
 import * as draw from "./draw.ts";
 import { autoShade, autoShadeVolume, cleanCorners, detailColors, selectiveOutline } from "./polish.ts";
 import { drawBox3d, drawCurve, drawForest, drawGradient, drawTerrain, fillPolygon, scatter } from "./paint.ts";
-import { BG_LAYER, evaluateBeauty, formatCritique, unionBox } from "./critique.ts";
+import { BG_LAYER, EFFECT_LAYER, evaluateBeauty, formatCritique, unionBox } from "./critique.ts";
 import { REFERENCE_TOPICS, bodyProportions, darkOutline, makeRamp, reference } from "./reference.ts";
 import { HUMANOID_BONES, quadrupedBones, walkPoses, boneSegments, capsuleArt, clampAngles, humanoidAngles, humanoidBones, groundedRoot, ellipseArt, renderRigFrame } from "./skeleton.ts";
 import { DEFAULT_POSE, FIGURE_LAYERS, PRESETS as POSE_PRESETS, WALK_CYCLE, clampPose, lerpPose, renderFigure, swapSides, type Pose, type Ramp } from "./rig.ts";
@@ -1977,7 +1977,7 @@ const polish = def({
     const list = resolveFrames(p, i.frames ?? "all");
     const before = evaluateBeauty(p, list);
     const log: string[] = [];
-    const figureLayers = p.layers.filter((l) => l.visible && !BG_LAYER.test(l.name) && l.name.toLowerCase() !== "contorno");
+    const figureLayers = p.layers.filter((l) => l.visible && !BG_LAYER.test(l.name) && !EFFECT_LAYER.test(l.name) && l.name.toLowerCase() !== "contorno");
     const lum = paletteLum(p);
     // 1) preto puro -> tom escuro do material dominante
     const usage = new Map<number, number>();

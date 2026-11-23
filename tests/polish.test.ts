@@ -186,3 +186,18 @@ describe("polish forma volume", () => {
     expect(used(p).size).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe("polish ignora camadas de efeito", () => {
+  it("a sombra no chão e a aura não ganham contorno", () => {
+    const p = createProject({ width: 20, height: 20 });
+    ok(p, "set_palette", { colors: [{ key: "r", hex: "#d84a3a", name: "vermelho" }, { key: "k", hex: "#665577", name: "cinza" }] });
+    ok(p, "add_layer", { name: "Sombra", position: "bottom" });
+    ok(p, "add_layer", { name: "Corpo" });
+    ok(p, "draw_shapes", { layer: "Sombra", shapes: [{ type: "rect", x: 4, y: 17, w: 12, h: 2, color: "k", fill: true }] });
+    ok(p, "draw_shapes", { layer: "Corpo", shapes: [{ type: "ellipse", x: 4, y: 3, w: 12, h: 12, color: "r", fill: true }] });
+    ok(p, "polish", { contorno: "seletivo" });
+    const sombra = p.layers.find((l) => l.name === "Sombra")!;
+    const cnt = Array.from(p.frames[0].cels[sombra.id]).filter((v) => v).length;
+    expect(cnt).toBe(24);                                  // não mudou (nem sombreada)
+  });
+});

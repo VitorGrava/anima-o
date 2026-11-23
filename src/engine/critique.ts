@@ -18,6 +18,8 @@ export interface Critique { score: number; scores: Record<Category, number>; fin
 const WEIGHT = { erro: 30, aviso: 18, info: 6 } as const;
 const CAT_WEIGHT: Record<Category, number> = { paradigmas: 0.3, cor: 0.3, forma: 0.2, composicao: 0.2 };
 export const BG_LAYER = /fundo|background|cen[aá]rio|ch[aã]o|sombra-?no-?ch/i;
+/** Camadas de efeito (sombra projetada, aura, brilho, partículas): não ganham sombreamento nem contorno do polish. */
+export const EFFECT_LAYER = /^(sombra|shadow)\b|aura|glow|brilho|sparkle|part[ií]cula|^fx\b|efeito/i;
 
 /** Mapeia os códigos do `check` de arte para categoria + conserto. */
 const FROM_CHECK: Record<string, { category: Category; fix: string }> = {
