@@ -117,3 +117,24 @@ describe("reduce_colors", () => {
     expect(p.palette.some((c) => c.name === "contorno")).toBe(true);
   });
 });
+
+describe("draw_rows contorno seletivo e tópico processo", () => {
+  it("contorna a arte da camada na cor escura do material vizinho, sem escrever o contorno", () => {
+    const p = createProject({ width: 12, height: 12 });
+    ok(p, "set_palette", { colors: [{ key: "r", hex: "#d84a3a", name: "vermelho" }, { key: "b", hex: "#3a6ad8", name: "azul" }] });
+    ok(p, "draw_rows", { x: 3, y: 3, rows: ["rrr", "rrr", "bbb"], contorno: "seletivo" });
+    const c = p.frames[0].cels[p.layers[0].id];
+    expect(c[2 * 12 + 4]).not.toBe(0);                    // contorno acima da arte
+    expect(c[3 * 12 + 2]).not.toBe(0);                    // contorno à esquerda
+    expect(c[6 * 12 + 4]).not.toBe(0);                    // e abaixo
+    const hex = (i: number) => p.palette[c[i] - 1].hex;
+    expect(hex(2 * 12 + 4)).not.toBe(hex(6 * 12 + 4));    // acima do vermelho ≠ abaixo do azul: cor por material
+    expect(c[0]).toBe(0);                                  // longe da arte: vazio
+  });
+  it("reference processo existe e traz as regras que funcionaram", () => {
+    const r = runCommand(createProject(), "reference", { topic: "processo" });
+    expect(r.ok).toBe(true);
+    expect(r.text).toMatch(/OLHOS NOVOS/);
+    expect(r.text).toMatch(/contorno=.seletivo./);
+  });
+});

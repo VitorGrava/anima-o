@@ -436,6 +436,10 @@ const drawRowsCmd = def({
       .boolean()
       .default(true)
       .describe('true: "." apaga o pixel. false: "." também preserva o pixel (útil para sobrepor).'),
+    contorno: z
+      .enum(["nenhum", "seletivo"])
+      .default("nenhum")
+      .describe('"seletivo": depois de escrever, cria o contorno de 1 px em volta da arte DESTA camada, na cor escura de cada material vizinho (mais clara no lado da luz). Escreva o corpo SEM contorno e deixe a engine contornar: sai mais limpo que contornar à mão e a silhueta fica uniforme.'),
     preview: previewFlag,
   }),
   run(p, i) {
@@ -443,7 +447,11 @@ const drawRowsCmd = def({
     const list = resolveFrames(p, i.frames);
     let n = 0;
     const rows = i.mirror === "horizontal" ? i.rows.map((r) => r + [...r].slice(0, -1).reverse().join("")) : i.rows;
-    for (const f of list) n = drawRows(p, getCel(p, f, layer.id), rows, i.x, i.y, i.dot_is_transparent);
+    for (const f of list) {
+      const cel = getCel(p, f, layer.id);
+      n = drawRows(p, cel, rows, i.x, i.y, i.dot_is_transparent);
+      if (i.contorno === "seletivo") selectiveOutline(cel.slice(), cel, p.width, p.height, (c, lit) => selOutIndex(p, c, lit), paletteLum(p));
+    }
     return result(p, `${n} pixels escritos em "${layer.name}", ${fmtList(list)}.${widthWarning(rows)}`, list, i.preview);
   },
 });

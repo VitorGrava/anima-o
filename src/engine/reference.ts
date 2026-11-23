@@ -22,6 +22,7 @@ export const REFERENCE_TOPICS = [
   "estudo",
   "circulos",
   "cenario",
+  "processo",
 ] as const;
 export type ReferenceTopic = (typeof REFERENCE_TOPICS)[number];
 
@@ -173,8 +174,20 @@ const CENARIO = [
   "9. Animar cenário: poucos loops independentes de períodos diferentes (fumaça sobe em ciclo de 8 frames, brilho da água com scatter variar_por_frame, estrelas em grupos de fases, vaga-lumes em órbita). Nada parado por mais de 1 s; o aviso de emenda do loop do check é falso positivo para elementos que recomeçam (fumaça).",
 ].join("\n");
 
+const PROCESSO = [
+  "PROCESSO que produziu a melhor arte até agora (esqueleto 32x32/64x64: de 4/10 para 7/10 com um crítico independente; referências profissionais valem ~8):",
+  "1. ESTUDE referências reais ANTES de desenhar (importe um PNG com import_image/anima import e olhe de perto): pose e peso (3/4, joelhos dobrados, arma cruzando a silhueta), proporção da cabeça, quantas cores, onde está o único acento de cor. Liste 5 características concretas para copiar.",
+  "2. Monte as linhas por SCRIPT com validador de largura (cada linha com o mesmo número de colunas); desenhe ASSIMÉTRICO quando a pose pedir (espelhar uma metade só dá pose dura e frontal). Escreva o corpo SEM contorno e use draw_rows contorno=\"seletivo\" (ou transform outline seletivo) no fim.",
+  "3. RODADAS: a cada uma, exporte o PNG ampliado, LEIA e liste os 5 piores defeitos contra a referência (forma do crânio/cabeça, pose, tronco, membros, cor, contorno, silhueta); corrija SÓ isso; compare com a rodada anterior: se piorou, descarte e volte. Mínimo 5 rodadas em arte original.",
+  "4. OLHOS NOVOS: peça a um agente independente que veja a imagem (e as referências) e dê nota, os piores defeitos com região e a correção em pixels; ele não herda o seu viés de 'está bom'. Comparar duas versões às cegas (sem dizer qual é a nova) é o teste mais honesto.",
+  "5. Faça o tamanho pequeno primeiro e só depois o grande (mesmo desenho, mais detalhe: costuras, rachaduras, fivelas, juntas). Em 16–32 px nada de gerador automático de volumes (blob/capsule dão contorno grosso): desenhe pixel a pixel.",
+  "6. Antes de entregar: avaliar (nota e achados), check, e a imagem em tamanho real e ampliada. Diga o que ainda está pior que a referência; não diga 'está bom' sem comparar.",
+  "Erros comuns que derrubam a nota: pose frontal simétrica e dura; cabeça-caixa; tronco em bloco sem vazios; membros grossos como tubos; cor saturada demais e vários acentos brigando; espada/arma colada ao corpo sem contraste; contorno preto grosso e uniforme.",
+].join("\n");
+
 const TEXT: Record<Exclude<ReferenceTopic, "proporcoes" | "rampa" | "paletas" | "circulos">, string> = {
   cenario: CENARIO,
+  processo: PROCESSO,
   principios: `Os 12 princípios da animação (Disney: Frank Thomas, Ollie Johnston e John Lounsbery, anos 1930) e como aplicá-los nesta engine.
 Definições a partir do artigo "Os 12 princípios da animação" (Alura): https://www.alura.com.br/artigos/12-principios-animacao
 O comando check imprime um painel (✓ / ! / –) dos que dá para medir; os outros pedem o seu olho.
