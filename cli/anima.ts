@@ -7,9 +7,9 @@
                                          cria um projeto sem cores (você define a paleta); --camada: nome da primeira camada (padrão "Base"); --cores-padrao: traz as cores 0 (contorno) e 1 (branco)
  *   anima run <projeto> <comandos.json|->  aplica uma lista de comandos [{ "name", "input" }]
  *   anima show <projeto> [frame|all] [--png saida.png] [--check cinza|luz_sombra|silhueta]
-             [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--scale N]
+             [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--bones] [--scale N]
   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
- *              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--scale N]
+ *              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--bones] [--scale N]
  *   anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--png saida.png]
  *   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
  *   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N]
@@ -78,7 +78,7 @@ const USAGE = `anima — engine de animação pixel art
   anima run <projeto> <comandos.json|-> [--png prévia.png] [--continuar]
                                          aplica comandos [{"name": "...", "input": {...}}] EM CIMA do projeto existente (para recomeçar, rode "new", que sobrescreve); o último mostra a prévia; -q/--quiet não mostra a folha de frames
   anima show <projeto> [frame|all] [--png saida.png] [--check cinza|luz_sombra|silhueta]
-             [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--scale N]
+             [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--bones] [--scale N]
   anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--max-cores N] [--png saida.png]
                                          defeitos da arte e da animação (--max-cores: limite de cores do estilo, ex. 16 para retrô) (--efeito: brilho, chama, fumaça; --tipo rotacao: moeda girando)
   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
@@ -176,13 +176,14 @@ export async function main(argv: string[]): Promise<number> {
       const scale = flag(args, "scale");
       const grid = boolFlag(args, "grid");
       const onion = boolFlag(args, "onion");
+      const bones = boolFlag(args, "bones");
       const boolQuiet = boolFlag(args, "quiet") || boolFlag(args, "q");
       rejectUnknownFlags(args, "show");
       const [file, frame = "0"] = args;
       if (!file) break;
       await store.open(file);
       const p = store.project;
-      const input: Record<string, unknown> = { frames: frame === "all" ? "all" : Number(frame), check, grid, onion };
+      const input: Record<string, unknown> = { frames: frame === "all" ? "all" : Number(frame), check, grid, onion, bones };
       if (region) {
         const [x, y, w, h] = region.split(",").map(Number);
         input.region = { x, y, w, h };

@@ -1,0 +1,11 @@
+[{"name":"add_frames","input":{"count":7}},
+ {"name":"rig_create","input":{"template":"humanoide","height":34,"materials":{"top":"#5a7a9a","bottom":"#4a5a70","boots":"#2a3040","skin":"#9aa8b8","hair":"#c04040"}}},
+ {"name":"set_palette","input":{"colors":[{"key":"K","hex":"#1c2230","name":"aco-contorno"},{"key":"S","hex":"#6a7e98","name":"aco"},{"key":"L","hex":"#a8bcd4","name":"aco-luz"},{"key":"D","hex":"#46566e","name":"aco-sombra"},{"key":"R","hex":"#e04848","name":"led"}]}},
+ {"name":"rig_part","input":{"name":"braco_frente","bone":"braco_frente","pivot":{"x":2,"y":1},"layer":"braco-frente","z":0,"rows":["KKKK","KLSK","KLSK","KSDK","KSDK","KSDK","KDDK","KKKK"]}},
+ {"name":"rig_part","input":{"name":"antebraco_frente","bone":"antebraco_frente","pivot":{"x":2,"y":1},"layer":"braco-frente","z":1,"rows":["KKKK","KLSK","KLSK","KSDK","KSDK","KSDK","KDDK","KRRK","KKKK"]}},
+ {"name":"rig_part","input":{"name":"mao_frente","bone":"antebraco_frente","pivot":{"x":2,"y":1},"layer":"braco-frente","z":2,"rows":["....","...."]}},
+ {"name":"rig_part","input":{"name":"braco_tras","bone":"braco_tras","pivot":{"x":2,"y":1},"layer":"braco-tras","z":0,"rows":["KKKK","KSDK","KSDK","KDDK","KDDK","KDDK","KDDK","KKKK"]}},
+ {"name":"rig_part","input":{"name":"antebraco_tras","bone":"antebraco_tras","pivot":{"x":2,"y":1},"layer":"braco-tras","z":1,"rows":["KKKK","KSDK","KSDK","KDDK","KDDK","KDDK","KDDK","KRRK","KKKK"]}},
+ {"name":"rig_part","input":{"name":"mao_tras","bone":"antebraco_tras","pivot":{"x":2,"y":1},"layer":"braco-tras","z":2,"rows":["....","...."]}},
+ {"name":"rig_pose","input":{"cycle":"caminhada","amplitude":1.2}},
+ {"name":"rig_bake","input":{"outline":"K","preview":false}}]

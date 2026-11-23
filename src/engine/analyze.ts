@@ -875,6 +875,29 @@ function evaluatePrinciples(p: Project, frames: number[], metrics: FrameMetrics[
   return out;
 }
 
+// ---------- rig (só se o projeto tiver esqueleto) ----------
+
+function checkRig(p: Project, frames: number[], issues: Issue[]) {
+  const rig = p.rig;
+  if (!rig) return;
+  const names = new Set(rig.bones.map((b) => b.name));
+  for (const part of rig.parts) {
+    if (!names.has(part.bone)) issues.push({ severity: "erro", code: "rig_parte_sem_osso", message: `A parte "${part.name}" está presa ao osso "${part.bone}", que não existe.` });
+  }
+  const used = new Set(rig.parts.map((x) => x.bone));
+  const loose = rig.bones.filter((b) => !used.has(b.name) && !rig.bones.some((c) => c.parent === b.name && false)).map((b) => b.name);
+  if (loose.length) issues.push({ severity: "info", code: "rig_osso_sem_arte", message: `Ossos sem arte presa: ${loose.join(", ")}. Tudo bem se são só articulações; senão, use rig_part.` });
+  const posed = frames.filter((f) => p.frames[f].pose);
+  if (posed.length && posed.length < frames.length) issues.push({ severity: "aviso", code: "rig_frames_sem_pose", message: `Frames sem pose: ${frames.filter((f) => !p.frames[f].pose).join(", ")}. O bake não renderiza esses frames.` });
+  for (const f of posed) {
+    for (const [n, v] of Object.entries(p.frames[f].pose!.angles)) {
+      const b = rig.bones.find((x) => x.name === n);
+      if (!b) issues.push({ severity: "erro", code: "rig_pose_osso_desconhecido", frame: f, message: `A pose do frame ${f} usa o osso "${n}", que não existe.` });
+      else if (v < b.min - 1e-6 || v > b.max + 1e-6) issues.push({ severity: "aviso", code: "rig_fora_do_limite", frame: f, message: `${n} = ${v.toFixed(0)}° no frame ${f} está fora do limite anatômico [${b.min}, ${b.max}].` });
+    }
+  }
+}
+
 // ---------- API ----------
 
 /** Checagens de um único frame (rápidas: usadas no preview automático dos comandos de desenho). */
@@ -962,6 +985,7 @@ export function analyze(p: Project, frames: number[], opts: AnalyzeOptions = {})
   for (const f of frames) issues.push(...analyzeFrame(p, f, { ...opts, figure: frames.length > 1 ? flattenLayers(p, f, moving) : undefined }));
   if (frames.length > 1) checkContrastAndLight(p, frames, moving, issues);
   checkPalette(p, frames, issues, opts.maxColors);
+  checkRig(p, frames, issues);
   let principles: PrincipleStatus[] | undefined;
   if (frames.length > 1) {
     const articulated = [...moving].filter((id) => !empty(id)).length >= 3;

@@ -22,6 +22,8 @@ export interface ImageRequest {
   onion?: boolean;
   /** Pixels a marcar em magenta (problemas encontrados pelo check). */
   highlight?: [number, number][];
+  /** Esqueleto por frame: segmentos de osso (em coordenadas do canvas) a desenhar por cima. */
+  bones?: Record<number, { name: string; x0: number; y0: number; x1: number; y1: number }[]>;
 }
 
 export interface RenderedImage {
@@ -146,6 +148,7 @@ function enlarge(
   scale: number,
   grid: boolean,
   highlight: [number, number][] | undefined,
+  bones?: { x0: number; y0: number; x1: number; y1: number }[],
 ): { width: number; height: number; data: Uint8ClampedArray<ArrayBuffer> } {
   const digitsX = String(region.x + region.w - 1).length;
   const digitsY = String(region.y + region.h - 1).length;
@@ -216,6 +219,23 @@ function enlarge(
     }
   }
 
+  if (bones?.length) {
+    const toPx = (x: number, y: number) => ({ x: ml + (x - region.x) * scale, y: mt + (y - region.y) * scale });
+    const dot = (cx: number, cy: number, r: number, rgb: [number, number, number]) => {
+      for (let y = Math.round(cy - r); y <= Math.round(cy + r); y++) for (let x = Math.round(cx - r); x <= Math.round(cx + r); x++) {
+        if (x < 0 || y < 0 || x >= W || y >= H || Math.hypot(x - cx, y - cy) > r) continue;
+        const o = (y * W + x) * 4; data[o] = rgb[0]; data[o + 1] = rgb[1]; data[o + 2] = rgb[2]; data[o + 3] = 255;
+      }
+    };
+    const thick = Math.max(1, Math.round(scale / 6));
+    for (const b of bones) {
+      const a = toPx(b.x0, b.y0), c = toPx(b.x1, b.y1);
+      const steps = Math.max(2, Math.ceil(Math.hypot(c.x - a.x, c.y - a.y)));
+      for (let k = 0; k <= steps; k++) dot(a.x + ((c.x - a.x) * k) / steps, a.y + ((c.y - a.y) * k) / steps, thick, [0, 230, 255]);
+    }
+    for (const b of bones) { const a = toPx(b.x0, b.y0); dot(a.x, a.y, thick + 1.5, [255, 0, 220]); }
+  }
+
   if (grid) {
     const sx = labelStep(scale, digitsX * GLYPH_W + 3);
     for (let i = 0; i < region.w; i++) {
@@ -243,7 +263,7 @@ export function renderImages(p: Project, req: ImageRequest): RenderedImage[] {
 
   const make = (frame: number, label: string): RenderedImage => {
     const base = baseImage(p, frame, req);
-    const img = enlarge(base, p.width, region, req.scale, !!req.grid, req.highlight);
+    const img = enlarge(base, p.width, region, req.scale, !!req.grid, req.highlight, req.bones?.[frame]);
     return { label: [label, ...notes].join(", "), ...img };
   };
 

@@ -1,4 +1,4 @@
-import { clampSize, newId, type Project } from "./project.ts";
+import { clampSize, newId, type FramePose, type Project, type Rig } from "./project.ts";
 
 /** Formato JSON salvo em disco / enviado pela rede. Pixels em base64. */
 export interface ProjectJSON {
@@ -10,7 +10,9 @@ export interface ProjectJSON {
   fps: number;
   palette: Project["palette"];
   layers: Project["layers"];
-  frames: { id: string; duration?: number; cels: Record<string, string> }[];
+  frames: { id: string; duration?: number; pose?: FramePose; cels: Record<string, string> }[];
+  /** Esqueleto opcional (só se o projeto usa rig). */
+  rig?: Rig;
 }
 
 function toBase64(bytes: Uint8Array): string {
@@ -36,9 +38,11 @@ export function toJSON(p: Project): ProjectJSON {
     fps: p.fps,
     palette: p.palette,
     layers: p.layers,
+    ...(p.rig ? { rig: p.rig } : {}),
     frames: p.frames.map((f) => ({
       id: f.id,
       ...(f.duration !== undefined ? { duration: f.duration } : {}),
+      ...(f.pose ? { pose: f.pose } : {}),
       cels: Object.fromEntries(Object.entries(f.cels).map(([k, v]) => [k, toBase64(v)])),
     })),
   };
@@ -57,9 +61,11 @@ export function fromJSON(j: ProjectJSON): Project {
     fps: j.fps,
     palette: j.palette,
     layers,
+    rig: j.rig,
     frames: j.frames.map((f) => ({
       id: f.id,
       duration: f.duration,
+      pose: f.pose,
       cels: Object.fromEntries(
         layers.map((l) => {
           const raw = f.cels[l.id] ? fromBase64(f.cels[l.id]) : new Uint8Array(size);

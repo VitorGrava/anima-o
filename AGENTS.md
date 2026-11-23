@@ -22,6 +22,7 @@ node bin/anima.mjs check projeto.anima.json [--efeito]    # defeitos, movimento 
 node bin/anima.mjs tools                                  # comandos e parâmetros
 ```
 
+Esqueleto OPCIONAL (só se for pedido ou fizer sentido): `rig_create` → `rig_part` (arte própria presa aos ossos) → `rig_pose` (ângulos, tween) → `rig_bake`; `view --bones` mostra os ossos. Sem `rig_create` o projeto não tem esqueleto.
 Figuras humanas: use o comando `draw_figure` (esqueleto por ângulos de articulação, com anatomia por construção; `cycle: "caminhada"`, `tween`, arma presa à mão), não desenhe membros à mão.
 Depois de desenhar, confira o resultado: os comandos de desenho já devolvem o frame (grade, imagem
 e avisos). Use `view` (com `region`+`grid` para zoom, `compare` para diff, `onion`), `check` para

@@ -129,3 +129,21 @@ Dois agentes novos, só com o pedido e o guia, usaram `draw_figure` por conta pr
 - Erros: o primeiro problema de validação vem na primeira linha; `frames` em formato errado lista os formatos aceitos; `draw_shapes pixels` aceita `{x, y}`.
 - CLI: `anima guide` agora é curto (o completo em `--completo`); `new` não traz mais as cores 0 e 1 por padrão (`--cores-padrao`); `show all --png` não despeja o texto.
 - A saída antiga com 35 cores foi para `bench/out/_historico/` (fora do portão).
+
+## Rig: esqueleto opcional e invisível que dita o movimento (ideia do usuário)
+
+**Ideia:** animar por ossos; um esqueleto invisível dita o movimento e, se for bem feito, a animação por cima também será. **Decisão do usuário:** o rig só existe se for explícito.
+
+**Como ficou (e por quê)**
+- `project.rig` só existe depois de `rig_create`. Sem ele, o projeto não ganha nenhum campo, e `rig_pose`/`rig_bake`/`rig_part` dão erro claro.
+- A **pose mora no frame** (`frame.pose`: ângulos por osso + raiz): copiar, mover, apagar e salvar frames leva a pose junto.
+- A **arte de cada parte é desenhada uma vez, na pose de repouso, e guardada no rig** (não nos frames). O `rig_bake` sempre gira a partir dessa cópia limpa (4×4 subpixels com limiar de cobertura, o mesmo método que preserva contorno de 1 px; juntas arredondadas ao pixel; `snap_angle` opcional). Resultado: o bake é idempotente (pose A → B → A dá exatamente a primeira imagem) e não acumula erro.
+- O bake escreve só em camadas marcadas `generated`; **retoque à mão fica em outra camada e sobrevive** a qualquer re-bake.
+- Ossos genéricos (parent, at, length, mode absolute/relative, rest, sign, min, max): serve para humanoide (modelo pronto com 13 ossos e as proporções do `reference`, mais osso `espada`) e para esqueleto livre (`template: "vazio"` + `bones`).
+- `rig_pose`: presets e ciclo de caminhada reaproveitados do `draw_figure`, `tween` com ease, `ground_lock`, limites anatômicos aplicados e avisados, erro para osso inexistente.
+- `view bones=true` desenha o esqueleto por cima; `check` aponta parte presa a osso inexistente, ossos sem arte, frames sem pose e ângulo fora do limite.
+- `draw_figure` continua existindo como o jeito rápido de ter um humano sem rig.
+- `tests/rig.test.ts` (31 testes): opcional/explícito, comprimento dos ossos constante, juntas ligadas, limites, `facing: left`, pose no frame e salvar/abrir, `rig_part` (validações, cápsula, atualizar só z, remover), bake exato a 0° e a 90°, idempotência, massa preservada ao girar, espelho, `snap_angle`, retoque sobrevivendo, contorno opcional, ciclo sem frestas nem pixel solto, ordem das camadas, tween com ease, espada presa ao antebraço, troca de uma parte por arte própria, `view bones`, `check` do rig.
+- Exemplo: `examples/rig-robo/` (arte própria de braços e pernas de aço presa aos ossos do humanoide, ciclo de caminhada).
+
+**Limites conhecidos:** só vista lateral; sem IK de pé travado nem deslocamento da raiz (o ciclo é no lugar); em sprites muito pequenos (16–24 px) girar arte serrilha (use `snap_angle`); o pivô é uma célula inteira; a arte de uma parte precisa ser desenhada na pose de repouso.

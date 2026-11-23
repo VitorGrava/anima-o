@@ -30,10 +30,63 @@ export interface Layer {
   id: string;
   name: string;
   visible: boolean;
+  /** Camada gerada por rig_bake: é reescrita a cada bake. Retoque à mão em outra camada. */
+  generated?: boolean;
+}
+
+/** Osso de um esqueleto (invisível). Ângulos em graus, medidos a partir de "para baixo", + = para a frente. */
+export interface Bone {
+  name: string;
+  parent: string | null;
+  /** Em que ponta do osso-pai este começa (padrão "end"). */
+  at?: "start" | "end";
+  length: number;
+  /** absolute: o valor é o ângulo no mundo; relative: soma ao ângulo do pai. */
+  mode: "absolute" | "relative";
+  /** Ângulo em repouso (valor 0). */
+  rest: number;
+  /** +1 ou −1: sentido em que o valor gira o osso. */
+  sign: 1 | -1;
+  /** Limites do valor (anatomia). */
+  min: number;
+  max: number;
+  /** A ponta do osso é uma sola (o pé): `ground_lock` encosta a sola mais baixa no chão. */
+  sole?: number;
+}
+
+/** Arte de uma parte, desenhada UMA vez na pose de repouso e presa a um osso. */
+export interface RigPart {
+  name: string;
+  bone: string;
+  /** Camada onde a parte é renderizada (várias partes podem dividir uma camada). */
+  layer: string;
+  /** Ordem de desenho dentro da camada. */
+  z: number;
+  /** Pixel da arte (célula) onde fica o início do osso. */
+  pivot: { x: number; y: number };
+  /** Linhas de texto com as chaves da paleta ("." = transparente). */
+  rows: string[];
+}
+
+export interface Rig {
+  bones: Bone[];
+  parts: RigPart[];
+  facing: "right" | "left";
+  /** Início do esqueleto (quadril) quando o frame não define `root`. */
+  root: { x: number; y: number };
+  /** y do chão, usado por ground_lock. */
+  ground: number;
+}
+
+export interface FramePose {
+  angles: Record<string, number>;
+  root?: { x: number; y: number };
 }
 
 export interface Frame {
   id: string;
+  /** Pose do esqueleto neste frame (só existe se o projeto tiver rig). */
+  pose?: FramePose;
   /** Duração deste frame em ms. Se ausente, usa 1000 / fps. */
   duration?: number;
   /** layerId -> pixels (índices da paleta + 1; 0 = transparente). */
@@ -49,6 +102,8 @@ export interface Project {
   palette: PaletteColor[];
   layers: Layer[];
   frames: Frame[];
+  /** Esqueleto opcional: só existe depois de rig_create. */
+  rig?: Rig;
 }
 
 let idCounter = 0;
@@ -84,8 +139,10 @@ export function cloneProject(p: Project): Project {
     ...p,
     palette: p.palette.map((c) => ({ ...c })),
     layers: p.layers.map((l) => ({ ...l })),
+    rig: p.rig ? structuredClone(p.rig) : undefined,
     frames: p.frames.map((f) => ({
       ...f,
+      pose: f.pose ? structuredClone(f.pose) : undefined,
       cels: Object.fromEntries(Object.entries(f.cels).map(([k, v]) => [k, new Uint8Array(v)])),
     })),
   };

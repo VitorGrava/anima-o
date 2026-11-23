@@ -9,7 +9,8 @@ import { z } from "zod";
 import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.ts";
 import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
-import { REFERENCE_TOPICS, darkOutline, makeRamp, reference } from "./reference.ts";
+import { REFERENCE_TOPICS, bodyProportions, darkOutline, makeRamp, reference } from "./reference.ts";
+import { HUMANOID_BONES, boneSegments, capsuleArt, clampAngles, humanoidAngles, humanoidBones, groundedRoot, ellipseArt, renderRigFrame } from "./skeleton.ts";
 import { DEFAULT_POSE, FIGURE_LAYERS, PRESETS as POSE_PRESETS, WALK_CYCLE, clampPose, lerpPose, renderFigure, swapSides, type Pose, type Ramp } from "./rig.ts";
 import type { CheckMode } from "./render.ts";
 import { autoScale, clampRegion, diffRows, type ImageRequest } from "./view.ts";
@@ -26,7 +27,9 @@ import {
   getCel,
   newId,
   normalizeHex,
+  type Bone,
   type Project,
+  type RigPart,
 } from "./project.ts";
 
 export type ExportFormat = "gif" | "spritesheet_png" | "json";
@@ -325,6 +328,7 @@ const addFrames = def({
     const fresh = Array.from({ length: i.count }, () => ({
       id: newId("F"),
       duration: src?.duration,
+      pose: src?.pose ? structuredClone(src.pose) : undefined,
       cels: Object.fromEntries(
         p.layers.map((l) => [l.id, src?.cels[l.id] ? new Uint8Array(src.cels[l.id]) : new Uint8Array(p.width * p.height)]),
       ),
@@ -654,6 +658,311 @@ const drawFigure = def({
   },
 });
 
+// ---------- rig: esqueleto opcional, invisível, que dita o movimento ----------
+
+const NO_RIG = "Este projeto não tem rig (o esqueleto é opcional). Crie um com rig_create, ou use draw_figure para um humano rápido sem rig.";
+const needRig = (p: Project) => { if (!p.rig) throw new Error(NO_RIG); return p.rig; };
+const GEN_ORDER = ["contorno", "braco-tras", "perna-tras", "mochila", "tronco", "cabeca", "chapeu", "perna-frente", "braco-frente", "arma"];
+
+/** Garante as camadas geradas do rig, juntas e na ordem certa (de baixo para cima). */
+function ensureGeneratedLayers(p: Project, names: string[]): Map<string, string> {
+  const ordered = [...new Set(names)].sort((a, b) => (GEN_ORDER.indexOf(a) < 0 ? 99 : GEN_ORDER.indexOf(a)) - (GEN_ORDER.indexOf(b) < 0 ? 99 : GEN_ORDER.indexOf(b)));
+  const ids = new Map<string, string>();
+  const layers = ordered.map((n) => {
+    let l = p.layers.find((x) => x.name === n);
+    if (!l) { l = { id: newId("L"), name: n, visible: true, generated: true }; }
+    l.generated = true;
+    ids.set(n, l.id);
+    return l;
+  });
+  const firstOld = Math.min(...layers.map((l) => p.layers.indexOf(l)).filter((i) => i >= 0), Infinity);
+  const rest = p.layers.filter((l) => !layers.includes(l));
+  let at = Number.isFinite(firstOld) ? Math.min(firstOld, rest.length) : rest.length;
+  if (!Number.isFinite(firstOld)) {
+    const bg = rest.map((l, i) => (/fundo|background|cenario|cenário/i.test(l.name) ? i : -1)).filter((i) => i >= 0);
+    at = bg.length ? Math.max(...bg) + 1 : rest.length;
+  }
+  p.layers = [...rest.slice(0, at), ...layers, ...rest.slice(at)];
+  if (p.layers.length > MAX_LAYERS) throw new Error(`Máximo de ${MAX_LAYERS} camadas.`);
+  for (const l of layers) for (const f of p.frames) if (!f.cels[l.id]) f.cels[l.id] = new Uint8Array(p.width * p.height);
+  return ids;
+}
+
+const boneSchema = z.object({
+  name: z.string().min(1).max(30),
+  parent: z.string().nullable().default(null),
+  at: z.enum(["start", "end"]).default("end").describe("em que ponta do osso-pai este começa"),
+  length: z.number().min(0.5).max(200),
+  mode: z.enum(["absolute", "relative"]).default("relative").describe("absolute: o valor é o ângulo no mundo (ombro, quadril); relative: soma ao ângulo do pai (cotovelo, joelho)"),
+  rest: z.number().default(0).describe("ângulo em repouso, em graus a partir de 'para baixo' (osso para cima = 180)"),
+  sign: z.union([z.literal(1), z.literal(-1)]).default(1).describe("+1: valor positivo gira para a frente; −1: para trás (joelho)"),
+  min: z.number().default(-180),
+  max: z.number().default(180),
+});
+
+const rigCreate = def({
+  name: "rig_create",
+  description: [
+    "Cria um ESQUELETO invisível (opcional: sem isto o projeto não tem rig e nada muda). Os ossos ditam o movimento; a arte de cada parte é presa a um osso e o rig_bake a desenha em cada frame. A anatomia sai certa porque os ossos têm comprimento fixo e limites de articulação; o movimento sai bom porque você pensa em ÂNGULOS (poses-chave + tween com ease).",
+    'template "humanoide": 13 ossos (tronco, pescoco, cabeca, braco/antebraco e coxa/canela/pe, frente e tras), com proporções de reference proporcoes. Com auto_art=true (padrão) já cria partes de arte provisórias (cápsulas com luz) EDITÁVEIS: troque qualquer uma pela sua arte com rig_part. `weapon_length` acrescenta o osso "espada" preso ao antebraço da frente.',
+    'template "vazio" + `bones`: esqueleto livre (cachorro, monstro, qualquer coisa). Cada osso: parent, at (start|end do pai), length, mode (absolute|relative), rest, sign, min, max. Ângulo: graus a partir de "para baixo", + = para a frente; osso para cima = 180.',
+    "Depois: rig_pose (poses e tween) → rig_bake (renderiza) → view bones=true (vê o esqueleto por cima).",
+  ].join("\n"),
+  schema: z.object({
+    template: z.enum(["humanoide", "vazio"]).default("humanoide"),
+    bones: z.array(boneSchema).max(60).optional().describe('template "vazio": os ossos (o primeiro, sem parent, é a raiz)'),
+    height: z.number().int().min(8).max(240).optional().describe("humanoide: altura total em px (padrão 70% do canvas)"),
+    style: z.enum(["realista", "estilizado", "chibi"]).default("estilizado"),
+    facing: z.enum(["right", "left"]).default("right"),
+    x: z.number().int().optional().describe("x da raiz (quadril); padrão: centro do canvas"),
+    ground: z.number().int().optional().describe("y do chão (padrão: altura − 2)"),
+    weapon_length: z.number().min(3).max(60).optional().describe("humanoide: acrescenta o osso espada com esta lâmina em px"),
+    auto_art: z.boolean().default(true).describe("humanoide: cria as partes de arte provisórias (cápsulas) já com cores"),
+    materials: z
+      .object({ skin: z.string().default("#f0c09a"), hair: z.string().default("#6b3b1e"), top: z.string().default("#3d7fd0"), bottom: z.string().default("#6a4a8a"), boots: z.string().default("#5a3420"), metal: z.string().default("#b9c4d6"), gold: z.string().default("#e0b040") })
+      .default({ skin: "#f0c09a", hair: "#6b3b1e", top: "#3d7fd0", bottom: "#6a4a8a", boots: "#5a3420", metal: "#b9c4d6", gold: "#e0b040" }),
+    replace: z.boolean().default(false).describe("true: troca um rig que já existe"),
+  }),
+  run(p, i) {
+    if (p.rig && !i.replace) throw new Error("Este projeto já tem um rig. Use replace=true para recriá-lo (as partes e as poses atuais são perdidas).");
+    const x = i.x ?? Math.round(p.width / 2), ground = i.ground ?? p.height - 2;
+    let bones: Bone[];
+    if (i.template === "humanoide") bones = humanoidBones(i.height ?? Math.round(p.height * 0.7), i.style, i.weapon_length);
+    else {
+      if (!i.bones?.length) throw new Error('template "vazio" precisa de `bones` (a lista de ossos).');
+      bones = i.bones.map((b) => ({ ...b, at: b.at }));
+      for (const b of bones) if (b.parent && !bones.some((o) => o.name === b.parent)) throw new Error(`O osso "${b.name}" tem pai "${b.parent}", que não existe.`);
+      if (new Set(bones.map((b) => b.name)).size !== bones.length) throw new Error("Há ossos com o mesmo nome.");
+    }
+    p.rig = { bones, parts: [], facing: i.facing, root: { x, y: ground - Math.round((i.height ?? p.height * 0.7) * 0.5) }, ground };
+    for (const f of p.frames) f.pose = undefined;
+    let parts = 0;
+    if (i.template === "humanoide" && i.auto_art) {
+      const R = (hex: string, name: string) => ensureRamp(p, hex, name, darkOutline(i.materials.boots));
+      const ramp = { skin: R(i.materials.skin, "pele"), hair: R(i.materials.hair, "cabelo"), top: R(i.materials.top, "roupa"), bottom: R(i.materials.bottom, "calca"), boots: R(i.materials.boots, "bota"), metal: R(i.materials.metal, "metal"), gold: R(i.materials.gold, "ouro") };
+      const key = (n: number) => p.palette[n - 1].key;
+      const K = (r: Ramp, far = false) => (far ? { dark: key(r.outline), base: key(r.dark), light: key(r.base) } : { dark: key(r.dark), base: key(r.base), light: key(r.light) });
+      const pr = bodyProportionsOf(bones, i.height ?? Math.round(p.height * 0.7), i.style);
+      const u = pr.head;
+      const rArm = Math.max(1, u * 0.16), rFore = Math.max(0.9, u * 0.14), rThigh = Math.max(1.3, u * 0.23), rShin = Math.max(1.1, u * 0.18);
+      const rTl = Math.max(2, u * 0.34), rTu = Math.max(2.2, u * 0.4), rNeck = Math.max(0.9, u * 0.14), rFoot = Math.max(0.9, pr.footH * 0.5);
+      const B = (n: string) => bones.find((b) => b.name === n)!;
+      const add = (name: string, bone: string, art: { rows: string[]; pivot: { x: number; y: number } }, layer: string, z: number) => { p.rig!.parts.push({ name, bone, layer, z, pivot: art.pivot, rows: art.rows }); parts++; };
+      const rig = p.rig;
+      for (const side of ["tras", "frente"] as const) {
+        const far = side === "tras";
+        add(`braco_${side}`, `braco_${side}`, capsuleArt(rig, B(`braco_${side}`), rArm, rArm * 0.9, K(ramp.top, far)), `braco-${side}`, 0);
+        add(`antebraco_${side}`, `antebraco_${side}`, capsuleArt(rig, B(`antebraco_${side}`), rFore, rFore * 0.85, K(ramp.skin, far)), `braco-${side}`, 1);
+        add(`mao_${side}`, `antebraco_${side}`, ellipseArt(rig, B(`antebraco_${side}`), B(`antebraco_${side}`).length, pr.handR, pr.handR, K(ramp.skin)), `braco-${side}`, 2);
+        add(`coxa_${side}`, `coxa_${side}`, capsuleArt(rig, B(`coxa_${side}`), rThigh, rThigh * 0.85, K(ramp.bottom, far)), `perna-${side}`, 0);
+        add(`canela_${side}`, `canela_${side}`, capsuleArt(rig, B(`canela_${side}`), rShin, rShin * 0.8, K(ramp.bottom, far)), `perna-${side}`, 1);
+        add(`pe_${side}`, `pe_${side}`, capsuleArt(rig, B(`pe_${side}`), rFoot, rFoot * 0.85, K(ramp.boots, far), pr.footL * 0.25), `perna-${side}`, 2);
+      }
+      add("tronco", "tronco", capsuleArt(rig, B("tronco"), rTl, rTu, K(ramp.top)), "tronco", 0);
+      add("quadril", "tronco", ellipseArt(rig, B("tronco"), 0, rTl * 0.95, rTl * 0.9, K(ramp.bottom)), "tronco", 1);
+      add("pescoco", "pescoco", capsuleArt(rig, B("pescoco"), rNeck, rNeck * 0.9, K(ramp.skin)), "tronco", 2);
+      const hairKeys = K(ramp.hair), skinKeys = K(ramp.skin);
+      add("cabeca", "cabeca", ellipseArt(rig, B("cabeca"), pr.head * 0.46, pr.head * 0.42, pr.head * 0.5, skinKeys, (cells, c) => {
+        for (let y = 0; y < cells.length; y++) for (let xx = 0; xx < cells.length; xx++) {
+          if (cells[y][xx] === TRANSPARENT_KEY) continue;
+          const lx = (xx + 0.5 - c.x) / pr.head, ly = (y + 0.5 - c.y) / pr.head;
+          if (ly < -0.2 || (lx < -0.3 && ly < 0.02)) cells[y][xx] = ly < -0.3 ? (lx < 0 ? hairKeys.light : hairKeys.base) : hairKeys.dark;
+        }
+        const put = (lx: number, ly: number, k: string) => { const xx = Math.floor(c.x + lx * pr.head), y = Math.floor(c.y + ly * pr.head); if (cells[y]?.[xx] && cells[y][xx] !== TRANSPARENT_KEY) cells[y][xx] = k; };
+        put(0.14, -0.04, key(ramp.skin.outline)); put(0.42, 0.06, skinKeys.light); if (pr.head >= 7) put(0.32, 0.22, skinKeys.dark);
+      }), "cabeca", 0);
+      if (i.weapon_length) {
+        const sw = capsuleArt(rig, B("espada"), 0.9, 0.55, K(ramp.metal));
+        // guarda (perpendicular) e cabo, desenhados na arte da lâmina
+        const rows = sw.rows.map((r) => [...r]);
+        const { x: px, y: py } = sw.pivot;
+        const gk = key(ramp.gold.base), hk = key(ramp.boots.base);
+        for (let d = -2; d <= 2; d++) if (rows[py]?.[px + d]) rows[py][px + d] = gk;
+        for (let d = 1; d <= 2; d++) if (rows[py - d]?.[px]) rows[py - d][px] = hk;
+        add("espada", "espada", { rows: rows.map((r) => r.join("")), pivot: sw.pivot }, "arma", 0);
+      }
+    }
+    return { changed: true, text: `Rig criado (${i.template}): ${bones.length} ossos${parts ? `, ${parts} partes de arte provisórias` : ""}. Ossos: ${bones.map((b) => b.name).join(", ")}. Próximo: rig_pose, depois rig_bake.` };
+  },
+});
+
+function bodyProportionsOf(bones: Bone[], height: number, style: "realista" | "estilizado" | "chibi") {
+  const pr = bodyProportions(height, style);
+  void bones;
+  return pr;
+}
+
+const rigPart = def({
+  name: "rig_part",
+  description: [
+    "Liga a ARTE de uma parte a um osso (ou troca a arte provisória por uma sua). A arte é desenhada UMA vez, com o osso na pose de REPOUSO (membros pendurados para baixo; tronco, pescoço e cabeça para cima; pé para a frente), e guardada no rig: o bake sempre gira a partir dela, nunca de uma cópia já girada.",
+    "`rows`: linhas de texto com chaves da paleta ('.' = transparente), como em draw_rows. `pivot`: a célula da arte onde fica o INÍCIO do osso (a articulação). `layer` e `z`: camada onde a parte é renderizada (várias partes podem dividir uma) e a ordem dentro dela.",
+    "Alternativas rápidas sem desenhar: `capsule` (cápsula com luz ao longo do osso) ou `remove: true`.",
+  ].join("\n"),
+  schema: z.object({
+    name: z.string().min(1).max(30),
+    bone: z.string().optional().describe("osso ao qual a parte é presa (obrigatório ao criar)"),
+    rows: z.array(z.string().max(128)).min(1).max(128).optional(),
+    pivot: z.object({ x: z.number().int(), y: z.number().int() }).optional().describe("célula da arte onde começa o osso"),
+    layer: z.string().max(30).optional().describe("padrão: o nome da parte"),
+    z: z.number().optional().describe("ordem dentro da camada (maior = por cima)"),
+    capsule: z
+      .object({ r0: z.number().min(0.5).max(30), r1: z.number().min(0.5).max(30).optional(), base: z.string(), light: z.string().optional(), dark: z.string().optional(), back: z.number().min(0).max(30).optional() })
+      .optional()
+      .describe("gera uma cápsula ao longo do osso com estas cores (chaves da paleta)"),
+    remove: z.boolean().default(false),
+  }),
+  run(p, i) {
+    const rig = needRig(p);
+    if (i.remove) {
+      const before = rig.parts.length;
+      rig.parts = rig.parts.filter((x) => x.name !== i.name);
+      if (rig.parts.length === before) throw new Error(`A parte "${i.name}" não existe. Partes: ${rig.parts.map((x) => x.name).join(", ") || "(nenhuma)"}.`);
+      return { changed: true, text: `Parte "${i.name}" removida.` };
+    }
+    const old = rig.parts.find((x) => x.name === i.name);
+    const bone = i.bone ?? old?.bone;
+    if (!bone) throw new Error("Diga o osso (`bone`) ao qual a parte é presa.");
+    const b = rig.bones.find((x) => x.name === bone);
+    if (!b) throw new Error(`O osso "${bone}" não existe. Ossos: ${rig.bones.map((x) => x.name).join(", ")}.`);
+    let rows = i.rows, pivot = i.pivot;
+    if (i.capsule) {
+      const c = i.capsule;
+      const art = capsuleArt(rig, b, c.r0, c.r1 ?? c.r0, { base: c.base, light: c.light ?? c.base, dark: c.dark ?? c.base }, c.back ?? 0);
+      rows = art.rows; pivot = art.pivot;
+    }
+    if (!rows) { if (old) rows = old.rows; else throw new Error("Diga a arte: `rows` (e `pivot`) ou `capsule`."); }
+    if (!pivot) { if (old && !i.rows) pivot = old.pivot; else throw new Error("Diga o `pivot`: a célula da arte onde começa o osso (a articulação)."); }
+    const w = Math.max(...rows.map((r) => [...r].length));
+    if (pivot.x < 0 || pivot.y < 0 || pivot.x >= w || pivot.y >= rows.length) throw new Error(`O pivot (${pivot.x}, ${pivot.y}) está fora da arte (${w}×${rows.length}).`);
+    for (const k of new Set(rows.join("").split(""))) if (k !== TRANSPARENT_KEY && k !== " ") colorIndex(p, k);
+    const part: RigPart = { name: i.name, bone, layer: i.layer ?? old?.layer ?? i.name, z: i.z ?? old?.z ?? 0, pivot, rows };
+    rig.parts = rig.parts.filter((x) => x.name !== i.name).concat(part);
+    return { changed: true, text: `Parte "${i.name}" ${old ? "atualizada" : "criada"}: arte ${w}×${rows.length} presa ao osso "${bone}" (pivô ${pivot.x},${pivot.y}), camada "${part.layer}".` };
+  },
+});
+
+const rigPose = def({
+  name: "rig_pose",
+  description: [
+    "Define a POSE do esqueleto em frames: ângulos por osso (graus; limites anatômicos aplicados e avisados) e a posição da raiz. Só guarda a pose; rig_bake renderiza.",
+    "`items`: [{frame, angles: {osso: graus}, root?: {x, y}, preset?, swap?}]. Para o humanoide há presets (parado, caminhada_contato/abaixo/passagem/acima, golpe_armar/impacto/seguir) e `cycle: \"caminhada\"` (8 frames). `ground_lock` (padrão) apoia a sola mais baixa no chão em cada frame.",
+    "`tween: true` preenche os frames ENTRE dois itens interpolando os ângulos com ease in/out: defina só as poses-chave (pose a pose, slow in/out e arcos de graça). Ângulos de ossos que você não citar ficam em 0 (repouso).",
+  ].join("\n"),
+  schema: z.object({
+    items: z
+      .array(
+        z.object({
+          frame: z.number().int().min(0),
+          preset: z.enum(PRESET_NAMES).optional().describe("só no humanoide"),
+          swap: z.boolean().optional(),
+          angles: z.record(z.string(), z.number()).optional().describe("ângulo por osso, ex.: {\"braco_frente\": 90, \"antebraco_frente\": 20}"),
+          root: z.object({ x: z.number(), y: z.number() }).optional().describe("posição da raiz (quadril) neste frame; anula o ground_lock no y"),
+        }),
+      )
+      .max(128)
+      .optional(),
+    cycle: z.enum(["caminhada"]).optional(),
+    tween: z.boolean().default(false),
+    ground_lock: z.boolean().default(true).describe("apoia a sola mais baixa no chão (ossos com sola) em cada frame"),
+    amplitude: z.number().min(0.2).max(2.5).default(1).describe("exagera (>1) ou suaviza (<1) os presets"),
+    preview: previewFlag,
+  }),
+  run(p, i) {
+    const rig = needRig(p);
+    const humanoid = HUMANOID_BONES.every((n) => rig.bones.some((b) => b.name === n));
+    type It = { frame: number; angles: Record<string, number>; root?: { x: number; y: number } };
+    let items: It[] = [];
+    const fromPose = (pose: Pose) => { if (!humanoid) throw new Error("Os presets só existem no modelo humanoide; para um esqueleto livre use `angles`."); return humanoidAngles(pose); };
+    if (i.cycle === "caminhada") {
+      if (!humanoid) throw new Error("O ciclo de caminhada pronto é do modelo humanoide.");
+      if (p.frames.length < 8) throw new Error(`O ciclo de caminhada tem 8 frames, e o projeto tem ${p.frames.length}. Rode add_frames com count ${8 - p.frames.length} antes.`);
+      items = Array.from({ length: 8 }, (_, f) => { const base = scalePose(POSE_PRESETS[WALK_CYCLE[f % 4]], i.amplitude); return { frame: f, angles: fromPose(f >= 4 ? swapSides(base) : base) }; });
+    }
+    for (const it of i.items ?? []) {
+      resolveFrames(p, it.frame);
+      let angles: Record<string, number> = {};
+      if (it.preset) { let base = POSE_PRESETS[it.preset]; if (it.swap) base = swapSides(base); angles = fromPose(scalePose(base, i.amplitude)); }
+      Object.assign(angles, it.angles ?? {});
+      items = items.filter((x) => x.frame !== it.frame);
+      items.push({ frame: it.frame, angles, root: it.root });
+    }
+    if (!items.length) throw new Error('Diga as poses: `items` (frame + angles/preset) ou `cycle: "caminhada"`.');
+    items.sort((a, b) => a.frame - b.frame);
+    const names = rig.bones.map((b) => b.name);
+    for (const it of items) for (const k of Object.keys(it.angles)) if (!names.includes(k)) throw new Error(`O osso "${k}" não existe (frame ${it.frame}). Ossos: ${names.join(", ")}.`);
+    const full = (a: Record<string, number>) => Object.fromEntries(names.map((n) => [n, a[n] ?? 0]));
+    if (i.tween) {
+      const extra: It[] = [];
+      const ease = (t: number) => t * t * (3 - 2 * t);
+      for (let k = 0; k + 1 < items.length; k++) {
+        const a = items[k], b = items[k + 1];
+        for (let f = a.frame + 1; f < b.frame && f < p.frames.length; f++) {
+          const t = ease((f - a.frame) / (b.frame - a.frame));
+          const fa = full(a.angles), fb = full(b.angles);
+          const angles = Object.fromEntries(names.map((n) => [n, fa[n] * (1 - t) + fb[n] * t]));
+          const root = a.root && b.root ? { x: a.root.x * (1 - t) + b.root.x * t, y: a.root.y * (1 - t) + b.root.y * t } : undefined;
+          extra.push({ frame: f, angles, root });
+        }
+      }
+      items = [...items, ...extra].sort((a, b) => a.frame - b.frame);
+    }
+    const warns = new Set<string>();
+    for (const it of items) {
+      const { angles, warnings } = clampAngles(rig, full(it.angles));
+      warnings.forEach((w) => warns.add(`frame ${it.frame}: ${w}`));
+      const x = it.root?.x ?? rig.root.x;
+      const root = it.root ?? (i.ground_lock ? groundedRoot(rig, angles, x) : { x, y: rig.root.y });
+      p.frames[it.frame].pose = { angles, root };
+    }
+    const frames = [...new Set(items.map((x) => x.frame))];
+    const note = warns.size ? `\nATENÇÃO (limites anatômicos):\n- ${[...warns].slice(0, 6).join("\n- ")}` : "";
+    return { changed: true, text: `Pose definida em ${fmtList(frames)}. Rode rig_bake para renderizar.${note}` };
+  },
+});
+
+const rigBake = def({
+  name: "rig_bake",
+  description: [
+    "Renderiza o rig: desenha as partes de arte nas camadas (marcadas como GERADAS) de cada frame com pose, girando SEMPRE a partir da arte limpa guardada no rig. É repetível e não destrutivo: depois de mudar poses ou arte, rode de novo. Para retocar à mão, desenhe em OUTRA camada (por cima): o bake só reescreve as camadas geradas.",
+    "`snap_angle`: arredonda o ângulo de cada parte (ex.: 15) para um serrilhado mais estável em sprites pequenos; 0 = sem arredondar. `outline`: chave da paleta para um contorno de 1 px em volta de tudo (camada contorno). As juntas são arredondadas ao pixel.",
+  ].join("\n"),
+  schema: z.object({
+    frames: framesSel.optional().describe('Padrão: todos os frames que têm pose'),
+    snap_angle: z.number().min(0).max(90).default(0),
+    round_joints: z.boolean().default(true),
+    outline: z.string().optional().describe("chave da paleta do contorno externo (opcional)"),
+    preview: previewFlag,
+  }),
+  run(p, i) {
+    const rig = needRig(p);
+    if (!rig.parts.length) throw new Error("O rig não tem partes de arte. Use rig_part (ou rig_create template humanoide com auto_art).");
+    const list = i.frames !== undefined ? resolveFrames(p, i.frames) : p.frames.map((_, k) => k).filter((k) => p.frames[k].pose);
+    if (!list.length) throw new Error("Nenhum frame tem pose. Rode rig_pose primeiro.");
+    const names = [...new Set(rig.parts.map((x) => x.layer)), ...(i.outline ? ["contorno"] : [])];
+    const ids = ensureGeneratedLayers(p, names);
+    const outlineIdx = i.outline ? colorIndex(p, i.outline) : 0;
+    for (const f of list) {
+      const out = renderRigFrame(p, p.frames[f].pose, { snapAngle: i.snap_angle, roundJoints: i.round_joints });
+      for (const n of names) getCel(p, f, ids.get(n)!).fill(0);
+      const union = new Uint8Array(p.width * p.height);
+      for (const [layer, buf] of out) {
+        const cel = getCel(p, f, ids.get(layer)!);
+        for (let k = 0; k < buf.length; k++) if (buf[k]) { cel[k] = buf[k]; union[k] = 1; }
+      }
+      if (outlineIdx) {
+        const cel = getCel(p, f, ids.get("contorno")!);
+        for (let y = 0; y < p.height; y++) for (let x = 0; x < p.width; x++) {
+          const k = y * p.width + x;
+          if (union[k]) continue;
+          if ((x > 0 && union[k - 1]) || (x < p.width - 1 && union[k + 1]) || (y > 0 && union[k - p.width]) || (y < p.height - 1 && union[k + p.width])) cel[k] = outlineIdx;
+        }
+      }
+    }
+    return result(p, `Rig renderizado em ${fmtList(list)}: ${rig.parts.length} partes em ${names.length} camada(s) geradas (${names.join(", ")}).`, list, i.preview);
+  },
+});
+
 const shape = z.discriminatedUnion("type", [
   z.object({ type: z.literal("pixels"), points: z.array(z.union([z.array(z.number().int()).length(2), z.object({ x: z.number().int(), y: z.number().int() })])).min(1).max(4096).describe("Lista de [x, y] ou {x, y}"), color: colorRef }),
   z.object({ type: z.literal("line"), x1: z.number().int(), y1: z.number().int(), x2: z.number().int(), y2: z.number().int(), color: colorRef }),
@@ -892,6 +1201,7 @@ const view = def({
     grid: z.boolean().default(false).describe("Grade e coordenadas nas margens da imagem (use com region para zoom)."),
     compare: z.object({ a: z.number().int().min(0), b: z.number().int().min(0) }).optional().describe("Diff do frame a para o frame b."),
     onion: z.boolean().default(false).describe("Onion skin: frame anterior em azul atrás do atual (o do loop, no frame 0)."),
+    bones: z.boolean().default(false).describe("Desenha o ESQUELETO (ossos em ciano, juntas em magenta) por cima da imagem; só em projetos com rig."),
     as_text: z.boolean().default(true),
     as_image: z.boolean().default(true),
     image_scale: z.number().int().min(1).max(32).optional().describe("Ampliação da imagem (padrão: automático)"),
@@ -946,7 +1256,7 @@ const view = def({
     return {
       changed: false,
       text: parts.join("\n\n"),
-      images: i.as_image ? { frames: list, scale, mode: i.check, region, grid: i.grid, onion: i.onion } : undefined,
+      images: i.as_image ? { frames: list, scale, mode: i.check, region, grid: i.grid, onion: i.onion, bones: i.bones && p.rig ? Object.fromEntries(list.map((f) => [f, boneSegments(p, f)])) : undefined } : undefined,
     };
   },
 });
@@ -1050,6 +1360,10 @@ export const COMMANDS = [
   drawRowsCmd,
   drawFramesCmd,
   drawFigure,
+  rigCreate,
+  rigPart,
+  rigPose,
+  rigBake,
   drawShapes,
   transform,
   copyCel,
@@ -1068,6 +1382,7 @@ export function describeProject(p: Project): string {
     `Paleta (${p.palette.length}): ${p.palette.map((c) => `${c.key}=${c.hex} ${c.name}`).join(" | ")}`,
     `Camadas (baixo→cima): ${p.layers.map((l) => `${l.name}${l.visible ? "" : " (oculta)"}`).join(", ")}`,
     `Durações: ${p.frames.map((f, i) => `${i}:${f.duration ?? Math.round(1000 / p.fps)}ms`).join(" ")}`,
+    ...(p.rig ? [`Rig: ${p.rig.bones.length} ossos (${p.rig.bones.map((b) => b.name).join(", ")}), ${p.rig.parts.length} partes de arte, ${p.frames.filter((f) => f.pose).length} frame(s) com pose.`] : []),
   ].join("\n");
 }
 
