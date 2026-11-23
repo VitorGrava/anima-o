@@ -81,43 +81,62 @@ function facets(pts, color, depth) {
   }
   return out;
 }
-const R3 = ridge(prng(7), 46, 44, 0.62, 22, 26), R2 = ridge(prng(12), 62, 26, 0.6, 12, 22), R1 = ridge(prng(3), 76, 10, 0.55, 4, 20);
-draw("montanhas3", [mpoly(R3, K("m3")), ...facets(R3, K("m3L"), 26)]);
-draw("montanhas2", [mpoly(R2, K("m2")), ...facets(R2, K("m2L"), 16)]);
-draw("montanhas1", [mpoly(R1, K("m1")), ...facets(R1, K("m1L"), 8)]);
-// disco do sol já baixo, meio escondido pela crista de perto
-draw("ceu", [{ type: "gradient", x: SX - 12, y: SY - 12, w: 24, h: 24, direction: "radial", cx: SX, cy: SY, r: 9, colors: [K("sun"), K("sun"), K("sun"), K("s7"), "."], dither: "bayer4", suavidade: 0.4 }]);
-draw("floresta", [{ type: "forest", x: 0, w: W, base: HZ, altura_min: 3, altura_max: 8, largura_min: 3, largura_max: 5, folga: 0.2, seed: 5, cores: [K("tree"), K("treeD")], tipo: "pinheiro" }]);
-// textura de rocha/neve rala nas encostas (quebra o "papel recortado"), antes da névoa
-draw("montanhas3", [{ type: "scatter", x: 0, y: 20, w: W, h: HZ - 20, colors: [K("m2"), K("m3L")], densidade: 0.035, forma: "traco", distancia: 3, seed: 31, only: K("m3") },
-  { type: "scatter", x: 0, y: 20, w: W, h: HZ - 20, colors: [K("mL")], densidade: 0.03, forma: "traco", distancia: 3, seed: 32, only: K("m3L") }]);
-draw("montanhas2", [{ type: "scatter", x: 0, y: 40, w: W, h: HZ - 40, colors: [K("m1"), K("m2L")], densidade: 0.018, forma: "traco", distancia: 4, seed: 33, only: K("m2") }]);
+// plano de trás: crista própria (para as faces acesas); planos da frente: terrain com `vale` no sol
+const R3 = ridge(prng(7), 60, 30, 0.6, 20, 28);
+draw("montanhas3", [mpoly(R3, K("m3")), ...facets(R3, K("m3L"), 20)]);
+draw("montanhas2", [{ type: "terrain", topo: 70, amp: 18, rugosidade: 0.58, seed: 12, ate: HZ, color: K("m2"), vale: { x: SX, largura: 44, profundidade: 9 } }]);
+draw("montanhas1", [{ type: "terrain", topo: 78, amp: 7, rugosidade: 0.55, seed: 3, ate: HZ, color: K("m1"), vale: { x: SX, largura: 36, profundidade: 3 } }]);
+// disco do sol baixo, no vale: fica no CÉU, as cristas da frente cortam a parte de baixo
+draw("ceu", [{ type: "gradient", x: SX - 12, y: SY - 12, w: 24, h: 24, direction: "radial", cx: SX, cy: SY, r: 9, colors: [K("sun"), K("sun"), K("sun"), "."], dither: "bayer4", suavidade: 0.4 }]);
+// mata da outra margem em GRUPOS de alturas diferentes, com vãos (não um pente uniforme)
+const rf = prng(55); const groves = [];
+for (let x = 0; x < W;) {
+  const gw = 8 + Math.round(rf() * 34), hmax = 5 + Math.round(rf() * 6);
+  groves.push({ type: "forest", x, w: gw, base: HZ, altura_min: Math.max(3, hmax - 4), altura_max: hmax, largura_min: 3, largura_max: 6, folga: 0.1, seed: 5 + x, cores: [K("tree"), K("treeD")], tipo: rf() < 0.6 ? "pinheiro" : "mista" });
+  x += gw + 3 + Math.round(rf() * 16);
+}
+draw("floresta", groves);
+draw("floresta", [{ type: "polygon", points: [[0, HZ], [0, HZ - 1], [W, HZ - 1], [W, HZ]], color: K("treeD") }]);
 draw("montanhas1", [{ type: "scatter", x: 0, y: 60, w: W, h: HZ - 60, colors: [K("tree"), K("m1L")], densidade: 0.04, forma: "tufo", distancia: 3, seed: 34, only: K("m1") }]);
-tf("montanhas3", { op: "haze", color: K("s6"), quantidade: 0.45 });
-tf("montanhas2", { op: "haze", color: K("s5"), quantidade: 0.25 });
+tf("montanhas3", { op: "haze", color: K("s6"), quantidade: 0.55 });
+tf("montanhas2", { op: "haze", color: K("s5"), quantidade: 0.3 });
 tf("montanhas1", { op: "haze", color: K("s5"), quantidade: 0.1 });
 // névoa quente rente ao horizonte (suaviza a linha mata/água)
 tf("montanhas1", { op: "haze", color: K("s6"), quantidade: 0.35, y_de: 70, y_ate: HZ, perfil: "subindo" });
-tf("floresta", { op: "haze", color: K("s5"), quantidade: 0.3, y_de: 76, y_ate: HZ, perfil: "subindo" });
-
+tf("floresta", { op: "haze", color: K("s5"), quantidade: 0.12, y_de: 72, y_ate: HZ, perfil: "subindo" });
+// luz de borda: as cristas perto do sol ficam acesas (contraluz), mais forte quanto mais perto
+for (const [R, layer, c1, c2] of [[R3, "montanhas3", "s7", "s6"]]) {
+  const rim = [];
+  for (let i = 0; i < R.length - 1; i++) {
+    const d = Math.abs(R[i][0] - SX); if (d > 56) continue;
+    rim.push({ type: "line", x1: R[i][0], y1: R[i][1], x2: R[i + 1][0], y2: R[i + 1][1], color: K(d < 28 ? c1 : c2) });
+  }
+  draw(layer, rim);
+}
 // ---------- lago ----------
 draw("lago", [
-  { type: "gradient", x: 0, y: HZ, w: W, h: H - HZ, colors: ["w1", "w2", "w3", "w4", "w5", "wd"].map(K), direction: "vertical", dither: "bayer4", suavidade: 0.7 },
+  { type: "gradient", x: 0, y: HZ, w: W, h: H - HZ, colors: ["w1", "w2", "w3", "w4", "w5", "wd"].map(K), direction: "vertical", dither: "bayer4", suavidade: 0.45 },
   { type: "scatter", x: 0, y: HZ + 3, w: W, h: H - HZ - 3, colors: [K("w2"), K("w3")], densidade: 0.04, forma: "onda", distancia: 3, seed: 3 },
   { type: "scatter", x: 0, y: HZ + 4, w: W, h: 24, colors: [K("s4"), K("s3")], densidade: 0.03, forma: "traco", distancia: 4, seed: 21 },
   { type: "scatter", x: 0, y: HZ + 20, w: W, h: H - HZ - 20, colors: [K("w4"), K("wd")], densidade: 0.05, forma: "onda", distancia: 3, seed: 9 },
 ]);
-tf("reflexo", { op: "reflect", fonte: ["montanhas3", "montanhas2", "montanhas1", "floresta"], y: HZ, alto: 30, onda: 1.3, mistura: 0.38, agua: K("w3"), dissolver: 0.15 });
-// coluna de luz do sol na água
+tf("reflexo", { op: "reflect", fonte: ["montanhas3", "montanhas2", "montanhas1", "floresta"], y: HZ, alto: 30, onda: 1.3, mistura: 0.42, agua: K("w3"), dissolver: 0 });
+// coluna de luz do sol na água: traços horizontais que se estreitam e se rompem para baixo (sem caixa)
+const rs = prng(91); const col = [];
+for (let y = HZ + 1; y < H; y++) {
+  const t = (y - HZ) / (H - HZ), hw = Math.round(13 - 7 * t), keep = 0.95 - 0.75 * t;
+  for (let x = SX - hw; x <= SX + hw;) {
+    const len = 2 + Math.floor(rs() * 6);
+    if (rs() < keep * (1 - Math.abs(x - SX) / (hw + 4))) col.push({ type: "line", x1: x, y1: y, x2: Math.min(SX + hw, x + len - 1), y2: y, color: K(t < 0.12 ? "sun" : t < 0.35 ? "wl" : "w0") });
+    x += len + 1 + Math.floor(rs() * 2 + t * 4);
+  }
+  if (t > 0.1) y += rs() < 0.5 ? 1 : 0;
+}
+draw("brilho", col);
+// ondulação por cima do reflexo (traços horizontais, sem a trama regular do dissolver)
 draw("brilho", [
-  { type: "gradient", x: SX - 40, y: HZ, w: 80, h: 60, direction: "radial", cx: SX, cy: HZ, r: 26, colors: [K("sun"), K("w0"), K("w1"), "."], dither: "bayer4", suavidade: 0.8 },
-  { type: "scatter", x: SX - 6, y: HZ + 2, w: 12, h: 8, colors: [K("wl"), K("w0")], densidade: 0.160, forma: "onda", distancia: 2, seed: 12 },
-  { type: "scatter", x: SX - 10, y: HZ + 10, w: 20, h: 8, colors: [K("wl"), K("w0")], densidade: 0.145, forma: "onda", distancia: 2, seed: 13 },
-  { type: "scatter", x: SX - 14, y: HZ + 18, w: 28, h: 8, colors: [K("wl"), K("w0")], densidade: 0.130, forma: "onda", distancia: 2, seed: 14 },
-  { type: "scatter", x: SX - 18, y: HZ + 26, w: 36, h: 8, colors: [K("wl"), K("w0")], densidade: 0.115, forma: "onda", distancia: 2, seed: 15 },
-  { type: "scatter", x: SX - 22, y: HZ + 34, w: 44, h: 8, colors: [K("wl"), K("w0")], densidade: 0.100, forma: "onda", distancia: 2, seed: 16 },
-  { type: "scatter", x: SX - 26, y: HZ + 42, w: 52, h: 8, colors: [K("wl"), K("w0")], densidade: 0.085, forma: "onda", distancia: 2, seed: 17 },
-  { type: "scatter", x: SX - 30, y: HZ + 50, w: 60, h: 8, colors: [K("wl"), K("w0")], densidade: 0.070, forma: "onda", distancia: 2, seed: 18 },
+  { type: "scatter", x: 0, y: HZ + 2, w: W, h: 30, colors: [K("w2"), K("s4")], densidade: 0.05, forma: "onda", distancia: 3, seed: 41 },
+  { type: "scatter", x: 0, y: HZ + 6, w: W, h: 30, colors: [K("w4"), K("w5")], densidade: 0.05, forma: "onda", distancia: 3, seed: 42 },
 ]);
 
 // ---------- margem esquerda + praia do primeiro plano ----------
@@ -147,16 +166,18 @@ draw("margem", [
   { type: "forest", x: 0, w: 30, base: 104, altura_min: 10, altura_max: 16, largura_min: 6, largura_max: 10, folga: 0.2, seed: 4, cores: [K("treeD"), K("g0")], tipo: "redonda" },
 ]);
 // ---------- casas (box3d, todas com o mesmo ponto de fuga) ----------
-const houses = [
-  { x: 30, y: 92, w: 14, h: 8, prof: 7, rise: 6, espaco: 2 },
-  { x: 70, y: 97, w: 14, h: 9, prof: 6, rise: 7, espaco: 2 },
-  { x: 44, y: 109, w: 22, h: 13, prof: 10, rise: 10, espaco: 3 },
-  { x: 4, y: 130, w: 34, h: 20, prof: 15, rise: 15, espaco: 3 },
-];
+// tamanho pela distância: largura proporcional a (y - HZ + 8), como a escala de perspectiva do cais
+const hs = (x, y, w0) => { const k = (y - HZ + 8) / (130 - HZ + 8); const w = Math.round(w0 * k); return { x, y, w, h: Math.round(w * 0.6), prof: Math.round(w * 0.45), rise: Math.round(w * 0.45), espaco: w > 18 ? 3 : 2 }; };
+const houses = [hs(30, 92, 34), hs(72, 98, 34), hs(44, 110, 34), hs(4, 130, 34)];
 for (const h of houses) {
   const B = { ...h, xv: XV, yh: HZ };
-  // sombra de contato no chão
-  draw("casas", [{ type: "polygon", points: [[B.x - 1, B.y + 1], [B.x + B.w + B.prof, B.y + 1], [B.x + B.w + B.prof - 2, B.y + 3], [B.x, B.y + 3]], color: K("g0") }]);
+  // degrau de terra (patamar) onde a casa se assenta: topo claro, face da frente escura, sombra na base
+  const t = Math.max(2, Math.round(h.w / 10));
+  draw("casas", [
+    { type: "polygon", points: [[B.x - 3, B.y + 1], [B.x + B.w + B.prof + 2, B.y + 1], [B.x + B.w + B.prof, B.y + 1 + t], [B.x - 3, B.y + 1 + t]], color: K("sandD") },
+    { type: "polygon", points: [[B.x - 3, B.y - 1], [B.x + B.w + B.prof + 2, B.y - 1], [B.x + B.w + B.prof + 2, B.y], [B.x - 3, B.y]], color: K("g2") },
+    { type: "line", x1: B.x - 3, y1: B.y + 1 + t, x2: B.x + B.w + B.prof, y2: B.y + 1 + t, color: K("g0") },
+  ]);
   draw("casas", [{ type: "box3d", ...B, frente: K("fr"), lado: K("sd"), telhado: K("rf"), empena: K("gab"), linhas: K("frL"), linhas_telhado: K("rfL") }]);
   const L = (u, v) => paint.pontoLateral({ ...B, frente: 0, lado: 0, telhado: 0, empena: 0 }, u, v).map(Math.round);
   const quad = (u0, u1, v0, v1, c) => ({ type: "polygon", points: [L(u0, v0), L(u1, v0), L(u1, v1), L(u0, v1)], color: K(c) });
@@ -223,7 +244,7 @@ draw("barco", [
   bline(0, 6, 30, 7, "dkL"), bline(30, 7, 33, 9, "dkL"),
   // mastro, retranca e vela recolhida
   bline(14, 6, 14, 30, "mast"), bline(14, 12, 27, 11, "mast"),
-  bpoly([[14.5, 28], [16.5, 26], [17.5, 13], [14.5, 12.5]], "sail"), bline(16, 25, 17, 14, "sailD"),
+  bpoly([[14.5, 28], [20.5, 13], [14.5, 13]], "sail"), bline(15.5, 14, 19.5, 14, "sailD"),
   bline(14.5, 29.5, 32, 9, "rope"),
   // cabine com janela acesa
   bpoly([[4, 6], [11, 6], [11, 11], [4, 11]], "hullL"), bpoly([[3.5, 11], [11.5, 11], [11.5, 12], [3.5, 12]], "hullD"),
