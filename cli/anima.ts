@@ -13,6 +13,7 @@
  *   anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--png saida.png]
  *   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
  *   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N]
+  anima import <projeto> <imagem.png> [--largura N|--altura N|--grade auto|N] [--cores N] [--fundo auto|nenhum|#hex] [--camada nome] [--manter-canvas]   (reduz uma imagem à grade de pixel e à paleta)
  *   anima guide                            imprime o guia do animador (fluxo e princípios): leia antes de começar
  *   anima tools                            lista os comandos com seus parâmetros (JSON Schema)
  */
@@ -24,11 +25,13 @@ import {
   createProject,
   describeProject,
   renderImages,
+  importImage,
+  importIntoProject,
   runCommand,
   type CommandResult,
   type Project,
 } from "../src/engine/index.ts";
-import { encodePNG } from "../server/png.ts";
+import { decodePNG, encodePNG } from "../server/png.ts";
 import { ProjectStore, exportToFile } from "../mcp/store.ts";
 import { SHORT_GUIDE, SYSTEM_PROMPT } from "../server/prompt.ts";
 import { writeFile } from "node:fs/promises";
@@ -240,6 +243,23 @@ export async function main(argv: string[]): Promise<number> {
       });
       console.log(r.text);
       return r.ok ? 0 : 1;
+    }
+    case "import": {
+      const [file, img] = args.filter((a) => !a.startsWith("--"));
+      const largura = flag(args, "largura"), altura = flag(args, "altura"), cores = flag(args, "cores"), grade = flag(args, "grade"), fundo = flag(args, "fundo"), camada = flag(args, "camada");
+      const manter = boolFlag(args, "manter-canvas") || boolFlag(args, "manter_canvas");
+      if (!file || !img) break;
+      await store.open(file, { width: 32, height: 32 });
+      const dec = decodePNG(await readFile(img));
+      const r = importImage(dec, { largura: largura ? Number(largura) : undefined, altura: altura ? Number(altura) : undefined, cores: cores ? Number(cores) : undefined, grade: grade && grade !== "auto" ? Number(grade) : "auto", fundo });
+      if (!manter && (r.width !== store.project.width || r.height !== store.project.height)) {
+        const rr = runCommand(store.project, "set_canvas", { width: r.width, height: r.height });
+        if (!rr.ok) throw new Error(rr.text);
+      }
+      const out = importIntoProject(store.project, r, { camada });
+      await store.save();
+      console.log(`Importado: ${r.width}x${r.height} px (pixel da origem ${r.cell || "reamostrado"}x), ${r.palette.length} cor(es) (${out.adicionadas} nova(s)), fundo ${r.fundo ?? "nenhum"} → camada "${out.camada}" de ${store.path}`);
+      return 0;
     }
     case "export": {
       const scale = Number(flag(args, "scale") ?? 4);

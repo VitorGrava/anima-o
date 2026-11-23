@@ -9,9 +9,11 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { describeProject, jsonSchemaOf, commandTools, renderImages, runCommand, type Project } from "../src/engine/index.ts";
+import { describeProject, jsonSchemaOf, commandTools, renderImages, runCommand, importImage, importIntoProject, type Project } from "../src/engine/index.ts";
 import { SYSTEM_PROMPT } from "../server/prompt.ts";
-import { encodePNG } from "../server/png.ts";
+import { decodePNG, encodePNG } from "../server/png.ts";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { ProjectStore, exportToFile } from "./store.ts";
 
 const VERSION = "0.2.0";
@@ -37,6 +39,17 @@ const OpenProject = z.object({
     .optional()
     .describe("Se o arquivo não existir, cria um projeto novo com estas opções"),
   overwrite: z.boolean().default(false).describe("true: cria um projeto novo mesmo se o arquivo existir (apaga o anterior)"),
+});
+
+const ImportImage = z.object({
+  path: z.string().min(1).describe("PNG a importar (relativo ao diretório atual). WebP/JPG: converta para PNG antes."),
+  largura: z.number().int().min(1).max(512).optional().describe("Largura final em px do canvas (reamostra); omita para detectar o tamanho do pixel e voltar à grade original"),
+  altura: z.number().int().min(1).max(512).optional(),
+  grade: z.number().int().min(1).max(64).optional().describe("Tamanho do pixel na imagem de origem, se já souber (ex.: 8 para uma arte ampliada 8x). Padrão: detecta sozinho"),
+  cores: z.number().int().min(2).max(255).default(32).describe("Máximo de cores (median cut)"),
+  fundo: z.string().default("auto").describe('"auto" (cor dos 4 cantos vira transparente), "nenhum" ou "#rrggbb"'),
+  camada: z.string().optional().describe("Camada onde gravar (padrão: a de cima)"),
+  ajustar_canvas: z.boolean().default(true).describe("Redimensiona o canvas para o tamanho importado"),
 });
 
 const ExportFile = z.object({
@@ -67,6 +80,11 @@ export function createAnimaServer(store = new ProjectStore()) {
       inputSchema: jsonSchemaOf(ExportFile),
     },
     // o "export" da engine baixa no navegador; aqui ele é substituído por export_file
+    {
+      name: "import_image",
+      description: "IMPORTA um PNG para a grade de pixel art: detecta o tamanho do pixel de uma arte ampliada (ou reamostra para `largura`), corta à grade pela cor mais frequente de cada célula, torna o fundo transparente e quantiza a paleta (median cut). Use para trazer uma referência, ou a saída de um gerador de imagem, e então contornar, sombrear, animar e conferir com a engine.",
+      inputSchema: jsonSchemaOf(ImportImage),
+    },
     ...commandTools(["export"]),
   ];
 
@@ -82,6 +100,18 @@ export function createAnimaServer(store = new ProjectStore()) {
         return reply([{ type: "text", text: `${created ? "Projeto criado" : "Projeto aberto"}: ${store.path}\n${describeProject(store.project)}` }]);
       }
       const project: Project = await store.current();
+      if (name === "import_image") {
+        const i = ImportImage.parse(args ?? {});
+        const dec = decodePNG(await readFile(path.resolve(process.cwd(), i.path)));
+        const r = importImage(dec, { largura: i.largura, altura: i.altura, grade: i.grade ?? "auto", cores: i.cores, fundo: i.fundo });
+        if (i.ajustar_canvas && (r.width !== project.width || r.height !== project.height)) { const rr = runCommand(project, "set_canvas", { width: r.width, height: r.height }); if (!rr.ok) throw new Error(rr.text); }
+        const out = importIntoProject(project, r, { camada: i.camada });
+        await store.save();
+        const shown = runCommand(project, "view", { as_text: false });
+        const content: Content[] = [{ type: "text", text: `Importado: ${r.width}x${r.height} px (pixel da origem ${r.cell || "reamostrado"}x), ${r.palette.length} cor(es) (${out.adicionadas} nova(s)), fundo ${r.fundo ?? "nenhum"} → camada "${out.camada}".` }];
+        if (shown.ok && shown.images) for (const img of renderImages(project, shown.images)) content.push({ type: "image", data: encodePNG(img.width, img.height, img.data).toString("base64"), mimeType: "image/png" });
+        return reply(content);
+      }
       if (name === "export_file") {
         const i = ExportFile.parse(args ?? {});
         const out = await exportToFile(project, i);

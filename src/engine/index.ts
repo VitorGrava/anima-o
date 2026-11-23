@@ -4,6 +4,7 @@ export * from "./ascii.ts";
 export * from "./serialize.ts";
 export * from "./commands.ts";
 export { exportGIF } from "./gif.ts";
+export * from "./importer.ts";
 export * as draw from "./draw.ts";
 export * from "./tools.ts";
 export * from "./view.ts";
