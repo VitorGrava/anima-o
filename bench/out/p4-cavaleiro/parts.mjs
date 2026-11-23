@@ -115,13 +115,16 @@ const foot=[
 ];
 const shield=[
 "kkkkkkkkkk",
+"kEEEDDDDCk",
 "kEEE98DDCk",
 "k98888887k",
 "k98888887k",
+"kEEE98DDCk",
 "kEEE98DDCk",
 ".kEE98DCk.",
 ".kDD98DCk.",
 "..kD98Ck..",
+"...kDCk...",
 "....kk....",
 ];
 const sword=[
