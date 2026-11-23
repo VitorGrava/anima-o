@@ -87,6 +87,8 @@ export interface ScatterSpec {
   only?: number;                            // só onde já há esta cor (0 = qualquer lugar)
   /** cor da ponta do tufo/traço (opcional) */
   ponta?: number;
+  /** (x,y) bloqueado: não pinta (ex.: onde outra camada já tem arte) */
+  blocked?: (x: number, y: number) => boolean;
 }
 
 function rng(seed: number) {
@@ -103,6 +105,7 @@ export function scatter(s: Surface, sp: ScatterSpec): number {
   const put = (x: number, y: number, c: number) => {
     if (x < 0 || y < 0 || x >= s.width || y >= s.height) return;
     if (sp.only && s.data[y * s.width + x] !== sp.only && c !== 0) return;
+    if (sp.blocked?.(x, y)) return;
     s.data[y * s.width + x] = c;
   };
   let n = 0;
@@ -112,6 +115,7 @@ export function scatter(s: Surface, sp: ScatterSpec): number {
     const x = sp.x + Math.floor(rnd() * sp.w), y = sp.y + Math.floor(rnd() * sp.h);
     if (x < 0 || y < 0 || x >= s.width || y >= s.height) continue;
     if (sp.only && s.data[y * s.width + x] !== sp.only) continue;
+    if (sp.blocked?.(x, y)) continue;
     if (sp.distancia > 1) {
       let ok = true;
       for (let dy = -cell; dy <= cell && ok; dy++) for (let dx = -cell; dx <= cell; dx++) if (grid.has(`${x + dx},${y + dy}`)) { ok = false; break; }

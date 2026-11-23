@@ -1282,6 +1282,7 @@ const shape = z.discriminatedUnion("type", [
     seed: z.number().int().default(1).describe("semente: mesmo valor = mesma textura (reprodutível); use sementes diferentes por plano"),
     only: colorRef.optional().describe("só espalha sobre esta cor (grama só sobre o campo)"),
     ponta: colorRef.optional().describe("cor da ponta do tufo/traço/cruz (ex.: luz)"),
+    evitar: z.array(z.string()).max(8).optional().describe("camadas onde NÃO espalhar: o elemento não cai onde estas camadas já têm arte (flores fora da casa)"),
   }).describe("TEXTURA espalhada com distância mínima (grama, estrelas, flores, pedras, folhas)."),
   z.object({ type: z.literal("fill"), x: z.number().int(), y: z.number().int(), color: colorRef }).describe("Balde de tinta a partir de (x, y)"),
 ]);
@@ -1391,7 +1392,7 @@ const drawShapes = def({
             drawGradient(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, direction: sh.direction, colors: sh.colors.map((k) => colorIndex(p, k)), dither: sh.dither, suavidade: sh.suavidade, ondas: sh.ondas, only: sh.only ? colorIndex(p, sh.only) : 0, cx: sh.cx, cy: sh.cy, r: sh.r });
             break;
           case "scatter":
-            scatter(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, colors: sh.colors.map((k) => colorIndex(p, k)), densidade: sh.densidade, forma: sh.forma, distancia: sh.distancia, seed: sh.seed, only: sh.only ? colorIndex(p, sh.only) : 0, ponta: sh.ponta ? colorIndex(p, sh.ponta) : undefined });
+            scatter(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, colors: sh.colors.map((k) => colorIndex(p, k)), densidade: sh.densidade, forma: sh.forma, distancia: sh.distancia, seed: sh.seed, only: sh.only ? colorIndex(p, sh.only) : 0, ponta: sh.ponta ? colorIndex(p, sh.ponta) : undefined, blocked: sh.evitar?.length ? ((cels) => (x: number, y: number) => cels.some((c) => c[y * p.width + x] !== 0))(sh.evitar.map((n) => getCel(p, f, findLayer(p, n).id))) : undefined });
             break;
         }
       }
@@ -1430,6 +1431,7 @@ const transform = def({
     color: colorRef.optional(),
     diagonal: z.boolean().optional().describe("outline: incluir diagonais"),
     mode: z.enum(["uniforme", "seletivo"]).optional().describe('outline: "seletivo" (sel-out) usa um tom escuro do material vizinho, mais claro no lado da luz, e não precisa de `color`'),
+    luz: z.enum(["cima-esquerda", "cima", "cima-direita", "esquerda", "direita"]).optional().describe("shade: de onde vem a luz (padrão cima-esquerda; mantenha a MESMA em toda a arte)"),
     depth: z.number().int().min(1).max(3).optional().describe("shade: espessura da sombra em pixels (padrão 1; 2 para sprites maiores que 48 px)"),
     skip: z.array(colorRef).optional().describe("shade: cores de DETALHE (olhos, boca, listras): não são sombreadas e contam como parte da região vizinha, sem criar rebordos em volta delas. Contornos escuros já são pulados"),
     preview: previewFlag,
@@ -1463,7 +1465,7 @@ const transform = def({
           break;
         case "shade": {
           const skipSet = new Set((i.skip ?? []).map((c) => colorIndex(p, c)));
-          const count = autoShade(s.data, p.width, p.height, i.depth ?? 1, (c) => (skipSet.has(c) ? null : shadeTones(p, c)), (c) => skipSet.has(c));
+          const count = autoShade(s.data, p.width, p.height, i.depth ?? 1, (c) => (skipSet.has(c) ? null : shadeTones(p, c)), (c) => skipSet.has(c), i.luz);
           if (!count) throw new Error("shade não mudou nada: a camada está vazia ou só tem contornos escuros/cores em `skip`.");
           break;
         }

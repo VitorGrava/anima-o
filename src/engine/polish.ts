@@ -44,7 +44,10 @@ export function autoShade(
   data: Uint8Array, w: number, h: number, depth: number,
   ramp: (idx: number) => { light: number; shadow: number } | null,
   detail: (idx: number) => boolean = () => false,
+  luz: "cima-esquerda" | "cima" | "cima-direita" | "esquerda" | "direita" = "cima-esquerda",
 ): number {
+  // (lx, ly) = direção PARA a luz: as bordas voltadas para ela ganham o tom claro
+  const [lx, ly] = { "cima-esquerda": [-1, -1], cima: [0, -1], "cima-direita": [1, -1], esquerda: [-1, 0], direita: [1, 0] }[luz];
   const src = data.slice();
   const cache = new Map<number, { light: number; shadow: number } | null>();
   // a própria luz/sombra da cor conta como a mesma região: rodar de novo não empilha rebordos
@@ -62,9 +65,9 @@ export function autoShade(
     if (!cache.has(c)) cache.set(c, ramp(c));
     const r = cache.get(c);
     if (!r) continue;
-    const lit = !same(x, y - 1, c) || !same(x - 1, y, c);
+    const lit = (ly !== 0 && !same(x, y + ly, c)) || (lx !== 0 && !same(x + lx, y, c));
     let shade = false;
-    for (let d = 1; d <= depth && !shade; d++) if (!same(x, y + d, c) || !same(x + d, y, c)) shade = true;
+    for (let d = 1; d <= depth && !shade; d++) if ((ly !== 0 && !same(x, y - ly * d, c)) || (lx !== 0 && !same(x - lx * d, y, c))) shade = true;
     if (lit && shade) continue;
     if (lit && r.light) { data[y * w + x] = r.light; n++; }
     else if (shade && r.shadow) { data[y * w + x] = r.shadow; n++; }
