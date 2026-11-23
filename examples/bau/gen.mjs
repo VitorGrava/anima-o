@@ -51,11 +51,11 @@ function frame(t){
   if(open){
     const gap=Math.max(rise,0);
     const edge=(r)=>"og"+r+"go";
-    for(let k=0;k<gap;k++) stamp(L.interior,["o"+(k<2?"n":"W").repeat(22)+"o"],X,BY-gap+k);
+    for(let k=0;k<gap;k++) stamp(L.interior,["oR"+(k<2?"n":"W").repeat(20)+"Ro"],X,BY-gap+k);
     
     if(t>=4){
       const heap=[[18],[15],[10],[4]];
-      stamp(L.interior,["b".repeat(20)],X+2,BY-2);
+      stamp(L.interior,["b".repeat(14)],X+5,BY-2); stamp(L.interior,["b","b"],X+4,BY-3); stamp(L.interior,["b","b"],X+19,BY-3);
       heap.forEach(([w],k)=>{ let r=""; for(let i=0;i<w;i++) r+=(i===0||i===w-1)?"b":(k===0&&i%4===2)?"Y":"y"; stamp(L.interior,[r],X+2+((20-w)>>1),BY-3-k); });
       stamp(L.interior,["b".repeat(4)],X+2+8,BY-7);
       if(t>=6){const k=t-6; {const cx=X+[8,12,16,19][k]; stamp(L.interior,["y","zzz","y"].map((r,j)=>Array(32).fill(".").map((_,i)=>(j===1?Math.abs(i-cx)<=1:i===cx)?(r[0]):".").join("")),0,BY-5);}
@@ -76,5 +76,5 @@ const cmds=[{name:"set_palette",input:{colors:pal.map(([key,hex,name])=>({key,he
  ...names.map(name=>({name:"add_layer",input:{name}})),{name:"add_frames",input:{count:N-1}}];
 for(let t=0;t<N;t++){const L=frame(t);for(const l of names)cmds.push({name:"draw_rows",input:{frames:t,layer:l,rows:L[l].map(r=>r.join("")),preview:false}});}
 cmds.push({name:"update_layer",input:{layer:"Base",delete:true}});
-cmds.push({name:"set_frame_timing",input:{frames:"all",duration_ms:[600,100,90,90,90,110,140,140,140,140]}});
+cmds.push({name:"set_frame_timing",input:{frames:"all",duration_ms:[600,100,90,90,90,100,120,120,110,260]}});
 writeFileSync(new URL("./cmds.json",import.meta.url),JSON.stringify(cmds));
