@@ -182,14 +182,15 @@ draw("margem", [
 ]);
 // ---------- casas (box3d, todas com o mesmo ponto de fuga) ----------
 // tamanho pela distância: largura proporcional a (y - HZ + 8), como a escala de perspectiva do cais
-const hs = (x, y, w0) => { const k = (y - HZ + 8) / (130 - HZ + 8); const w = Math.round(w0 * k); return { x, y, w, h: Math.round(w * 0.6), prof: Math.round(w * 0.45), rise: Math.round(w * 0.45), espaco: w > 18 ? 3 : 2 }; };
-const houses = [hs(30, 92, 34), hs(72, 98, 34), hs(44, 110, 34), hs(4, 130, 34)];
+const hs = (x, y, w0) => { const k = (y - HZ + 2) / (130 - HZ + 2); const w = Math.round(w0 * k); return { x, y, w, h: Math.round(w * 0.6), prof: Math.round(w * 0.45), rise: Math.round(w * 0.45), espaco: w > 18 ? 3 : 2 }; };
+const houses = [hs(81, 96, 34), hs(28, 99, 34), hs(50, 113, 34), hs(4, 130, 34)];
 for (const h of houses) {
   const B = { ...h, xv: XV, yh: HZ };
   // degrau de terra (patamar) onde a casa se assenta: topo claro, face da frente escura, sombra na base
   const t = Math.max(2, Math.round(h.w / 10));
   draw("casas", [
     { type: "polygon", points: [[B.x - 3, B.y + 1], [B.x + B.w + B.prof + 2, B.y + 1], [B.x + B.w + B.prof, B.y + 1 + t], [B.x - 3, B.y + 1 + t]], color: K("sandD") },
+    { type: "line", x1: B.x - 3, y1: B.y + 1, x2: B.x + B.w + B.prof + 2, y2: B.y + 1, color: K("g0") },
     { type: "polygon", points: [[B.x - 3, B.y - 1], [B.x + B.w + B.prof + 2, B.y - 1], [B.x + B.w + B.prof + 2, B.y], [B.x - 3, B.y]], color: K("g2") },
     { type: "line", x1: B.x - 3, y1: B.y + 1 + t, x2: B.x + B.w + B.prof, y2: B.y + 1 + t, color: K("g0") },
   ]);
@@ -250,7 +251,7 @@ const lx = dkPoly[1][0];
 draw("cais", [{ type: "rect", x: lx, y: Y1 - 8, w: 1, h: 8, color: K("post"), filled: true }, { type: "rect", x: lx - 1, y: Y1 - 10, w: 3, h: 3, color: K("lamp"), filled: true }, { type: "pixels", points: [[lx, Y1 - 11]], color: K("post") }]);
 
 // ---------- barco atracado à direita do cais (casco de lado, paralelo ao quadro) ----------
-const BY = 125, BX = 145, S = 1.35; // linha d'água, popa e escala do barco
+const BY = 125, BX = 163, S = 1.35; // linha d'água, popa e escala do barco
 const bp = (u, v) => [Math.round(BX + u * S), Math.round(BY - v * S)];
 const bpoly = (pts, c) => ({ type: "polygon", points: pts.map(([u, v]) => bp(u, v)), color: K(c) });
 const bline = (u1, v1, u2, v2, c) => { const [x1, y1] = bp(u1, v1), [x2, y2] = bp(u2, v2); return { type: "line", x1, y1, x2, y2, color: K(c) }; };
