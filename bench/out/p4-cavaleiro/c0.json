@@ -1,0 +1,2 @@
+[{"name":"add_frames","input":{"count":7}},
+{"name":"rig_create","input":{"template":"humanoide","height":52,"style":"estilizado","weapon_length":16,"ground":60,"x":30}}]
