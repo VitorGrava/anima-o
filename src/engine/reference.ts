@@ -176,6 +176,7 @@ const CENARIO = [
 
 const PROCESSO = [
   "PROCESSO que produziu a melhor arte até agora (esqueleto 32x32/64x64: de 4/10 para 7/10 com um crítico independente; referências profissionais valem ~8):",
+  "0. PESQUISE NA INTERNET antes (regra permanente): WebSearch por \"pixel art <assunto> sprite\" (OpenGameArt, itch.io, Lospec, tutoriais), baixe as imagens das páginas (fetch) e OLHE com Read; se um site bloquear (403), tente outro. Cite as referências na entrega.",
   "1. ESTUDE referências reais ANTES de desenhar (importe um PNG com import_image/anima import e olhe de perto): pose e peso (3/4, joelhos dobrados, arma cruzando a silhueta), proporção da cabeça, quantas cores, onde está o único acento de cor. Liste 5 características concretas para copiar.",
   "2. Monte as linhas por SCRIPT com validador de largura (cada linha com o mesmo número de colunas); desenhe ASSIMÉTRICO quando a pose pedir (espelhar uma metade só dá pose dura e frontal). Escreva o corpo SEM contorno e use draw_rows contorno=\"seletivo\" (ou transform outline seletivo) no fim.",
   "3. RODADAS: a cada uma, exporte o PNG ampliado, LEIA e liste os 5 piores defeitos contra a referência (forma do crânio/cabeça, pose, tronco, membros, cor, contorno, silhueta); corrija SÓ isso; compare com a rodada anterior: se piorou, descarte e volte. Mínimo 5 rodadas em arte original.",

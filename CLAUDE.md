@@ -4,6 +4,8 @@ Este repositório é uma engine de animação pixel art feita para ser controlad
 
 ## Para desenhar e animar
 
+**REGRA PERMANENTE (pedido do dono do projeto):** antes de fazer QUALQUER pixel art original, PESQUISE REFERÊNCIAS NA INTERNET (WebSearch; baixe as imagens com o fetch e OLHE com Read; liste 5 características concretas: pose, proporção da cabeça, cores, contorno, acento) e só então desenhe. Na entrega diga quais referências usou. E NÃO PARE no meio: o dono pediu para continuar melhorando e iterando até o limite; faça as rodadas, compare com a referência, descarte o que piorar e siga (`reference processo`). Só use `import_image` com referências para estudo local (algumas licenças proíbem redistribuir ou treinar IA; não copie para o repositório).
+
 Use o servidor MCP `anima` (ferramentas `open_project`, `draw_rows`, `draw_shapes`,
 `transform`, `add_frames`, `view`, `export_file`, ...). As instruções do servidor trazem
 os princípios de pixel art e de animação: siga-os.
