@@ -156,3 +156,25 @@ describe("contorno seletivo entre camadas e aviso da nota", () => {
     expect(runCommand(p, "avaliar", {}).text).toMatch(/NÃO mede pose, expressão, anatomia nem semelhança/);
   });
 });
+
+describe("transform shade forma volume", () => {
+  const lum = (h: string) => parseInt(h.slice(1, 3), 16) * 0.3 + parseInt(h.slice(3, 5), 16) * 0.59 + parseInt(h.slice(5, 7), 16) * 0.11;
+  it("dá um bloco claro em cima/esquerda e um de sombra embaixo/direita, mais grosso que 1 px", () => {
+    const p = disc();
+    ok(p, "transform", { frames: 0, op: "shade", forma: "volume" });
+    const cel = p.frames[0].cels[p.layers[0].id];
+    const L = (x: number, y: number) => lum(p.palette[cel[y * 20 + x] - 1].hex);
+    expect(used(p).size).toBe(3);
+    expect(L(7, 7)).toBeGreaterThan(L(10, 10));      // bloco claro entra além do rebordo
+    expect(L(13, 13)).toBeLessThan(L(10, 10));       // bloco de sombra
+    expect(L(6, 8)).toBeGreaterThan(L(10, 10));
+  });
+  it("regiões pequenas (< 14 px) não mudam", () => {
+    const p = createProject({ width: 8, height: 8 });
+    ok(p, "set_palette", { colors: [{ key: "r", hex: "#d84a3a", name: "vermelho" }] });
+    ok(p, "draw_shapes", { shapes: [{ type: "rect", x: 2, y: 2, w: 3, h: 3, color: "r", fill: true }] });
+    const r = runCommand(p, "transform", { frames: 0, op: "shade", forma: "volume" });
+    expect(r.ok).toBe(false);                        // nada a sombrear: avisa em vez de fingir
+    expect(used(p).size).toBe(1);
+  });
+});

@@ -125,3 +125,60 @@ export function detailColors(data: Uint8Array, w: number, h: number): Set<number
   }
   return new Set([...all].filter((c) => !big.has(c)));
 }
+
+/**
+ * Sombreamento por VOLUME (formas orgânicas: barriga, coxa, cabeça, folha): em cada região de cor única, a luz vem de uma
+ * direção e a região ganha um BLOCO claro do lado da luz e um bloco de sombra do lado oposto (como uma esfera/elipsoide),
+ * não só um rebordo de 1 px. A decisão usa a posição relativa ao centro da região; um filtro de maioria 3x3 remove pixels isolados
+ * e pixels de detalhe contam como a mesma região. Regiões pequenas (< 14 px) só ganham rebordo.
+ */
+export function autoShadeVolume(
+  data: Uint8Array, w: number, h: number,
+  ramp: (idx: number) => { light: number; shadow: number } | null,
+  detail: (idx: number) => boolean = () => false,
+  luz: "cima-esquerda" | "cima" | "cima-direita" | "esquerda" | "direita" = "cima-esquerda",
+): number {
+  const src = data.slice();
+  const [lx, ly] = ({ "cima-esquerda": [-1, -1], cima: [0, -1], "cima-direita": [1, -1], esquerda: [-1, 0], direita: [1, 0] } as const)[luz];
+  const norm = Math.hypot(lx, ly) || 1;
+  const seen = new Uint8Array(w * h), tone = new Int8Array(w * h);      // 0 base, 1 luz, -1 sombra
+  const same = (a: number, c: number) => a === c || detail(a);
+  let n = 0;
+  for (let st = 0; st < w * h; st++) {
+    const c = src[st];
+    if (!c || seen[st] || detail(c)) continue;
+    const r = ramp(c);
+    const stack = [st]; seen[st] = 1;
+    const cells: number[] = [];
+    while (stack.length) {
+      const k = stack.pop()!; cells.push(k);
+      const x = k % w, y = (k - x) / w;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue; const q = yy * w + xx; if (!seen[q] && same(src[q], c)) { seen[q] = 1; stack.push(q); } }
+    }
+    if (!r || cells.length < 14) continue;
+    let x0 = w, x1 = -1, y0 = h, y1 = -1;
+    for (const k of cells) { const x = k % w, y = (k - x) / w; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    const cx = (x0 + x1 + 1) / 2, cy = (y0 + y1 + 1) / 2, rx = Math.max(1.5, (x1 - x0 + 1) / 2), ry = Math.max(1.5, (y1 - y0 + 1) / 2);
+    for (const k of cells) {
+      const x = k % w, y = (k - x) / w;
+      if (src[k] !== c) continue;                                       // detalhes (olhos etc.) ficam como estão
+      const f = -(((x + 0.5 - cx) / rx) * lx + ((y + 0.5 - cy) / ry) * ly) / norm;   // > 0 = lado oposto à luz; < 0 = lado da luz
+      tone[k] = f < -0.42 ? 1 : f > 0.38 ? -1 : 0;
+    }
+    // maioria 3x3 sobre as células da região: tira ruído e deixa blocos
+    const cur = tone.slice();
+    for (const k of cells) {
+      if (src[k] !== c) continue;
+      const x = k % w, y = (k - x) / w; const cnt = { "-1": 0, "0": 0, "1": 0 } as Record<string, number>;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue; const q = yy * w + xx; if (src[q] === c) cnt[String(cur[q])]++; }
+      const best = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0];
+      tone[k] = Number(best[0]) as 0 | 1 | -1;
+    }
+    for (const k of cells) {
+      if (src[k] !== c) continue;
+      if (tone[k] === 1 && r.light) { data[k] = r.light; n++; }
+      else if (tone[k] === -1 && r.shadow) { data[k] = r.shadow; n++; }
+    }
+  }
+  return n;
+}

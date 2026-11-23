@@ -9,7 +9,7 @@ import { z } from "zod";
 import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.ts";
 import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
-import { autoShade, cleanCorners, detailColors, selectiveOutline } from "./polish.ts";
+import { autoShade, autoShadeVolume, cleanCorners, detailColors, selectiveOutline } from "./polish.ts";
 import { drawBox3d, drawCurve, drawForest, drawGradient, drawTerrain, fillPolygon, scatter } from "./paint.ts";
 import { BG_LAYER, evaluateBeauty, formatCritique, unionBox } from "./critique.ts";
 import { REFERENCE_TOPICS, bodyProportions, darkOutline, makeRamp, reference } from "./reference.ts";
@@ -1578,6 +1578,7 @@ const transform = def({
     onda: z.number().min(0).max(8).optional().describe("reflect: amplitude das ondulações horizontais em px (padrão 1.5; cresce com a distância)"),
     mistura: z.number().min(0).max(1).optional().describe("reflect: quanto o reflexo se mistura com a cor da água (padrão 0.45)"),
     agua: colorRef.optional().describe("reflect: cor da água para a mistura"),
+    forma: z.enum(["borda", "volume"]).optional().describe("shade: \"borda\" (padrão) pinta só o rebordo de 1–3 px; \"volume\" dá um BLOCO claro do lado da luz e um de sombra do lado oposto em cada região (barriga, coxa, cabeça, folha), como uma esfera. Use volume em formas orgânicas médias/grandes; combine com borda depois se quiser o rebordo"),
     depth: z.number().int().min(1).max(3).optional().describe("shade: espessura da sombra em pixels (padrão 1; 2 para sprites maiores que 48 px)"),
     skip: z.array(colorRef).optional().describe("shade: cores de DETALHE (olhos, boca, listras): não são sombreadas e contam como parte da região vizinha, sem criar rebordos em volta delas. Contornos escuros já são pulados"),
     preview: previewFlag,
@@ -1613,7 +1614,9 @@ const transform = def({
           break;
         case "shade": {
           const skipSet = new Set((i.skip ?? []).map((c) => colorIndex(p, c)));
-          const count = autoShade(s.data, p.width, p.height, i.depth ?? 1, (c) => (skipSet.has(c) ? null : shadeTones(p, c)), (c) => skipSet.has(c), i.luz);
+          const count = i.forma === "volume"
+            ? autoShadeVolume(s.data, p.width, p.height, (c) => (skipSet.has(c) ? null : shadeTones(p, c)), (c) => skipSet.has(c), i.luz)
+            : autoShade(s.data, p.width, p.height, i.depth ?? 1, (c) => (skipSet.has(c) ? null : shadeTones(p, c)), (c) => skipSet.has(c), i.luz);
           if (!count) throw new Error("shade não mudou nada: a camada está vazia ou só tem contornos escuros/cores em `skip`.");
           break;
         }
