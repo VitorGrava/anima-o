@@ -120,7 +120,7 @@ function capaBase(sway) {
   const ML = { 17: 16, 18: 15, 19: 14, 20: 14, 21: 14, 22: 15, 23: 15, 24: 16, 25: 16, 26: 17, 27: 17, 28: 18, 29: 18, 30: 18, 31: 17, 32: 17, 33: 16, 34: 16, 35: 15, 36: 15, 37: 14, 38: 14 };
   const L = (y) => ML[y] - (y < 22 ? 2 : y < 30 ? 3 : 2) + (y >= 26 && y <= 31 ? 0 : 0);
   for (let y = 17; y <= 38; y++) {
-    const s = y >= 30 ? sway * (y >= 35 ? 2 : 1) : 0;
+    const s = y >= 37 ? sway : 0;
     const a = L(y) + s;
     span(g, y, a, 24, "c");
     px(g, a, y, y < 28 ? "p" : "c");
@@ -128,7 +128,7 @@ function capaBase(sway) {
     if (y > 30) px(g, a + 1, y, "p");
   }
   // borda de baixo em pontas (zigue-zague), recolhida atrás do manto
-  const s2 = sway * 2;
+  const s2 = sway;
   const pontas = [[11, 39], [12, 40], [13, 39], [14, 40], [15, 39]];
   for (const [x, y] of pontas) for (let yy = 38; yy <= y; yy++) px(g, x + s2, yy, "C");
   return g;
@@ -180,9 +180,9 @@ function aura(dy, lv) {
 const handDYoff = () => 0;
 const breath = [0, 0, -1, -1, -1, -1, 0, 0];            // peito, ombros, barba e mão sobem 1 px nos frames 2–5
 const lag = (k, t) => breath[(t - k + N) % N];
-const tipDX = [0, 0, 0, 1, 1, 0, -1, 0];                // ponta do chapéu: 1 frame atrasada, em arco
+const tipDX = [0, 0, 0, 0, 1, 1, 0, 0];                 // ponta do chapéu: 2 frames atrasada, pequeno arco
 const glow = [0, 1, 2, 3, 3, 2, 1, 0];
-const capeSway = [0, 0, 0, 0, -1, -1, -1, 0];           // barra da capa (atraso 2)
+const capeSway = [0, 0, 0, 0, -1, -1, 0, 0];            // capa de trás balança 1 px (atraso 2)
 const handDY = [0, 0, 0, -1, -1, 0, 0, 0];             // gesto: a mão levantada sobe mais 1 px e volta (arco pequeno)
 const handDX = [0, 0, 0, 0, 1, 1, 0, 0];
 const shiftRows = (g, fn) => { const o = grid(); for (let y = 0; y < H; y++) { const sy = y - fn(y); if (sy >= 0 && sy < H) o[y] = [...g[sy]]; } return o; };
@@ -191,17 +191,17 @@ const over = (a, b) => a.map((r, y) => r.map((c, x) => (b[y][x] !== "." ? b[y][x
 const sombra = () => { const g = grid(); span(g, 43, 11, 35, "O"); span(g, 45, 8, 38, "o"); span(g, 44, 10, 36, "o"); span(g, 45, 13, 33, "O"); return g; };
 
 const CB = bracos(corpoBase()), PE = pes(), CJ = offX(cajado(), -1), PT = pontaChapeu(), BB = barba();
-const upper = (y) => (y <= 31 ? 1 : 0);
+const upper = (y) => (y <= 19 ? 1 : 0); // só cabeça e ombros sobem; o tronco fica fixo (sem boiling nas dobras)
 const layers = ["capa", "corpo", "barba", "cajado", "mao", "cristal"];
 function frame(t) {
   const b = breath[t];
-  const ponta = shiftRows(offX(PT, tipDX[t]), () => lag(1, t));
+  const ponta = shiftRows(offX(PT, tipDX[t]), () => lag(2, t));
   const hem = lag(1, t); // barra do manto: 1 px, 1 frame atrasada
   const base = shiftRows(CB, (y) => upper(y) * b);
-  const corpo = over(over(base.map((r, y) => (y >= 38 && y <= 42 && hem ? offX([r], -1)[0] : r)), PE), ponta);
-  const capa = shiftRows(capaBase(capeSway[t]), (y) => (y <= 30 ? lag(1, t) : 0));
-  const barbaL = shiftRows(BB, () => b);
-  const m = maos(handDY[t] + b, handDX[t]);
+  const corpo = over(over(base, PE), ponta);
+  const capa = shiftRows(capaBase(capeSway[t]), (y) => (y <= 19 ? lag(1, t) : 0));
+  const barbaL = shiftRows(BB, (y) => (y <= 22 ? b : lag(1, t))); // ponta da barba 1 frame atrasada
+  const m = maos(handDY[t], handDX[t]);
   return { capa, corpo, barba: barbaL, cajado: CJ, mao: m, cristal: offX(cristal(lag(2, t), glow[t]), -1), aura: offX(aura(lag(2, t), glow[t]), -1), sombra: sombra() };
 }
 const cmds = [{ name: "set_palette", input: { colors: pal.map(([key, hex, name]) => ({ key, hex, name })) } },
@@ -215,7 +215,7 @@ cmds.push({ name: "polish", input: { frames: "all", sombrear: false, contorno: "
 // aura (sem contorno) por cima e sombra do chão por baixo, depois do polish
 cmds.push({ name: "add_layer", input: { name: "aura" } }, { name: "add_layer", input: { name: "sombra", position: "bottom" } });
 F.forEach((L, t) => { draw(t, "aura", L.aura); draw(t, "sombra", L.sombra); });
-cmds.push({ name: "set_frame_timing", input: { frames: "all", duration_ms: [200, 120, 140, 220, 160, 120, 140, 200] } });
+cmds.push({ name: "set_frame_timing", input: { frames: "all", duration_ms: [320, 140, 140, 300, 160, 140, 140, 160] } });
 const dir = new URL(".", import.meta.url).pathname;
 writeFileSync(dir + "cmds.json", JSON.stringify(cmds));
 if (!process.argv.includes("--so-cmds")) {
