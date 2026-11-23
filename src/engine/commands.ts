@@ -224,7 +224,7 @@ const setPalette = def({
           name: z.string().max(40).describe('Nome curto e descritivo, ex. "pele-sombra"'),
         }),
       )
-      .max(64)
+      .max(255)
       .default([]),
   }),
   run(p, i) {
@@ -424,6 +424,8 @@ const setTiming = def({
     return { changed: true, text: `Duração de ${fmtList(list)}: ${i.duration_ms ?? `padrão (${Math.round(1000 / p.fps)}ms)`}.` };
   },
 });
+
+type ColorRefT = string;
 
 const drawRowsCmd = def({
   name: "draw_rows",
@@ -1344,7 +1346,7 @@ const shape = z.discriminatedUnion("type", [
     dither: z.enum(["bayer2", "bayer4", "bayer8", "nenhum"]).default("bayer4").describe("dithering ordenado de Bayer na transição entre tons (bayer4 é o padrão; bayer8 = transição mais longa e suave)"),
     suavidade: z.number().min(0.1).max(1).default(0.5).describe("largura da zona de dither dentro de cada passo da rampa: 0.3 = faixas sólidas com transição curta; 1 = degradê todo em dither"),
     ondas: z.number().min(0).max(12).default(0).describe("ondula a borda dos passos (px) para quebrar faixas retas (céu, água)"),
-    only: colorRef.optional().describe("só pinta onde já há esta cor (textura num plano sem vazar)"),
+    only: z.union([colorRef, z.array(colorRef).min(1).max(12)]).optional().describe("só pinta onde já há esta cor (ou QUALQUER uma da lista) — textura num plano sem vazar"),
     cx: z.number().optional(), cy: z.number().optional(), r: z.number().min(1).optional().describe("radial: centro e raio (padrão: centro da caixa, metade da maior dimensão)"),
   }).describe("DEGRADÊ com dithering de Bayer entre os tons de uma rampa (céu, água, brilho do sol, sombra de chão). Em pixel art, degradê é dither, não faixas retas."),
   z.object({
@@ -1361,7 +1363,7 @@ const shape = z.discriminatedUnion("type", [
     distancia: z.number().int().min(1).max(48).default(2).describe("distância mínima entre elementos (evita aglomerar e dá ritmo de textura)"),
     seed: z.number().int().default(1).describe("semente: mesmo valor = mesma textura (reprodutível); use sementes diferentes por plano"),
     variar_por_frame: z.boolean().default(false).describe("soma o índice do frame à semente: a textura muda a cada frame (brilho de água, cintilar de estrelas, chuva) com frames:\"all\" numa só chamada"),
-    only: colorRef.optional().describe("só espalha sobre esta cor (grama só sobre o campo)"),
+    only: z.union([colorRef, z.array(colorRef).min(1).max(12)]).optional().describe("só espalha sobre esta cor (ou QUALQUER uma da lista): grama só sobre o campo"),
     ponta: colorRef.optional().describe("cor da ponta do tufo/traço/cruz (ex.: luz)"),
     evitar: z.array(z.string()).max(8).optional().describe("camadas onde NÃO espalhar: o elemento não cai onde estas camadas já têm arte (flores fora da casa)"),
   }).describe("TEXTURA espalhada com distância mínima (grama, estrelas, flores, pedras, folhas)."),
@@ -1404,7 +1406,7 @@ const shape = z.discriminatedUnion("type", [
     base: z.number().int().describe("linha y onde as árvores se assentam"),
     altura_min: z.number().int().min(3), altura_max: z.number().int().min(3),
     largura_min: z.number().int().min(2).default(5), largura_max: z.number().int().min(2).default(9),
-    folga: z.number().min(0).max(0.8).default(0.25).describe("sobreposição entre árvores vizinhas (0 = lado a lado, 0.5 = bem juntas)"),
+    folga: z.number().min(0).max(0.95).default(0.25).describe("sobreposição entre árvores vizinhas (0 = lado a lado, 0.5 = bem juntas)"),
     seed: z.number().int().default(1),
     cores: z.array(colorRef).min(1).max(6).describe("tons sorteados por árvore (variação evita o efeito de carimbo)"),
     tipo: z.enum(["pinheiro", "redonda", "mista"]).default("pinheiro"),
@@ -1487,7 +1489,8 @@ const drawShapes = def({
     const avisos: string[] = [];
     for (const f of list) {
       const s = { width: p.width, height: p.height, data: getCel(p, f, layer.id) };
-      const onlyComposto = (cor: string) => { const flat = flattenFrame(p, f), idx = colorIndex(p, cor); return (x: number, y: number) => flat[y * p.width + x] === idx; };
+      const onlyComposto = (cor: ColorRefT | ColorRefT[]) => { const flat = flattenFrame(p, f), idxs = new Set((Array.isArray(cor) ? cor : [cor]).map((c) => colorIndex(p, c))); return (x: number, y: number) => idxs.has(flat[y * p.width + x]); };
+      const onlyFirst = (cor: ColorRefT | ColorRefT[]) => colorIndex(p, Array.isArray(cor) ? cor[0] : cor);
       for (const sh of i.shapes) {
         const c = sh.type === "blob" || sh.type === "capsule" || sh.type === "gradient" || sh.type === "scatter" || sh.type === "box3d" || sh.type === "terrain" || sh.type === "forest" ? 0 : colorIndex(p, sh.color);
         switch (sh.type) {
@@ -1531,10 +1534,10 @@ const drawShapes = def({
             fillPolygon(s, sh.points as [number, number][], c);
             break;
           case "gradient":
-            if (drawGradient(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, direction: sh.direction, colors: sh.colors.map((k) => colorIndex(p, k)), dither: sh.dither, suavidade: sh.suavidade, ondas: sh.ondas, only: sh.only ? colorIndex(p, sh.only) : 0, onlyAt: sh.only ? onlyComposto(sh.only) : undefined, cx: sh.cx, cy: sh.cy, r: sh.r }) === 0) avisos.push(`gradient em (${sh.x},${sh.y}) ${sh.w}x${sh.h} não pintou nada${sh.only ? `: a cor only=${sh.only} não está em nenhuma camada visível nessa área` : ""}.`);
+            if (drawGradient(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, direction: sh.direction, colors: sh.colors.map((k) => colorIndex(p, k)), dither: sh.dither, suavidade: sh.suavidade, ondas: sh.ondas, only: sh.only ? onlyFirst(sh.only) : 0, onlyAt: sh.only ? onlyComposto(sh.only) : undefined, cx: sh.cx, cy: sh.cy, r: sh.r }) === 0) avisos.push(`gradient em (${sh.x},${sh.y}) ${sh.w}x${sh.h} não pintou nada${sh.only ? `: a cor only=${[sh.only].flat().join("|")} não está em nenhuma camada visível nessa área` : ""}.`);
             break;
           case "scatter":
-            if (scatter(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, colors: sh.colors.map((k) => colorIndex(p, k)), densidade: sh.densidade, forma: sh.forma, distancia: sh.distancia, seed: sh.seed + (sh.variar_por_frame ? f * 7919 : 0), only: sh.only ? colorIndex(p, sh.only) : 0, onlyAt: sh.only ? onlyComposto(sh.only) : undefined, ponta: sh.ponta ? colorIndex(p, sh.ponta) : undefined, blocked: sh.evitar?.length ? ((cels) => (x: number, y: number) => cels.some((c) => c[y * p.width + x] !== 0))(sh.evitar.map((n) => getCel(p, f, findLayer(p, n).id))) : undefined }) === 0) avisos.push(`scatter em (${sh.x},${sh.y}) ${sh.w}x${sh.h} não desenhou nenhum elemento${sh.only ? `: a cor only=${sh.only} não foi achada em nenhuma camada visível nessa área (confira a cor e se o plano já foi desenhado antes)` : sh.evitar ? ": evitar bloqueou a área toda" : " (densidade baixa demais?)"}.`);
+            if (scatter(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, colors: sh.colors.map((k) => colorIndex(p, k)), densidade: sh.densidade, forma: sh.forma, distancia: sh.distancia, seed: sh.seed + (sh.variar_por_frame ? f * 7919 : 0), only: sh.only ? onlyFirst(sh.only) : 0, onlyAt: sh.only ? onlyComposto(sh.only) : undefined, ponta: sh.ponta ? colorIndex(p, sh.ponta) : undefined, blocked: sh.evitar?.length ? ((cels) => (x: number, y: number) => cels.some((c) => c[y * p.width + x] !== 0))(sh.evitar.map((n) => getCel(p, f, findLayer(p, n).id))) : undefined }) === 0) avisos.push(`scatter em (${sh.x},${sh.y}) ${sh.w}x${sh.h} não desenhou nenhum elemento${sh.only ? `: a cor only=${[sh.only].flat().join("|")} não foi achada em nenhuma camada visível nessa área (confira a cor e se o plano já foi desenhado antes)` : sh.evitar ? ": evitar bloqueou a área toda" : " (densidade baixa demais?)"}.`);
             break;
         }
       }

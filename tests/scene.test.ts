@@ -315,3 +315,23 @@ describe("atritos da casa: box3d fora do quadro, quinas de quadro cheio, anima c
     expect(out).toMatch(/nota 0-10/);
   });
 });
+
+describe("atritos da vila: only em lista, paleta grande, folga alta", () => {
+  it("only aceita uma lista de cores e set_palette aceita 100 cores de uma vez", () => {
+    const p = createProject({ width: 32, height: 16 });
+    const cores = Array.from({ length: 100 }, (_, k) => ({ key: [..."abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"][k % 62] + "", hex: `#${(k * 2 + 10).toString(16).padStart(2, "0")}${(255 - k).toString(16).padStart(2, "0")}80`, name: `c${k}` }));
+    const unicas = cores.filter((c, k) => cores.findIndex((d) => d.key === c.key) === k);
+    const r0 = runCommand(p, "set_palette", { colors: unicas.slice(0, 62).concat([]) });
+    expect(r0.ok, r0.text).toBe(true);
+    const big = Array.from({ length: 70 }, (_, k) => ({ key: [..."abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789àáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ"][k], hex: `#${(k * 3).toString(16).padStart(2, "0")}4060`, name: `x${k}` }));
+    const q = createProject({ width: 8, height: 8 });
+    const r1 = runCommand(q, "set_palette", { colors: big });
+    expect(r1.ok, r1.text).toBe(true);
+    runCommand(p, "set_palette", { colors: [{ key: "a", hex: "#304060", name: "ceu" }, { key: "b", hex: "#506080", name: "lago" }, { key: "c", hex: "#d0a060", name: "luz" }] });
+    runCommand(p, "draw_shapes", { shapes: [{ type: "rect", x: 0, y: 0, w: 16, h: 16, color: "a", fill: true }, { type: "rect", x: 16, y: 0, w: 16, h: 16, color: "b", fill: true }] });
+    const r2 = runCommand(p, "draw_shapes", { shapes: [{ type: "scatter", x: 0, y: 0, w: 32, h: 16, colors: ["c"], densidade: 0.5, only: ["a", "b"] }] });
+    expect(r2.ok, r2.text).toBe(true);
+    const r3 = runCommand(p, "draw_shapes", { shapes: [{ type: "forest", base: 15, altura_min: 4, altura_max: 6, cores: ["c", "a"], folga: 0.9 }] });
+    expect(r3.ok, r3.text).toBe(true);
+  });
+});
