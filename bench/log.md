@@ -189,3 +189,7 @@ Dois agentes novos, só com o pedido e o guia, usaram `draw_figure` por conta pr
 
 ## Baú abrindo 32x32 (pesquisa primeiro, crítico independente)
 Referência: Wooden Treasure Chests (szymon18042, itch.io). Notas do crítico (0-10, ref ~8): r1 4,7 → r2 5,6 → r3 6,1 → r4 6,5 → r5 6,8 → r6 (entregue). Ganhos que valeram: tábuas contínuas em vez de "tijolo", sombra no chão, antecipação (-1 px), overshoot, cadeado em escudo preso à tampa, monte de ouro com contorno, aro dourado. Lição de ferramenta: a última camada criada fica por cima; `check` passou a reconhecer animação de uma passada (sem falso aviso de emenda).
+
+## Slime e mago (agentes com pesquisa primeiro)
+- Slime 32x32 (refs Pixelsnorf, OpenGameArt): 7 rodadas; atritos corrigidos: `tools <subcomando>`, `rodada --saida`, sombra/efeitos fora do aviso de figura partida.
+- Mago 48x48 (refs mirquiso, Movicx, Calciumtrice): crítico 5 → 5,8 → 6,2 → 6,8 (animação 4 → 7). Descobertas: (1) a folha de frames esconde movimento de 1 px; o `critico` agora gera folha + diff e a nota de animação subiu de 4 para 6 só por o crítico enxergar; (2) "boiling": redesenhar dobras por frame faz a textura tremer, desloque a mesma arte; (3) polish não contorna camadas de efeito (sombra/aura); (4) `avaliar` mecânico dava 91–98 enquanto o crítico dava 5–6,8.
