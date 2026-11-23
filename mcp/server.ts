@@ -43,7 +43,7 @@ const OpenProject = z.object({
 });
 
 /** ferramentas pesadas e raras: ficam fora da lista até alguém pedir (economiza ~7 mil tokens por sessão) */
-export const RIG_TOOLS = ["draw_figure", "rig_create", "rig_part", "rig_pose", "rig_bake", "rig_bone", "rig_walk"];
+export const RIG_TOOLS = ["draw_figure", "rig_info", "rig_create", "rig_part", "rig_pose", "rig_bake", "rig_bone", "rig_walk"];
 const EnableTools = z.object({ grupo: z.enum(["rig", "tudo"]).default("rig").describe('"rig": esqueleto por ossos (rig_*) e draw_figure (humano por ângulos). Chame só quando o pedido for uma figura humana ou um personagem com esqueleto/pose por ângulos.') });
 
 const ImportImage = z.object({

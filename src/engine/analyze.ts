@@ -928,7 +928,7 @@ function checkRig(p: Project, frames: number[], issues: Issue[]) {
     for (const [n, v] of Object.entries(p.frames[f].pose!.angles)) {
       const b = rig.bones.find((x) => x.name === n);
       if (!b) issues.push({ severity: "erro", code: "rig_pose_osso_desconhecido", frame: f, message: `A pose do frame ${f} usa o osso "${n}", que não existe.` });
-      else if (v < b.min - 1e-6 || v > b.max + 1e-6) issues.push({ severity: "aviso", code: "rig_fora_do_limite", frame: f, message: `${n} = ${v.toFixed(0)}° no frame ${f} está fora do limite anatômico [${b.min}, ${b.max}].` });
+      else if (b.min !== b.max && (v < b.min - 1e-6 || v > b.max + 1e-6)) issues.push({ severity: "aviso", code: "rig_fora_do_limite", frame: f, message: `${n} = ${v.toFixed(0)}° no frame ${f} está fora do limite anatômico [${b.min}, ${b.max}].` });
     }
   }
 }

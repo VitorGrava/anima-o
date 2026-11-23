@@ -583,3 +583,52 @@ describe("rig_bake outline auto (sel-out)", () => {
     expect(used.size).toBeGreaterThan(1);
   });
 });
+
+describe("atritos do cavaleiro: ossos travados, rig_info, aviso de osso novo, cabeça reta, período do chão", () => {
+  const humanoide = () => {
+    const p = bare(64, 64);
+    ok(p, "rig_create", { template: "humanoide", height: 40 });
+    return p;
+  };
+  it("osso com min == max fica travado no rig_walk e não gera aviso de limite", () => {
+    const p = humanoide();
+    ok(p, "rig_bone", { name: "espada", parent: "antebraco_tras", length: 10, mode: "relative", rest: 0, sign: 1, min: 22, max: 22 });
+    ok(p, "add_frames", { count: 7, copy_from: 0 });
+    ok(p, "rig_walk", { start: 0, frames: 8 });
+    expect(p.frames[3].pose!.angles.espada).toBe(22);
+    const r = runCommand(p, "check", { as_image: false });
+    expect(r.text).not.toMatch(/espada = .* fora do limite/);
+  });
+  it("osso novo sem mode/rest avisa; rig_info lista ossos, travas e partes", () => {
+    const p = humanoide();
+    const r = ok(p, "rig_bone", { name: "bandeira", parent: "tronco", length: 8 });
+    expect(r.text).toMatch(/AVISO: sem mode\/rest/);
+    ok(p, "rig_bone", { name: "escudo", parent: "antebraco_frente", length: 6, mode: "relative", rest: 10, sign: 1, min: 0, max: 0 });
+    const info = ok(p, "rig_info", {});
+    expect(info.text).toMatch(/Ossos \(\d+\)/);
+    expect(info.text).toMatch(/escudo: pai antebraco_frente.*\(TRAVADO\)/);
+    expect(info.text).toMatch(/Partes \(\d+\)/);
+    expect(info.text).toMatch(/pivô \(/);
+  });
+  it("rig_walk no_lugar diz o período do chão que fecha no canvas E no ciclo; cabeca_reta desfaz a inclinação", () => {
+    const p = humanoide();
+    ok(p, "add_layer", { name: "chao" });
+    ok(p, "draw_shapes", { layer: "chao", shapes: [{ type: "pixels", points: [[0, 60], [8, 60]], color: p.palette[0].key }] });
+    ok(p, "add_frames", { count: 7, copy_from: 0 });
+    const r = ok(p, "rig_walk", { start: 0, frames: 8, mode: "no_lugar", scroll_layer: "chao", speed: 3 });
+    expect(r.text).toMatch(/divisor de 24 \(o ciclo\) E de 64 \(o wrap\): 1, 2, 4, 8/);
+    const torto = runCommand(p, "rig_walk", { start: 0, frames: 8, lean: 10, cabeca_reta: 0 });
+    expect(torto.ok).toBe(true);
+    const a0 = p.frames[0].pose!.angles.cabeca;
+    ok(p, "rig_walk", { start: 0, frames: 8, lean: 10, cabeca_reta: 1 });
+    expect(Math.abs(p.frames[0].pose!.angles.cabeca - a0)).toBeGreaterThan(5);   // a cabeça passou a compensar a inclinação
+  });
+  it("avaliar aceita ignorar códigos intencionais", () => {
+    const p = bare(32, 32);
+    ok(p, "set_palette", { colors: [{ key: "a", hex: "#d84a3a", name: "a" }, { key: "b", hex: "#3a6ad8", name: "b" }] });
+    ok(p, "draw_shapes", { shapes: [{ type: "rect", x: 6, y: 6, w: 14, h: 14, color: "a", filled: true }, { type: "rect", x: 9, y: 9, w: 5, h: 5, color: "b", filled: true }] });
+    const com = runCommand(p, "avaliar", { tipo: "personagem" }).text;
+    expect(com).toMatch(/sem_contorno/);
+    expect(runCommand(p, "avaliar", { tipo: "personagem", ignorar: ["sem_contorno", "arte_chapada"] }).text).not.toMatch(/sem_contorno/);
+  });
+});

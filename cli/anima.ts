@@ -68,7 +68,10 @@ async function saveImages(p: Project, r: CommandResult, png: string): Promise<vo
 /** Flags que sobraram depois do parse são erro (antes eram ignoradas em silêncio, ex.: `--tipo efeito`). */
 function rejectUnknownFlags(args: string[], cmd: string): void {
   const bad = args.filter((a) => a.startsWith("--"));
-  if (bad.length) throw new Error(`flag(s) desconhecida(s) em "${cmd}": ${bad.join(", ")}. Veja \`anima help\`.`);
+  if (bad.length) {
+    const uso = USAGE.split("\n").filter((l) => l.trim().startsWith(`anima ${cmd} `)).join("\n");
+    throw new Error(`flag(s) desconhecida(s) em "${cmd}": ${bad.join(", ")}.${uso ? ` Opções válidas:\n${uso}` : " Veja `anima help`."}`);
+  }
 }
 
 async function readStdin(): Promise<string> {

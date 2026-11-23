@@ -1141,6 +1141,18 @@ const rigBake = def({
   },
 });
 
+const rigInfo = def({
+  name: "rig_info",
+  description: "Lista o esqueleto SEM abrir o JSON: cada osso (pai, ponto de fixação, comprimento, modo, repouso, sinal, limites) e cada parte de arte (osso, camada, tamanho, pivô). Convenções: ângulo em graus a partir de \"para baixo\", + = para a frente; o PIVÔ do pé é o tornozelo e a arte do pé aponta para a frente (facing) na pose de repouso; membros pendurados para baixo; osso com min == max fica TRAVADO nesse ângulo (arma/escudo fixos).",
+  schema: z.object({}),
+  run(p) {
+    const rig = needRig(p);
+    const bones = rig.bones.map((b) => `- ${b.name}: pai ${b.parent ?? "—"} (${typeof b.at === "number" ? `em ${b.at}` : b.at}), ${b.length} px, ${b.mode}, repouso ${b.rest}°, sinal ${b.sign}, limites [${b.min}, ${b.max}]${b.min === b.max ? " (TRAVADO)" : ""}${b.sole !== undefined ? `, sola ${b.sole}` : ""}`);
+    const parts = rig.parts.map((x) => `- ${x.name}: osso ${x.bone}, camada ${x.layer}, ${Math.max(0, ...x.rows.map((r) => [...r].length))}x${x.rows.length} px, pivô (${x.pivot.x}, ${x.pivot.y}), z ${x.z}`);
+    return { changed: false, text: `Rig: facing ${rig.facing}, chão y ${rig.ground}, raiz (${rig.root.x}, ${rig.root.y}).\nOssos (${bones.length}):\n${bones.join("\n")}\nPartes (${parts.length}):\n${parts.join("\n") || "(nenhuma)"}` };
+  },
+});
+
 const rigBone = def({
   name: "rig_bone",
   description: "Cria, EDITA ou remove um osso SEM perder a arte das partes: muda comprimento, repouso, limites, pai ou ponto de fixação (`at`) e as partes presas continuam (o pivô fica o mesmo; só a distância entre juntas muda). Se o osso não existe, cria (precisa de `parent` e `length`). `remove: true` só funciona se nenhum osso filho e nenhuma parte dependerem dele.",
@@ -1183,7 +1195,8 @@ const rigBone = def({
     if (i.length === undefined) throw new Error(`O osso "${i.name}" é novo: diga o \`length\` (e o \`parent\`, se não for a raiz).`);
     if (i.parent === undefined && rig.bones.length) throw new Error(`O osso "${i.name}" é novo: diga o \`parent\` (ou null para uma segunda raiz).`);
     rig.bones.push({ name: i.name, parent: i.parent ?? null, at: i.at ?? "end", length: i.length, mode: i.mode ?? "relative", rest: i.rest ?? 0, sign: i.sign ?? 1, min: i.min ?? -180, max: i.max ?? 180, ...(i.sole != null ? { sole: i.sole } : {}) });
-    return { changed: true, text: `Osso "${i.name}" criado (filho de ${i.parent ?? "nada"}, ${i.length} px). Prenda arte a ele com rig_part.` };
+    const semDir = i.mode === undefined && i.rest === undefined ? `\nAVISO: sem mode/rest o osso nasce RELATIVO ao pai, com repouso 0° (aponta para baixo, na direção do pai) e pode ficar invisível atrás do corpo. Defina mode (absolute|relative), rest e sign para apontar onde você quer; use view bones=true para conferir.` : "";
+    return { changed: true, text: `Osso "${i.name}" criado (filho de ${i.parent ?? "nada"}, ${i.length} px). Prenda arte a ele com rig_part.${semDir}` };
   },
 });
 
@@ -1206,6 +1219,7 @@ const rigWalk = def({
     mode: z.enum(["andar", "no_lugar"]).default("andar"),
     arm_swing: z.number().min(0).max(80).default(28).describe("balanço dos braços (humanoide), em graus"),
     lean: z.number().min(-20).max(30).default(3).describe("inclinação do tronco para a frente (humanoide)"),
+    cabeca_reta: z.number().min(0).max(1).default(0).describe("0..1: quanto da inclinação do tronco a cabeça desfaz (0 = a cabeça inclina junto e fica curvada; 0.7–1 = cabeça de pé)"),
     x0: z.number().optional().describe("x inicial da raiz"),
     scroll_layer: z.string().optional().describe('com mode "no_lugar": camada do chão/fundo que a engine rola para trás, sem deslize, usando o conteúdo do frame `start`'),
     preview: previewFlag,
@@ -1223,12 +1237,12 @@ const rigWalk = def({
     const stride = speed * duty * Nc;
     const total = speed * (N - 1);
     const x0 = i.x0 ?? (i.mode === "andar" ? Math.round(rig.root.x - total / 2) : rig.root.x);
-    const poses = walkPoses(rig, { frames: N, cycles: i.cycles, stride, lift: i.lift ?? Math.max(1, +(reach * 0.14).toFixed(1)), bob: i.bob ?? +(reach * 0.04).toFixed(1), duty, mode: i.mode, armSwing: i.arm_swing, lean: i.lean, x0, speed });
+    const poses = walkPoses(rig, { frames: N, cycles: i.cycles, stride, lift: i.lift ?? Math.max(1, +(reach * 0.14).toFixed(1)), bob: i.bob ?? +(reach * 0.04).toFixed(1), duty, mode: i.mode, armSwing: i.arm_swing, lean: i.lean, headLevel: i.cabeca_reta, x0, speed });
     const warns = new Set<string>();
     poses.forEach((ps, k) => {
       const { angles, warnings } = clampAngles(rig, ps.angles);
       warnings.forEach((w) => warns.add(w));
-      const full = Object.fromEntries(rig.bones.map((b) => [b.name, angles[b.name] ?? 0]));
+      const full = Object.fromEntries(rig.bones.map((b) => [b.name, angles[b.name] ?? (b.min === b.max ? b.min : 0)]));
       p.frames[i.start + k].pose = { angles: full, root: ps.root };
     });
     rig.travel = { mode: i.mode, speed };
@@ -1241,7 +1255,8 @@ const rigWalk = def({
         cel.set(base);
         draw.shift({ width: p.width, height: p.height, data: cel }, -speed * k, 0, true);
       }
-      scrolled = ` A camada "${layer.name}" foi rolada ${speed} px por frame para trás (com wrap). Para o loop fechar sem emenda, o desenho do chão deve se repetir a cada ${[...Array(speed * N).keys()].map((x) => x + 1).filter((d) => (speed * N) % d === 0).slice(0, 6).join(", ")} px ou um múltiplo (divisores de ${speed * N}).`;
+      const cyc = speed * N, validos = Array.from({ length: cyc }, (_, k) => k + 1).filter((d) => cyc % d === 0 && p.width % d === 0);
+      scrolled = ` A camada "${layer.name}" foi rolada ${speed} px por frame para trás (com wrap na largura do canvas, ${p.width} px). Para o loop fechar sem emenda o desenho do chão deve se repetir a cada P px, com P divisor de ${cyc} (o ciclo) E de ${p.width} (o wrap): ${validos.length ? validos.join(", ") : "nenhum: mude a velocidade ou o número de frames, ou a largura do canvas"}.`;
     }
     const adj = Math.abs(stride - stride0) > 0.6 ? ` O stride foi ajustado de ${stride0} para ${stride.toFixed(1)} px para a velocidade ser inteira.` : "";
     const how = i.mode === "andar" ? `A raiz avança ${speed} px por frame (${total} px no total).` : `A raiz fica parada e o chão deve rolar ${speed} px por frame para trás.${scrolled || " Passe scroll_layer para a engine rolar uma camada de chão, ou desenhe o chão rolando você mesmo com transform shift wrap."}`;
@@ -1793,11 +1808,12 @@ const avaliar = def({
   ].join("\n"),
   schema: z.object({
     frames: framesSel.optional().describe('Padrão: "all"'),
+    ignorar: z.array(z.string()).optional().describe("Códigos de achado a silenciar porque são INTENCIONAIS (ex.: arte_chapada, banding, contorno_incompleto, sem_contorno). Os códigos aparecem no relatório."),
     tipo: z.enum(["auto", "personagem", "cena"]).default("auto").describe('"cena" (fundo completo, paisagem, tela cheia): avalia faixas duras no degradê, áreas chapadas enormes, formas repetidas, regiões vazias e profundidade em vez de enquadramento de figura. "auto" escolhe cena em canvas grande (≥ 24000 px).'),
   }),
   run(p, i) {
     const list = resolveFrames(p, i.frames ?? "all");
-    return { changed: false, text: formatCritique(evaluateBeauty(p, list, i.tipo)) };
+    return { changed: false, text: formatCritique(evaluateBeauty(p, list, i.tipo, i.ignorar)) };
   },
 });
 
@@ -2117,6 +2133,7 @@ export const COMMANDS = [
   rigBake,
   rigBone,
   rigWalk,
+  rigInfo,
   drawShapes,
   transform,
   polish,

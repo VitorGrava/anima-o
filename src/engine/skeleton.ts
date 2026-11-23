@@ -275,6 +275,8 @@ export interface WalkOptions {
   mode: "andar" | "no_lugar";
   armSwing: number;
   lean: number;
+  /** 0..1: quanto da inclinação do tronco a cabeça desfaz (0 = a cabeça inclina junto) */
+  headLevel?: number;
   x0: number;
   speed: number;
 }
@@ -300,6 +302,7 @@ export function walkPoses(rig: Rig, o: WalkOptions): { angles: Record<string, nu
     const bobV = o.bob * (0.5 - 0.5 * Math.cos(4 * Math.PI * ph(t)));                  // sobe na passagem, desce no contato
     const root: V = { x: o.x0 + (o.mode === "andar" ? o.speed * k : 0), y: rig.ground - (rootH + bobV) };
     if (has("tronco")) angles.tronco = o.lean;
+    if (o.headLevel && has("tronco") && has("cabeca")) { const tr = rig.bones.find((b) => b.name === "tronco")!, cb = rig.bones.find((b) => b.name === "cabeca")!; angles.cabeca = (angles.cabeca ?? 0) + (-(tr.sign * o.lean) * o.headLevel) / cb.sign; }
     for (const leg of legs) {
       const p0 = ph(t + leg.phase);
       let relX: number, lift = 0, foot: number;

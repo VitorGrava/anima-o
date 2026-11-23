@@ -204,7 +204,7 @@ export function unionBox(p: Project, frames: number[]): { x0: number; y0: number
 }
 
 /** Avalia a arte em todos os frames dados; achados iguais entre frames viram um só, com a lista de frames. */
-export function evaluateBeauty(p: Project, frames: number[] = p.frames.map((_, i) => i), tipo: "auto" | "personagem" | "cena" = "auto"): Critique {
+export function evaluateBeauty(p: Project, frames: number[] = p.frames.map((_, i) => i), tipo: "auto" | "personagem" | "cena" = "auto", ignorar: string[] = []): Critique {
   const scene = tipo === "cena" || (tipo === "auto" && p.width * p.height >= 24000);
   const merged = new Map<string, Finding>();
   for (const f of frames) {
@@ -222,7 +222,7 @@ export function evaluateBeauty(p: Project, frames: number[] = p.frames.map((_, i
       merged.set("fora_do_centro", { category: "composicao", severity: "info", code: "fora_do_centro", frames: [...frames], message: `A figura está deslocada do centro do quadro (${Math.round(dx)} px em x, ${Math.round(dy)} px em y). Uma composição centrada (ou propositalmente descentrada, com respiro) lê melhor.`, fix: "polish centralizar=true (ou transform op center)" });
     }
   }
-  const findings = [...merged.values()];
+  const findings = [...merged.values()].filter((f) => !ignorar.includes(f.code));
   const order = { erro: 0, aviso: 1, info: 2 } as const;
   findings.sort((a, b) => order[a.severity] - order[b.severity]);
   const scores = { paradigmas: 100, cor: 100, forma: 100, composicao: 100 } as Record<Category, number>;
