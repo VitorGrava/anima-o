@@ -152,3 +152,8 @@ Dois agentes novos, só com o pedido e o guia, usaram `draw_figure` por conta pr
 - Agente entregou 8 frames, 4 patas no chão, sem `pe_escorrega`. Atritos: raiz não centraliza (cabeça cortada em 48x32, sem aviso), chão com período 6 (não divide 8, emenda salta), nomes `frames`/`frame` e `durations` inconsistentes, patas "tubo", sombras avermelhadas, `check` acusa furo entre as patas com chão visível.
 - Contorno (pedido do usuário): halo único escuro de 1 px deixava pernas fundidas e pé em bloco preto. Pesquisa (Lospec outlines 1 e 2, Pixel Parmesan, Humbird0, pixel-perfect): contorno colorido pelo material, sel-out, claro no lado da luz, linhas internas com a cor da parte mais próxima ou omitidas, limpar quinas em L.
 - Feito: `rig_bake outline "auto"` (sel-out + lado da luz). Falta: linhas internas entre partes sobrepostas, limpeza de L, aviso de silhueta cortada, centralizar raiz.
+
+## Acabamento (abelha 32x32) — ferramenta para pixel art mais bonita
+- Pedido do usuário: "faltou cor e ficou muito quadrado" (abelha). Causas: desenhar tudo à mão contando colunas dá caixa; paleta sem variedade de matiz; sombreamento fica a cargo do agente.
+- Novo: `transform op shade` (3 tons automáticos, `skip` = cores de detalhe), `outline mode seletivo` (sel-out em qualquer camada), `clean` (quinas em L), `check cantos_quadrados`, `reference circulos` (moldes por diâmetro), guia "ACABAMENTO" no prompt. Exemplo: `examples/acabamento/` (chapado → acabado).
+- Limites: `shade` só pinta rebordos de 1–3 px (não cria volume interno nem luz de 2 fontes); `clean` só remove quinas de ponta com lados vazios.

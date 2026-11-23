@@ -268,6 +268,34 @@ function checkJaggies(mask: Uint8Array, w: number, h: number, frame: number, iss
   }
 }
 
+/**
+ * Cantos quadrados: quina convexa de 90° da silhueta com dois lados retos de 4+ px
+ * (o sprite "em caixa"). Formas orgânicas arredondam a quina em degraus (1-2-3).
+ */
+function checkSquareCorners(mask: Uint8Array, w: number, h: number, frame: number, issues: Issue[]) {
+  const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < w && y < h ? mask[y * w + x] : 0);
+  const run = (x: number, y: number, dx: number, dy: number, ox: number, oy: number) => {
+    for (let k = 1; k <= 4; k++) if (!at(x + dx * k, y + dy * k) || at(x + dx * k + ox, y + dy * k + oy)) return false;
+    return true;
+  };
+  const pts: [number, number][] = [];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (!at(x, y)) continue;
+    for (const [ux, uy, vx, vy] of [[0, -1, -1, 0], [0, -1, 1, 0], [0, 1, -1, 0], [0, 1, 1, 0]]) {
+      // (ux,uy) e (vx,vy): as duas direções livres da quina; os lados seguem na direção oposta de cada uma
+      if (at(x + ux, y + uy) || at(x + vx, y + vy) || at(x + ux + vx, y + uy + vy)) continue;
+      if (run(x, y, -vx, 0, ux, uy) && run(x, y, 0, -uy, vx, vy)) pts.push([x, y]);
+    }
+  }
+  if (pts.length >= 3) {
+    issues.push({
+      severity: "info", code: "cantos_quadrados", frame,
+      message: `${pts.length} quina(s) de 90° com lados retos de 4+ px na silhueta (forma "em caixa"). Arredonde as quinas em degraus (1-2-3 px) e quebre as retas longas com uma leve curva.`,
+      points: pts.slice(0, MAX_POINTS),
+    });
+  }
+}
+
 /** Compara a silhueta com a espelhada em torno do centro da caixa envolvente. */
 function checkSymmetry(flat: Uint8Array, w: number, h: number, frame: number, issues: Issue[]) {
   const mask = opaqueMask(flat);
@@ -937,6 +965,7 @@ export function analyzeFrame(p: Project, frame: number, opts: AnalyzeOptions = {
   checkStray(mask, p.width, p.height, frame, issues);
   checkHoles(mask, p.width, p.height, frame, issues);
   checkJaggies(mask, p.width, p.height, frame, issues);
+  checkSquareCorners(mask, p.width, p.height, frame, issues);
   const figure = opts.figure ?? flat;
   // efeitos (chama, brilho) emitem luz: centro claro e bordas escuras estão certos, e não têm contorno sólido
   if (opts.tipo !== "efeito") {
@@ -1030,7 +1059,7 @@ const ICON: Record<Severity, string> = { erro: "ERRO", aviso: "AVISO", info: "in
 /** Infos que se repetem em vários frames (serrilhado, banding...) viram uma linha só, com a lista de frames. */
 function groupRepeats(issues: Issue[]): Issue[] {
   const byCode = new Map<string, Issue[]>();
-  for (const i of issues) if (i.severity === "info" && i.frame !== undefined && ["serrilhado", "banding"].includes(i.code)) byCode.set(i.code, [...(byCode.get(i.code) ?? []), i]);
+  for (const i of issues) if (i.severity === "info" && i.frame !== undefined && ["serrilhado", "banding", "cantos_quadrados"].includes(i.code)) byCode.set(i.code, [...(byCode.get(i.code) ?? []), i]);
   const grouped = new Set<Issue>();
   const extra: Issue[] = [];
   for (const [code, list] of byCode) {

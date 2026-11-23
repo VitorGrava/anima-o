@@ -9,6 +9,7 @@ import { z } from "zod";
 import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.ts";
 import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
+import { autoShade, cleanCorners, selectiveOutline } from "./polish.ts";
 import { REFERENCE_TOPICS, bodyProportions, darkOutline, makeRamp, reference } from "./reference.ts";
 import { HUMANOID_BONES, quadrupedBones, walkPoses, boneSegments, capsuleArt, clampAngles, humanoidAngles, humanoidBones, groundedRoot, ellipseArt, renderRigFrame } from "./skeleton.ts";
 import { DEFAULT_POSE, FIGURE_LAYERS, PRESETS as POSE_PRESETS, WALK_CYCLE, clampPose, lerpPose, renderFigure, swapSides, type Pose, type Ramp } from "./rig.ts";
@@ -501,6 +502,13 @@ function mix(a: string, b: string, t: number): string {
   const [x, y] = [a, b].map((h) => [1, 3, 5].map((i) => parseInt(normalizeHex(h).slice(i, i + 2), 16)));
   return `#${x.map((v, k) => Math.round(v * (1 - t) + y[k] * t).toString(16).padStart(2, "0")).join("")}`;
 }
+
+/** índice da paleta do contorno seletivo para um material vizinho (mais claro no lado da luz) */
+function selOutIndex(p: Project, neighbor: number, lit: boolean): number {
+  const hex = p.palette[neighbor - 1].hex;
+  return ensureColor(p, mix(hex, darkOutline(hex), lit ? 0.68 : 0.88), `contorno-${p.palette[neighbor - 1].name}${lit ? "-luz" : ""}`);
+}
+const paletteLum = (p: Project) => (idx: number) => { const [r, g, b] = hexToRgb(p.palette[idx - 1].hex); return 0.3 * r + 0.59 * g + 0.11 * b; };
 
 function ensureColor(p: Project, hex: string, name: string): number {
   const h = normalizeHex(hex);
@@ -1050,17 +1058,6 @@ const rigBake = def({
     const ids = ensureGeneratedLayers(p, names);
     const auto = i.outline === "auto";
     const outlineIdx = i.outline && !auto ? colorIndex(p, i.outline) : 0;
-    const selCache = new Map<string, number>();
-    // contorno seletivo (sel-out): tom escuro do próprio material vizinho; mais claro no lado da luz (cima/esquerda)
-    const selOut = (neighbor: number, lit: boolean): number => {
-      const key = `${neighbor}:${lit ? 1 : 0}`;
-      const hit = selCache.get(key);
-      if (hit) return hit;
-      const hex = p.palette[neighbor - 1].hex;
-      const idx = ensureColor(p, mix(hex, darkOutline(hex), lit ? 0.68 : 0.88), `contorno-${p.palette[neighbor - 1].name}${lit ? "-luz" : ""}`);
-      selCache.set(key, idx);
-      return idx;
-    };
     for (const f of list) {
       const out = renderRigFrame(p, p.frames[f].pose, { snapAngle: i.snap_angle, roundJoints: i.round_joints });
       for (const n of names) getCel(p, f, ids.get(n)!).fill(0);
@@ -1070,22 +1067,7 @@ const rigBake = def({
         const cel = getCel(p, f, ids.get(layer)!);
         for (let k = 0; k < buf.length; k++) if (buf[k]) { cel[k] = buf[k]; union[k] = 1; top[k] = buf[k]; }
       }
-      if (auto) {
-        const cel = getCel(p, f, ids.get("contorno")!);
-        const lum = (idx: number) => { const [r, g, b] = hexToRgb(p.palette[idx - 1].hex); return 0.3 * r + 0.59 * g + 0.11 * b; };
-        for (let y = 0; y < p.height; y++) for (let x = 0; x < p.width; x++) {
-          const k = y * p.width + x;
-          if (union[k]) continue;
-          let best = 0, lit = false;
-          for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-            const xx = x + dx, yy = y + dy;
-            if (xx < 0 || yy < 0 || xx >= p.width || yy >= p.height) continue;
-            const c = top[yy * p.width + xx];
-            if (c && (!best || lum(c) < lum(best))) { best = c; lit = dx === 1 || dy === 1; }
-          }
-          if (best) cel[k] = selOut(best, lit);
-        }
-      }
+      if (auto) selectiveOutline(top, getCel(p, f, ids.get("contorno")!), p.width, p.height, (c, lit) => selOutIndex(p, c, lit), paletteLum(p));
       if (outlineIdx) {
         const cel = getCel(p, f, ids.get("contorno")!);
         for (let y = 0; y < p.height; y++) for (let x = 0; x < p.width; x++) {
@@ -1367,7 +1349,9 @@ const transform = def({
     "- shift: move dx/dy pixels (wrap=true faz dar a volta; ótimo para nuvens, água, fundos em loop)",
     "- flip_horizontal / flip_vertical: espelha",
     "- replace_color: troca a cor `from` por `to`",
-    "- outline: contorna automaticamente a silhueta com `color`",
+    "- outline: contorna automaticamente a silhueta com `color`; com mode=\"seletivo\" (sel-out) cada trecho usa um tom escuro do material vizinho, mais claro no lado da luz, em vez de um halo uniforme",
+    "- shade: SOMBREAMENTO AUTOMÁTICO de arte chapada: cada região de cor única ganha o tom claro na borda de cima/esquerda e o tom de sombra na de baixo/direita (rampa com mudança de matiz, cores novas criadas na paleta). Desenhe chapado, aplique shade e depois retoque só os detalhes",
+    "- clean: limpa quinas em L do contorno `color` (pixel perfect): tira o pixel de ponta que engrossa a linha",
     "- rotate: gira `angle` graus (positivo = horário) em torno do pivô (cx, cy). Ótimo para braços, armas e objetos girando. Gire sempre a partir de uma cópia limpa (copy_layer_content) em vez de girar várias vezes o mesmo frame, para não acumular distorção.",
     "- center: centraliza o conteúdo da camada no canvas (axis: x, y ou both)",
     "- clear: apaga tudo",
@@ -1375,7 +1359,7 @@ const transform = def({
   schema: z.object({
     frames: framesSel,
     layer: layerSel,
-    op: z.enum(["shift", "flip_horizontal", "flip_vertical", "replace_color", "outline", "rotate", "center", "clear"]),
+    op: z.enum(["shift", "flip_horizontal", "flip_vertical", "replace_color", "outline", "shade", "clean", "rotate", "center", "clear"]),
     axis: z.enum(["x", "y", "both"]).optional().describe("center: eixo a centralizar (padrão: both)"),
     angle: z.number().min(-360).max(360).optional().describe("rotate: graus, positivo = horário"),
     cx: z.number().optional().describe("rotate: pivô x (padrão: centro do canvas)"),
@@ -1387,6 +1371,9 @@ const transform = def({
     to: colorRef.optional(),
     color: colorRef.optional(),
     diagonal: z.boolean().optional().describe("outline: incluir diagonais"),
+    mode: z.enum(["uniforme", "seletivo"]).optional().describe('outline: "seletivo" (sel-out) usa um tom escuro do material vizinho, mais claro no lado da luz, e não precisa de `color`'),
+    depth: z.number().int().min(1).max(3).optional().describe("shade: espessura da sombra em pixels (padrão 1; 2 para sprites maiores que 48 px)"),
+    skip: z.array(colorRef).optional().describe("shade: cores de DETALHE (olhos, boca, listras): não são sombreadas e contam como parte da região vizinha, sem criar rebordos em volta delas. Contornos escuros já são pulados"),
     preview: previewFlag,
   }),
   run(p, i) {
@@ -1409,8 +1396,28 @@ const transform = def({
           draw.replaceColor(s, colorIndex(p, i.from), colorIndex(p, i.to));
           break;
         case "outline":
-          if (i.color === undefined) throw new Error("outline precisa de `color`.");
+          if (i.mode === "seletivo") {
+            selectiveOutline(s.data.slice(), s.data, p.width, p.height, (c, lit) => selOutIndex(p, c, lit), paletteLum(p));
+            break;
+          }
+          if (i.color === undefined) throw new Error("outline precisa de `color` (ou mode: \"seletivo\").");
           draw.outline(s, colorIndex(p, i.color), i.diagonal ?? false);
+          break;
+        case "shade": {
+          const lum = paletteLum(p);
+          const skipSet = new Set((i.skip ?? []).map((c) => colorIndex(p, c)));
+          const count = autoShade(s.data, p.width, p.height, i.depth ?? 1, (c) => {
+            if (skipSet.has(c) || lum(c) < 70) return null;
+            const hex = p.palette[c - 1].hex, name = p.palette[c - 1].name;
+            const r = makeRamp(hex, 5);
+            return { light: ensureColor(p, r[3], `${name}-luz`), shadow: ensureColor(p, r[1], `${name}-sombra`) };
+          }, (c) => skipSet.has(c));
+          if (!count) throw new Error("shade não mudou nada: a camada está vazia ou só tem contornos escuros/cores em `skip`.");
+          break;
+        }
+        case "clean":
+          if (i.color === undefined) throw new Error("clean precisa de `color` (a cor do contorno).");
+          cleanCorners(s.data, p.width, p.height, colorIndex(p, i.color));
           break;
         case "rotate":
           if (i.angle === undefined) throw new Error("rotate precisa de `angle`.");

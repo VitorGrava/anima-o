@@ -1,0 +1,15 @@
+[
+{"name":"set_palette","input":{"colors":[
+ {"key":"w","hex":"#e8f6fb","name":"asa"},{"key":"h","hex":"#9a5028","name":"cabelo"},{"key":"s","hex":"#ffbf80","name":"pele"},
+ {"key":"v","hex":"#ffcb1f","name":"colete"},{"key":"a","hex":"#ff9a2c","name":"abdomen"},{"key":"b","hex":"#7a3418","name":"listra"},{"key":"e","hex":"#2a1018","name":"olho"},{"key":"m","hex":"#b83a40","name":"boca"}]}},
+{"name":"add_layer","input":{"name":"arte"}},
+{"name":"draw_shapes","input":{"layer":"arte","shapes":[
+ {"type":"ellipse","x":2,"y":20,"w":10,"h":6,"color":"w","fill":true},{"type":"ellipse","x":20,"y":20,"w":10,"h":6,"color":"w","fill":true},
+ {"type":"ellipse","x":10,"y":20,"w":12,"h":10,"color":"a","fill":true},
+ {"type":"rect","x":10,"y":24,"w":12,"h":1,"color":"b","fill":true},{"type":"rect","x":11,"y":27,"w":10,"h":1,"color":"b","fill":true},
+ {"type":"ellipse","x":11,"y":16,"w":10,"h":7,"color":"v","fill":true},
+ {"type":"ellipse","x":6,"y":2,"w":20,"h":16,"color":"h","fill":true},
+ {"type":"ellipse","x":9,"y":6,"w":14,"h":11,"color":"s","fill":true},
+ {"type":"rect","x":12,"y":9,"w":2,"h":3,"color":"e","fill":true},{"type":"rect","x":18,"y":9,"w":2,"h":3,"color":"e","fill":true},
+ {"type":"rect","x":14,"y":13,"w":4,"h":1,"color":"m","fill":true}]}}
+]

@@ -20,6 +20,7 @@ export const REFERENCE_TOPICS = [
   "rampa",
   "tamanhos",
   "estudo",
+  "circulos",
 ] as const;
 export type ReferenceTopic = (typeof REFERENCE_TOPICS)[number];
 
@@ -157,7 +158,7 @@ function proportions(height: number, style: NonNullable<ReferenceOptions["style"
 
 // ---------- tópicos de texto ----------
 
-const TEXT: Record<Exclude<ReferenceTopic, "proporcoes" | "rampa" | "paletas">, string> = {
+const TEXT: Record<Exclude<ReferenceTopic, "proporcoes" | "rampa" | "paletas" | "circulos">, string> = {
   principios: `Os 12 princípios da animação (Disney: Frank Thomas, Ollie Johnston e John Lounsbery, anos 1930) e como aplicá-los nesta engine.
 Definições a partir do artigo "Os 12 princípios da animação" (Alura): https://www.alura.com.br/artigos/12-principios-animacao
 O comando check imprime um painel (✓ / ! / –) dos que dá para medir; os outros pedem o seu olho.
@@ -426,6 +427,37 @@ function quadrupedMeasures(withers: number): string {
   ].join("\n");
 }
 
+
+/** Círculos e elipses em pixels (larguras de cada linha) + como arredondar quinas: para desenhar à mão sem formas quadradas. */
+function circles(): string {
+  const disc = (d: number) => {
+    const rows: number[] = [];
+    for (let y = 0; y < d; y++) {
+      let n = 0;
+      for (let x = 0; x < d; x++) {
+        const dx = (x + 0.5 - d / 2) / (d / 2), dy = (y + 0.5 - d / 2) / (d / 2);
+        if (dx * dx + dy * dy <= 1.02) n++;
+      }
+      rows.push(n);
+    }
+    return rows;
+  };
+  const art = (d: number) => disc(d).map((n) => " ".repeat(Math.floor((d - n) / 2)) + "█".repeat(n)).join("\n");
+  return [
+    "Círculos em pixels (largura de cada linha, de cima para baixo). Use como molde para cabeças, barrigas, olhos e joelhos: formas orgânicas NÃO têm quina reta.",
+    ...[4, 6, 8, 10, 12, 14, 16, 20, 24].map((d) => `  ${String(d).padStart(2)} px: ${disc(d).join(" ")}`),
+    "",
+    "Exemplo (12 px):",
+    art(12),
+    "",
+    "Como arredondar uma quina (degraus que crescem em direção à reta): 1-2-3 para raio grande, 1-2 para raio médio, 1-1 para raio pequeno. Nunca 2-1-2 (serrilhado).",
+    "- Cabeça redonda de personagem: pule 2–3 px nos cantos de cima e use o molde do diâmetro; evite topo reto e queixo reto (afine o queixo 2 px por lado).",
+    "- Retas longas (4+ px) em silhueta orgânica viram caixa: quebre com uma curva de 1 px a cada 4–6 px.",
+    "- Em sprite de 32 px, a cabeça costuma ter 14–18 px; use os moldes de 14, 16 ou 20.",
+    "Acabamento recomendado: desenhe CHAPADO → `transform op shade` (3 tons com mudança de matiz) → `transform op outline mode seletivo` → `transform op clean` → retoque só os detalhes (olhos, brilho) → `check`.",
+  ].join("\n");
+}
+
 export function reference(topic: ReferenceTopic, opts: ReferenceOptions = {}): string {
   switch (topic) {
     case "quadrupede":
@@ -438,6 +470,8 @@ export function reference(topic: ReferenceTopic, opts: ReferenceOptions = {}): s
       return ramp(opts.base_color ?? "#c8794a", opts.steps ?? 5);
     case "paletas":
       return palettes();
+    case "circulos":
+      return circles();
     default:
       return TEXT[topic];
   }
