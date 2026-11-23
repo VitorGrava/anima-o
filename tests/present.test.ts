@@ -68,3 +68,39 @@ describe("folha com metadados e check cenário", () => {
     expect(w.text).toMatch(/blob\/capsule geram contorno grosso/);
   });
 });
+
+describe("anima rodada e restaurar (o ciclo de revisão em ferramenta)", () => {
+  it("cada rodada exporta imagem, guarda snapshot, compara com a anterior e avisa se piorou; restaurar volta o projeto", async () => {
+    const { execSync } = await import("node:child_process");
+    const { mkdtempSync, readFileSync, writeFileSync, existsSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+    const { toJSON } = await import("../src/engine/index.ts");
+    const dir = mkdtempSync(path.join(tmpdir(), "anima-rod-"));
+    const proj = path.join(dir, "p.anima.json");
+    const root = path.resolve(__dirname, "..");
+    const run = (cmd: string) => execSync(`node bin/anima.mjs ${cmd}`, { cwd: root, encoding: "utf8" });
+    const p = proj1();
+    writeFileSync(proj, JSON.stringify(toJSON(p)));
+    const r1 = run(`rodada ${proj} --nota 6`);
+    expect(r1).toMatch(/Rodada 1: avaliar \d+\/100 \(primeira rodada/);
+    expect(existsSync(path.join(dir, "p.r1.png"))).toBe(true);
+    expect(existsSync(path.join(dir, "p.r1.anima.json"))).toBe(true);
+    // estraga o desenho e declara nota menor: deve avisar que piorou
+    runCommand(p, "draw_shapes", { shapes: [{ type: "rect", x: 0, y: 0, w: 16, h: 16, color: "a", filled: true }] });
+    writeFileSync(proj, JSON.stringify(toJSON(p)));
+    const r2 = run(`rodada ${proj} --nota 4`);
+    expect(r2).toMatch(/Rodada 2/);
+    expect(r2).toMatch(/PIOROU em relação à rodada 1.*anima restaurar/);
+    const antes = JSON.parse(readFileSync(path.join(dir, "p.r1.anima.json"), "utf8"));
+    run(`restaurar ${proj} 1`);
+    expect(JSON.parse(readFileSync(proj, "utf8"))).toEqual(antes);
+    expect(JSON.parse(readFileSync(path.join(dir, "p.rodadas.json"), "utf8")).length).toBe(2);
+  });
+});
+function proj1() {
+  const p = createProject({ width: 16, height: 16 });
+  runCommand(p, "set_palette", { colors: [{ key: "a", hex: "#d84a3a", name: "vermelho" }] });
+  runCommand(p, "draw_shapes", { shapes: [{ type: "ellipse", x: 4, y: 4, w: 8, h: 8, color: "a", filled: true }] });
+  return p;
+}

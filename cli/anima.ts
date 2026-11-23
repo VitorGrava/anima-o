@@ -14,6 +14,8 @@
  *   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
  *   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N] [--fundo #hex] [--margem N] [--sombra] [--vai-e-volta] [--meta]   (sem --scale a escala é automática; --meta grava <saida>.json com posição e duração de cada frame da folha)
   anima compare <projeto> <ref.png> [--frame N] [--png saida.png] [--fundo auto|nenhum|#hex]   (compara o desenho com uma referência na mesma grade: silhueta, erro de cor, painel lado a lado)
+  anima rodada <projeto> [--frame N] [--ref ref.png] [--nota N]   (UMA chamada por rodada de revisão: exporta a imagem (e a folha), mede, compara com a rodada anterior e com a referência, guarda um snapshot; avisa se PIOROU)
+  anima restaurar <projeto> <n>   (volta o projeto ao estado da rodada n)
   anima critico <projeto> [--frame N] [--ref referencia.png]   (exporta a imagem e imprime o pedido pronto para um agente INDEPENDENTE criticar; é o passo 4 do reference processo)
   anima import <projeto> <imagem.png> [--largura N|--altura N|--grade auto|N] [--cores N] [--fundo auto|nenhum|#hex] [--tol-fundo N] [--modo auto|dominante|media] [--contraste K] [--saturacao K] [--dither] [--contorno] [--camada nome] [--manter-canvas]   (reduz uma imagem/foto à grade de pixel e à paleta; --contorno cria o contorno seletivo)
  *   anima guide                            imprime o guia do animador (fluxo e princípios): leia antes de começar
@@ -28,6 +30,8 @@ import {
   describeProject,
   renderImages,
   importImage,
+  evaluateBeauty,
+  toJSON,
   compareToReference,
   avisoFundo,
   avisoVazio,
@@ -269,6 +273,52 @@ export async function main(argv: string[]): Promise<number> {
       const out = png ?? file.replace(/(\.anima)?\.json$/, "") + ".comparacao.png";
       await writeFile(out, encodePNG(r.image.width, r.image.height, r.image.data));
       console.log(`${r.text}\nImagem: ${path.resolve(out)}`);
+      return 0;
+    }
+    case "rodada": {
+      const [file] = args.filter((a) => !a.startsWith("--"));
+      const frame = Number(flag(args, "frame") ?? 0), ref = flag(args, "ref"), nota = flag(args, "nota"), cores = flag(args, "cores");
+      if (!file) break;
+      await store.open(file);
+      const p = store.project;
+      const base = file.replace(/(\.anima)?\.json$/, "");
+      const histFile = `${base}.rodadas.json`;
+      type Rod = { n: number; png: string; snapshot: string; avaliar: number; iou?: number; erro?: number; nota?: number };
+      let hist: Rod[] = [];
+      try { hist = JSON.parse(await readFile(histFile, "utf8")) as Rod[]; } catch { /* primeira rodada */ }
+      const n = (hist[hist.length - 1]?.n ?? 0) + 1;
+      const png = `${base}.r${n}.png`, snap = `${base}.r${n}.anima.json`;
+      await exportToFile(p, { format: "frame_png", path: png, frame });
+      let sheet = "";
+      if (p.frames.length > 1) { sheet = `${base}.r${n}-folha.png`; await exportToFile(p, { format: "spritesheet_png", path: sheet, frame: 0, scale: undefined, columns: Math.min(p.frames.length, 8) }); }
+      await writeFile(snap, JSON.stringify(toJSON(p)));
+      const av = evaluateBeauty(p, [frame]);
+      const chk = runCommand(p, "check", { as_image: false, painel_completo: false });
+      const cnt = /Problemas: (\d+) erro\(s\), (\d+) aviso\(s\)/.exec(chk.text);
+      let iou: number | undefined, erro: number | undefined, cmpTxt = "";
+      if (ref) {
+        const refImg = importImage(decodePNG(await readFile(ref)), { largura: p.width, altura: p.height, cores: Number(cores ?? 255) });
+        const c = compareToReference(p, frame, refImg);
+        iou = c.iou; erro = c.erroCor;
+        await writeFile(`${base}.r${n}-comparacao.png`, encodePNG(c.image.width, c.image.height, c.image.data));
+        cmpTxt = `\nContra a referência: silhueta ${(c.iou * 100).toFixed(0)}%, erro de cor ${(c.erroCor * 100).toFixed(0)}% (painel: ${path.resolve(`${base}.r${n}-comparacao.png`)}).`;
+      }
+      const prev = hist[hist.length - 1];
+      hist.push({ n, png: path.resolve(png), snapshot: path.resolve(snap), avaliar: av.score, iou, erro, nota: nota ? Number(nota) : undefined });
+      await writeFile(histFile, JSON.stringify(hist, null, 1));
+      const delta = prev ? `${av.score - prev.avaliar >= 0 ? "+" : ""}${av.score - prev.avaliar} contra a rodada ${prev.n}` : "primeira rodada";
+      const piorou = prev && ((iou !== undefined && prev.iou !== undefined && iou < prev.iou - 0.02) || (nota && prev.nota !== undefined && Number(nota) < prev.nota)) ? `\nATENÇÃO: PIOROU em relação à rodada ${prev.n}. Restaure com: anima restaurar ${file} ${prev.n}` : "";
+      console.log(`Rodada ${n}: avaliar ${av.score}/100 (${delta}; mede só defeitos mecânicos), check ${cnt ? `${cnt[1]} erro(s) e ${cnt[2]} aviso(s)` : "sem resumo"}.${nota ? ` Nota do crítico: ${nota}/10${prev?.nota !== undefined ? ` (antes ${prev.nota})` : ""}.` : ""}${cmpTxt}${piorou}\nImagem: ${path.resolve(png)}${sheet ? `\nFolha: ${path.resolve(sheet)}` : ""}\nPiores achados do avaliar: ${av.findings.slice(0, 3).map((x) => x.code).join(", ") || "nenhum"}.\nAgora: (1) LEIA a imagem e compare com a referência; (2) liste os 5 piores defeitos; (3) corrija SÓ isso; (4) rode anima rodada de novo${nota ? "" : " (use --nota N com a nota do crítico independente: anima critico gera o pedido)"}. Voltar: anima restaurar ${file} <n>.`);
+      return 0;
+    }
+    case "restaurar": {
+      const [file, nStr] = args.filter((a) => !a.startsWith("--"));
+      if (!file || !nStr) break;
+      const base = file.replace(/(\.anima)?\.json$/, "");
+      const snap = `${base}.r${Number(nStr)}.anima.json`;
+      const data = await readFile(snap, "utf8");
+      await writeFile(file, data);
+      console.log(`Restaurado: ${file} voltou ao estado da rodada ${nStr} (${path.resolve(snap)}).`);
       return 0;
     }
     case "critico": {

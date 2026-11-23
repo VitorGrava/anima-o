@@ -22,6 +22,7 @@ node bin/anima.mjs export projeto.anima.json sheet.png --scale 6 --columns 8   #
 node bin/anima.mjs show projeto.anima.json all            # todos os frames lado a lado, em texto
 node bin/anima.mjs check projeto.anima.json [--efeito]    # defeitos, movimento e tempos (--efeito: brilho, chama, fumaça)
 node bin/anima.mjs import projeto.anima.json ref.png --cores 24   # traz um PNG para a grade (detecta o pixel, tira o fundo, quantiza a paleta)
+node bin/anima.mjs rodada projeto.anima.json --ref ref.png --nota 7   # UMA chamada por rodada de revisão (imagem, medidas, comparação, snapshot, aviso se piorou); `restaurar <proj> <n>` volta; `critico` gera o pedido para um crítico independente
 node bin/anima.mjs tools                                  # comandos e parâmetros
 ```
 
