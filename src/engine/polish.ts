@@ -46,8 +46,15 @@ export function autoShade(
   detail: (idx: number) => boolean = () => false,
 ): number {
   const src = data.slice();
-  const same = (x: number, y: number, c: number) => x >= 0 && y >= 0 && x < w && y < h && (src[y * w + x] === c || detail(src[y * w + x]));
   const cache = new Map<number, { light: number; shadow: number } | null>();
+  // a própria luz/sombra da cor conta como a mesma região: rodar de novo não empilha rebordos
+  const same = (x: number, y: number, c: number) => {
+    if (x < 0 || y < 0 || x >= w || y >= h) return false;
+    const v = src[y * w + x];
+    if (v === c || detail(v)) return true;
+    const r = cache.get(c);
+    return !!r && (v === r.light || v === r.shadow);
+  };
   let n = 0;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const c = src[y * w + x];
@@ -68,9 +75,9 @@ export function autoShade(
 /**
  * Limpeza de quinas em L num contorno de 1 px (`line`): tira o pixel de ponta que forma um L
  * quando os dois lados opostos estão vazios (não mexe se houver arte encostada, para não abrir
- * buraco na silhueta). Devolve quantos pixels removeu.
+ * buraco na silhueta; `blocked` marca a arte de outras camadas). Devolve quantos pixels removeu.
  */
-export function cleanCorners(data: Uint8Array, w: number, h: number, line: number): number {
+export function cleanCorners(data: Uint8Array, w: number, h: number, line: number, blocked?: Uint8Array): number {
   let n = 0;
   const at = (x: number, y: number) => (x < 0 || y < 0 || x >= w || y >= h ? 0 : data[y * w + x]);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
@@ -80,7 +87,37 @@ export function cleanCorners(data: Uint8Array, w: number, h: number, line: numbe
     const L = (N && E && !S && !W) || (N && W && !S && !E) || (S && E && !N && !W) || (S && W && !N && !E);
     if (!L) continue;
     const opp = [N ? [0, 1] : [0, -1], E ? [-1, 0] : [1, 0]];
-    if (opp.every(([dx, dy]) => at(x + dx, y + dy) === 0)) { data[y * w + x] = 0; n++; }
+    if (!opp.every(([dx, dy]) => at(x + dx, y + dy) === 0)) continue;
+    if (blocked && ORTH.some(([dx, dy]) => blocked[(y + dy) * w + x + dx])) continue;   // há arte de outra camada encostada
+    data[y * w + x] = 0; n++;
   }
   return n;
+}
+
+/** Cores de DETALHE de uma camada: tudo cuja região é minúscula (≤ 8 px) ou fina (1 px de espessura): olhos, boca, listras, brilhos. */
+export function detailColors(data: Uint8Array, w: number, h: number): Set<number> {
+  const seen = new Uint8Array(w * h);
+  const big = new Set<number>(), all = new Set<number>();
+  for (let start = 0; start < w * h; start++) {
+    const c = data[start];
+    if (!c || seen[start]) continue;
+    all.add(c);
+    const stack = [start];
+    seen[start] = 1;
+    let n = 0, x0 = w, x1 = -1, y0 = h, y1 = -1;
+    while (stack.length) {
+      const k = stack.pop()!;
+      const x = k % w, y = (k - x) / w;
+      n++; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+      for (const [dx, dy] of ORTH) {
+        const xx = x + dx, yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        const q = yy * w + xx;
+        if (!seen[q] && data[q] === c) { seen[q] = 1; stack.push(q); }
+      }
+    }
+    const thin = Math.min(x1 - x0 + 1, y1 - y0 + 1) <= 1;
+    if (n > 8 && !thin) big.add(c);
+  }
+  return new Set([...all].filter((c) => !big.has(c)));
 }

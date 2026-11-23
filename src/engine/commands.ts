@@ -9,7 +9,8 @@ import { z } from "zod";
 import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.ts";
 import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
-import { autoShade, cleanCorners, selectiveOutline } from "./polish.ts";
+import { autoShade, cleanCorners, detailColors, selectiveOutline } from "./polish.ts";
+import { BG_LAYER, evaluateBeauty, formatCritique, unionBox } from "./critique.ts";
 import { REFERENCE_TOPICS, bodyProportions, darkOutline, makeRamp, reference } from "./reference.ts";
 import { HUMANOID_BONES, quadrupedBones, walkPoses, boneSegments, capsuleArt, clampAngles, humanoidAngles, humanoidBones, groundedRoot, ellipseArt, renderRigFrame } from "./skeleton.ts";
 import { DEFAULT_POSE, FIGURE_LAYERS, PRESETS as POSE_PRESETS, WALK_CYCLE, clampPose, lerpPose, renderFigure, swapSides, type Pose, type Ramp } from "./rig.ts";
@@ -503,12 +504,32 @@ function mix(a: string, b: string, t: number): string {
   return `#${x.map((v, k) => Math.round(v * (1 - t) + y[k] * t).toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** índice da paleta do contorno seletivo para um material vizinho (mais claro no lado da luz) */
-function selOutIndex(p: Project, neighbor: number, lit: boolean): number {
-  const hex = p.palette[neighbor - 1].hex;
-  return ensureColor(p, mix(hex, darkOutline(hex), lit ? 0.68 : 0.88), `contorno-${p.palette[neighbor - 1].name}${lit ? "-luz" : ""}`);
+const DERIVED = /-(luz|sombra|brilho)$/i;
+/** cor base de um tom derivado (cabelo-luz → cabelo); a própria cor se não for derivado */
+function baseOf(p: Project, idx: number): number {
+  const name = p.palette[idx - 1].name;
+  if (!DERIVED.test(name)) return idx;
+  const base = name.replace(DERIVED, "").toLowerCase();
+  const hit = p.palette.findIndex((c) => c.name.toLowerCase() === base);
+  return hit >= 0 ? hit + 1 : idx;
 }
-const paletteLum = (p: Project) => (idx: number) => { const [r, g, b] = hexToRgb(p.palette[idx - 1].hex); return 0.3 * r + 0.59 * g + 0.11 * b; };
+
+/** índice da paleta do contorno seletivo para um material vizinho (mais claro no lado da luz) */
+function selOutIndex(p: Project, neighborRaw: number, lit: boolean): number {
+  const neighbor = baseOf(p, neighborRaw);
+  const hex = p.palette[neighbor - 1].hex;
+  const base = p.palette[neighbor - 1].name.replace(/-(luz|sombra|brilho)$/i, "");
+  return ensureColor(p, mix(hex, darkOutline(hex), lit ? 0.68 : 0.88), `contorno-${base}${lit ? "-luz" : ""}`);
+}
+const paletteLum = (p: Project) => (idx: number) => { idx = baseOf(p, idx); const [r, g, b] = hexToRgb(p.palette[idx - 1].hex); return 0.3 * r + 0.59 * g + 0.11 * b; };
+
+/** Tons de luz e sombra de uma cor (mudança de matiz suavizada); null para contornos, tons já derivados e cores muito escuras. */
+function shadeTones(p: Project, c: number): { light: number; shadow: number } | null {
+  const name = p.palette[c - 1].name;
+  if (paletteLum(p)(c) < 70 || /(-luz|-sombra|-brilho)$|^contorno/i.test(name)) return null;
+  const hex = p.palette[c - 1].hex, r = makeRamp(hex, 5);
+  return { light: ensureColor(p, mix(hex, r[3], 0.75), `${name}-luz`), shadow: ensureColor(p, mix(hex, r[1], 0.65), `${name}-sombra`) };
+}
 
 function ensureColor(p: Project, hex: string, name: string): number {
   const h = normalizeHex(hex);
@@ -1404,14 +1425,8 @@ const transform = def({
           draw.outline(s, colorIndex(p, i.color), i.diagonal ?? false);
           break;
         case "shade": {
-          const lum = paletteLum(p);
           const skipSet = new Set((i.skip ?? []).map((c) => colorIndex(p, c)));
-          const count = autoShade(s.data, p.width, p.height, i.depth ?? 1, (c) => {
-            if (skipSet.has(c) || lum(c) < 70) return null;
-            const hex = p.palette[c - 1].hex, name = p.palette[c - 1].name;
-            const r = makeRamp(hex, 5);
-            return { light: ensureColor(p, r[3], `${name}-luz`), shadow: ensureColor(p, r[1], `${name}-sombra`) };
-          }, (c) => skipSet.has(c));
+          const count = autoShade(s.data, p.width, p.height, i.depth ?? 1, (c) => (skipSet.has(c) ? null : shadeTones(p, c)), (c) => skipSet.has(c));
           if (!count) throw new Error("shade não mudou nada: a camada está vazia ou só tem contornos escuros/cores em `skip`.");
           break;
         }
@@ -1439,6 +1454,110 @@ const transform = def({
       }
     }
     return result(p, `${i.op} aplicado em "${layer.name}", ${fmtList(list)}.`, list, i.preview);
+  },
+});
+
+const avaliar = def({
+  name: "avaliar",
+  description: [
+    "AVALIAÇÃO DE BELEZA: olha a arte como um diretor de arte e dá nota 0–100 em quatro categorias, com achados acionáveis (cada um diz o comando que conserta):",
+    "- Paradigmas da pixel art: pixel solto, furo, serrilhado, banding, pillow shading, ruído, contorno claro, luz inconsistente.",
+    "- Cor e harmonia: preto puro, matiz monótono, sombra sem mudança de matiz, contraste baixo, arte chapada (sem luz/sombra), cores quase iguais.",
+    "- Forma e contorno: quinas quadradas, contorno que some em trechos.",
+    "- Composição: figura cortada nas bordas, fora do centro, pequena demais no quadro.",
+    "Use depois de desenhar e antes de entregar; `polish` corrige sozinho o que é mecânico. É heurístico: ignore o que for intencional.",
+  ].join("\n"),
+  schema: z.object({ frames: framesSel.optional().describe('Padrão: "all"') }),
+  run(p, i) {
+    const list = resolveFrames(p, i.frames ?? "all");
+    return { changed: false, text: formatCritique(evaluateBeauty(p, list)) };
+  },
+});
+
+const polish = def({
+  name: "polish",
+  description: [
+    "ACABAMENTO AUTOMÁTICO numa chamada: avalia a arte, corrige o que é mecânico e mostra a nota antes e depois.",
+    "1) preto puro vira um tom escuro do material; 2) sombreamento (shade): cada material chapado ganha luz e sombra com mudança de matiz (olhos, boca e listras são detectados como detalhe e preservados); 3) contorno seletivo (sel-out) numa camada `contorno` em volta de toda a figura, mais claro no lado da luz, com limpeza de quinas em L; 4) opcional: centraliza a figura no quadro.",
+    "É idempotente (rodar de novo não empilha rebordos). Retoque os detalhes à mão depois, e use `avaliar` para ver o que sobrou (forma quadrada, composição...).",
+  ].join("\n"),
+  schema: z.object({
+    frames: framesSel.optional().describe('Padrão: "all"'),
+    sombrear: z.boolean().default(true).describe("aplica o sombreamento automático (shade)"),
+    contorno: z.enum(["seletivo", "nenhum"]).default("seletivo").describe("contorno seletivo numa camada `contorno` (não mexe numa camada contorno gerada pelo rig_bake)"),
+    profundidade: z.number().int().min(1).max(3).default(1).describe("espessura da sombra em px (2 para sprites > 48 px)"),
+    detalhes: z.array(colorRef).optional().describe("cores de detalhe extras a preservar (além das detectadas)"),
+    centralizar: z.boolean().default(false).describe("centraliza a figura no quadro (mesmo deslocamento em todos os frames)"),
+    preview: previewFlag,
+  }),
+  run(p, i) {
+    const list = resolveFrames(p, i.frames ?? "all");
+    const before = evaluateBeauty(p, list);
+    const log: string[] = [];
+    const figureLayers = p.layers.filter((l) => l.visible && !BG_LAYER.test(l.name) && l.name.toLowerCase() !== "contorno");
+    const lum = paletteLum(p);
+    // 1) preto puro -> tom escuro do material dominante
+    const usage = new Map<number, number>();
+    for (const l of figureLayers) for (const f of list) { const c = p.frames[f].cels[l.id]; if (c) for (const v of c) if (v) usage.set(v, (usage.get(v) ?? 0) + 1); }
+    const dominant = [...usage].filter(([k]) => lum(k) > 90).sort((a, b) => b[1] - a[1])[0];
+    if (dominant) for (const [k, n] of usage) {
+      if (lum(k) < 14 && n >= 6) { p.palette[k - 1].hex = darkOutline(p.palette[dominant[0] - 1].hex); log.push(`preto puro "${p.palette[k - 1].name}" → tom escuro colorido`); }
+    }
+    // 2) sombreamento por camada (detalhes detectados por camada em todos os frames)
+    if (i.sombrear) {
+      const extra = new Set((i.detalhes ?? []).map((c) => colorIndex(p, c)));
+      let shaded = 0;
+      for (const l of figureLayers) {
+        const detail = new Set<number>(extra), bigAny = new Set<number>();
+        for (const f of list) {
+          const cel = p.frames[f].cels[l.id];
+          const d = detailColors(cel, p.width, p.height);
+          for (const v of new Set(cel)) if (v && !DERIVED.test(p.palette[v - 1].name)) (d.has(v) ? detail : bigAny).add(v);
+        }
+        for (const v of bigAny) detail.delete(v);
+        for (const f of list) {
+          shaded += autoShade(p.frames[f].cels[l.id], p.width, p.height, i.profundidade, (c) => (detail.has(c) ? null : shadeTones(p, c)), (c) => detail.has(c));
+        }
+      }
+      log.push(shaded ? `sombreamento: ${shaded} pixel(s) em ${figureLayers.length} camada(s)` : "sombreamento: nada a mudar (já sombreado ou só detalhes)");
+    }
+    // 3) contorno seletivo numa camada própria
+    if (i.contorno === "seletivo") {
+      let layer = p.layers.find((l) => l.name.toLowerCase() === "contorno");
+      if (layer?.generated) log.push("contorno: ignorado (a camada `contorno` é gerada pelo rig_bake; use rig_bake outline auto)");
+      else {
+        if (!layer) {
+          layer = { id: newId("L"), name: "contorno", visible: true };
+          p.layers.unshift(layer);
+          for (const fr of p.frames) fr.cels[layer.id] = new Uint8Array(p.width * p.height);
+        }
+        let corners = 0;
+        for (const f of list) {
+          const top = new Uint8Array(p.width * p.height);
+          for (const l of figureLayers) { const c = p.frames[f].cels[l.id]; for (let k = 0; k < c.length; k++) if (c[k]) top[k] = c[k]; }
+          const cel = p.frames[f].cels[layer.id];
+          cel.fill(0);
+          selectiveOutline(top, cel, p.width, p.height, (c, lit) => selOutIndex(p, c, lit), lum);
+          for (const color of new Set(cel)) if (color) corners += cleanCorners(cel, p.width, p.height, color, top);
+        }
+        log.push(`contorno seletivo na camada "contorno"${corners ? `; ${corners} quina(s) em L limpas` : ""}`);
+      }
+    }
+    // 4) centralizar
+    if (i.centralizar) {
+      const box = unionBox(p, p.frames.map((_, k) => k));
+      if (box) {
+        const dx = Math.floor((p.width - (box.x1 - box.x0 + 1)) / 2) - box.x0, dy = Math.floor((p.height - (box.y1 - box.y0 + 1)) / 2) - box.y0;
+        if (dx || dy) {
+          for (const fr of p.frames) for (const l of p.layers) if (!BG_LAYER.test(l.name)) draw.shift({ width: p.width, height: p.height, data: fr.cels[l.id] }, dx, dy, false);
+          log.push(`figura centralizada (${dx}, ${dy})`);
+        }
+      }
+    }
+    const after = evaluateBeauty(p, list);
+    const head = `polish: ${log.length ? log.join("; ") : "nada a corrigir"}.\nNota: ${before.score} → ${after.score}/100 (paradigmas ${before.scores.paradigmas}→${after.scores.paradigmas}, cor ${before.scores.cor}→${after.scores.cor}, forma ${before.scores.forma}→${after.scores.forma}, composição ${before.scores.composicao}→${after.scores.composicao}).`;
+    const rest = after.findings.length ? `\nO que sobrou (precisa de mão de artista):\n${after.findings.map((f) => `- ${f.code}: ${f.message} → ${f.fix}`).join("\n")}` : "\nSem achados restantes.";
+    return result(p, head + rest, list, i.preview);
   },
 });
 
@@ -1664,6 +1783,8 @@ export const COMMANDS = [
   rigWalk,
   drawShapes,
   transform,
+  polish,
+  avaliar,
   copyCel,
   view,
   check,

@@ -335,7 +335,7 @@ function palettes(): string {
 
 // ---------- rampa de cor com mudança de matiz ----------
 
-function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+export function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   r /= 255;
   g /= 255;
   b /= 255;
@@ -349,7 +349,7 @@ function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   return [h * 60, s, l];
 }
 
-function hslToHex(h: number, s: number, l: number): string {
+export function hslToHex(h: number, s: number, l: number): string {
   h = ((h % 360) + 360) % 360;
   const c = (1 - Math.abs(2 * l - 1)) * s;
   const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
