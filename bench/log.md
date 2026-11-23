@@ -162,3 +162,8 @@ Dois agentes novos, só com o pedido e o guia, usaram `draw_figure` por conta pr
 - Benchmark: ver `bench/out/visao/README.md`. Escala 3 acha 4/4 por +850 tokens; escala 1 acha 2/4; quadrantes 4/4 por +3.600 e menos precisos. Auditorias Opus: o erro da minha escala automática era mandar 992 px para sprite 32x32 (~1.300 tokens) junto com a grade de texto (mesma informação duas vezes).
 - Aplicado: escala adaptativa, texto só do trecho alterado, folha de contato, `batch`, padrões tolerantes, preset de paleta, removidos o mapa de brilho do `inspecionar` e `tiles 4x3`. Custo por desenho de sprite: ~1.700-2.500 → ~250 tokens.
 - Não aplicado (ideias dos Opus, pendentes): ferramentas em níveis (rig e draw_figure só sob pedido: −11k tokens fixos por sessão), prompt de sistema mais curto (−3,7k), lupas automáticas nos problemas, painel de conferência 2x2, `scene`/`item` como comando único, `import_image`.
+
+## Esqueleto aventureiro 32x32 e 64x64 (feito à mão + crítico com olhos novos)
+- Falha anterior: gerei com blob/capsule (contorno grosso, tronco ilegível) e entreguei dizendo "está bom". Lição aplicada: desenhar à mão (metade espelhada + assimétricos), contorno seletivo por material no FIM, e rodadas com crítico independente que compara versões às cegas.
+- Notas do crítico (Opus/Sonnet, lendo só a imagem): r1 4/10 → r3 6,5 → r4 7,5. Retrocessos: nenhum; cada rodada atacou só os defeitos listados e preservou o que o crítico mandou não mexer.
+- 64x64: o mesmo desenho ampliado ANTES do contorno (contorno fica 1 px), luz/sombra nas bordas por material e detalhes (costura, rachadura, fivelas, dobras). Scripts em examples/esqueleto/v2/.

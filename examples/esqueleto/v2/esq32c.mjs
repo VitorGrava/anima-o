@@ -46,7 +46,7 @@ const grid = left.map((half) => { const l = [...half], r = [...half].reverse().m
 const put = (x, y, c, only = false, raw = false) => { if (!raw) y -= 1; if (y < 0 || y > 31 || x < 0 || x > 31) return; if (only && grid[y][x] !== ".") return; grid[y][x] = c; };
 // braços de osso finos: ombro, cotovelo, antebraço e mão 2x2 (na altura do cinto); simétricos
 const P = (x, y, c) => put(x, y, c, false, true);
-for (const [x, y, c] of [[9, 18, "b"], [9, 19, "b"], [8, 20, "b"], [8, 21, "B"], [7, 22, "b"], [7, 23, "b"], [6, 24, "b"], [7, 24, "b"], [6, 25, "d"], [7, 25, "d"], [5, 25, "d"]]) { P(x, y, c); P(31 - x, y, c === "B" ? "b" : c === "b" ? "d" : c); }
+for (const [x, y, c] of [[9, 18, "b"], [9, 19, "b"], [9, 20, "b"], [8, 21, "B"], [8, 22, "b"], [8, 23, "b"], [7, 24, "b"], [8, 24, "b"], [7, 25, "d"], [8, 25, "d"], [6, 25, "d"]]) { P(x, y, c); P(31 - x, y, c === "B" ? "b" : c === "b" ? "d" : c); }
 // espada: lâmina 2 px (luz/sombra) com ponta fina, guarda dourada, empunhadura curta e pomo
 P(27, 10, "t");
 for (let y = 11; y <= 21; y++) { put(26, y, "t", true, true); put(27, y, "u", true, true); }
