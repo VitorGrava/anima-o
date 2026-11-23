@@ -186,3 +186,6 @@ Dois agentes novos, só com o pedido e o guia, usaram `draw_figure` por conta pr
 - Dragãozinho 32x32 (4 frames): 6,5/10 pela régua do agente (refs ~8); 4 referências baixadas; 11 rodadas, 1 descartada. Casa de pedra 96x96 em perspectiva + animação: 7/10; 4 referências; 14 rodadas, 1 descartada. As duas ficaram claramente acima de tudo que eu fiz sem referência: a pesquisa antes de desenhar é o maior ganho de qualidade medido.
 - `avaliar` deu 98 e 97 a trabalhos que o próprio agente nota em 6,5–7: a nota só mede defeitos mecânicos (aviso fixo agora no relatório).
 - Corrigido a partir dos atritos: contorno seletivo sem bolsões entre camadas, cores de contorno listadas, aviso de box3d fora do quadro, quinas do quadro em cena de quadro cheio, `anima critico`, rig_part `variantes`, comando `paisagem`.
+
+## Baú abrindo 32x32 (pesquisa primeiro, crítico independente)
+Referência: Wooden Treasure Chests (szymon18042, itch.io). Notas do crítico (0-10, ref ~8): r1 4,7 → r2 5,6 → r3 6,1 → r4 (ver exemplos/bau). Ganhos que valeram: tábuas contínuas em vez de "tijolo", sombra no chão, antecipação (-1 px), overshoot, cadeado em escudo preso à tampa, monte de ouro com contorno, aro dourado. Lição de ferramenta: a última camada criada fica por cima; `check` passou a reconhecer animação de uma passada (sem falso aviso de emenda).
