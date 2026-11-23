@@ -1,0 +1,12 @@
+[
+  { "id": "01-bola-quicando", "nivel": 1, "pedido": "Faz uma bola vermelha quicando no chão, em loop, canvas 16x16." },
+  { "id": "02-estrela-brilhando", "nivel": 1, "pedido": "Uma estrela amarela pequena brilhando/piscando em loop, canvas 16x16." },
+  { "id": "03-coracao-pulsando", "nivel": 2, "pedido": "Um coração pulsando como um batimento cardíaco, com um brilho, canvas 16x16, em loop." },
+  { "id": "04-fogueira", "nivel": 3, "pedido": "Uma fogueira com chamas tremulando, loop suave, canvas 32x32, fundo noturno simples." },
+  { "id": "05-slime-pulando", "nivel": 4, "pedido": "Um slime verde fofo pulando, com antecipação e impacto no chão, em loop, canvas 32x32." },
+  { "id": "06-moeda-girando", "nivel": 4, "pedido": "Uma moeda de ouro girando em torno do eixo vertical, loop perfeito, canvas 24x24." },
+  { "id": "07-cavaleiro-idle", "nivel": 5, "pedido": "Um cavaleiro pequeno parado (idle), visto de frente, respirando e piscando, canvas 32x32, em loop." },
+  { "id": "08-caminhada", "nivel": 6, "pedido": "Um aventureiro caminhando para a direita, vista lateral, ciclo de caminhada em loop, canvas 32x32." },
+  { "id": "09-golpe-de-espada", "nivel": 8, "pedido": "Um guerreiro dando um golpe de espada para a direita: antecipação, golpe, follow-through e volta à pose parada. Canvas 48x48." },
+  { "id": "10-cachorro-andando", "nivel": 9, "pedido": "Um cachorro vira-lata caramelo andando de lado para a direita, ciclo de caminhada de quadrúpede em loop, canvas 48x32." }
+]
