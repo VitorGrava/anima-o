@@ -292,7 +292,7 @@ const removeColors = def({
 const addLayer = def({
   name: "add_layer",
   description:
-    "Cria uma camada (ex. corpo, olhos, arma, efeitos). Camadas separam partes que se movem independentemente — facilita animar.",
+    "Cria uma camada (ex. corpo, olhos, arma, efeitos). Camadas separam partes que se movem independentemente — facilita animar. A ORDEM de criação importa: a última criada fica POR CIMA (use position bottom para fundo); o retorno lista baixo→cima.",
   schema: z.object({
     name: z.string().min(1).max(40),
     position: z.enum(["top", "bottom"]).optional().describe("Padrão: top (desenhada por cima)"),
