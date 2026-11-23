@@ -129,6 +129,17 @@ const MAX_PREVIEW_TEXT = 64;
  * de texto com régua, a imagem e os avisos das checagens rápidas, sem a IA precisar
  * lembrar de chamar `view`.
  */
+/** projeto ANTES do comando em execução (para mostrar só o trecho que mudou); definido por runCommand */
+let BEFORE: Project | null = null;
+
+function changedBox(a: Project, b: Project, f: number): { x0: number; y0: number; x1: number; y1: number } | null {
+  if (!a.frames[f] || a.width !== b.width || a.height !== b.height) return null;
+  const fa = flattenFrame(a, f), fb = flattenFrame(b, f);
+  let x0 = b.width, y0 = b.height, x1 = -1, y1 = -1;
+  for (let k = 0; k < fa.length; k++) if (fa[k] !== fb[k]) { const x = k % b.width, y = (k - x) / b.width; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  return x1 < 0 ? null : { x0, y0, x1, y1 };
+}
+
 function withPreview(p: Project, summary: string, frames: number[], layer?: string): CommandResult {
   const shown = frames.slice(0, 1);
   const f = shown[0];
@@ -136,14 +147,19 @@ function withPreview(p: Project, summary: string, frames: number[], layer?: stri
   if (frames.length > 1) parts.push(`Prévia só do frame ${f} (editou ${frames.length}); use view para os outros.`);
   const rows = layer ? celToRows(p, getCel(p, f, findLayer(p, layer).id)) : frameToRows(p, f);
   if (p.width <= MAX_PREVIEW_TEXT && p.height <= MAX_PREVIEW_TEXT) {
-    parts.push(`Frame ${f} agora:\n${withRuler(rows)}`);
+    // texto SÓ do trecho alterado (a imagem já mostra o conjunto): a grade inteira só no primeiro desenho do frame ou em mudança grande
+    const box = BEFORE ? changedBox(BEFORE, p, f) : null;
+    if (box && (box.x1 - box.x0 + 1) * (box.y1 - box.y0 + 1) < 0.4 * p.width * p.height && p.width * p.height > 256) {
+      const r = clampRegion(p, { x: Math.max(0, box.x0 - 1), y: Math.max(0, box.y0 - 1), w: box.x1 - box.x0 + 3, h: box.y1 - box.y0 + 3 });
+      parts.push(`Trecho alterado do frame ${f} (x${r.x}..${r.x + r.w - 1}, y${r.y}..${r.y + r.h - 1}):\n${withRuler(cropRows(rows, r), r.x, r.y)}`);
+    } else parts.push(`Frame ${f} agora:\n${withRuler(rows)}`);
   }
   const issues = analyzeFrame(p, f).filter((i) => i.severity !== "info");
   if (issues.length) parts.push(`Checagem automática do frame ${f}:\n${formatIssues(issues, 4).join("\n")}`);
   return {
     changed: true,
     text: parts.join("\n\n"),
-    images: { frames: shown, scale: autoScale(p), highlight: issues.flatMap((i) => i.points ?? []) },
+    images: { frames: shown, scale: autoScale(p, undefined, "previa"), highlight: issues.flatMap((i) => i.points ?? []) },
   };
 }
 
@@ -185,11 +201,18 @@ const setCanvas = def({
   },
 });
 
+const PRESETS_PALETA: Record<"pico8" | "sweetie16" | "gameboy", [string, string][]> = {
+  pico8: [["#000000", "preto"], ["#1d2b53", "azul-escuro"], ["#7e2553", "roxo-escuro"], ["#008751", "verde-escuro"], ["#ab5236", "marrom"], ["#5f574f", "cinza-escuro"], ["#c2c3c7", "cinza-claro"], ["#fff1e8", "branco"], ["#ff004d", "vermelho"], ["#ffa300", "laranja"], ["#ffec27", "amarelo"], ["#00e436", "verde"], ["#29adff", "azul"], ["#83769c", "lavanda"], ["#ff77a8", "rosa"], ["#ffccaa", "pele"]],
+  sweetie16: [["#1a1c2c", "noite"], ["#5d275d", "uva"], ["#b13e53", "carmim"], ["#ef7d57", "laranja"], ["#ffcd75", "ouro"], ["#a7f070", "limao"], ["#38b764", "verde"], ["#257179", "petroleo"], ["#29366f", "marinho"], ["#3b5dc9", "azul"], ["#41a6f6", "ceu"], ["#73eff7", "ciano"], ["#f4f4f4", "branco"], ["#94b0c2", "cinza-azul"], ["#566c86", "ardosia"], ["#333c57", "grafite"]],
+  gameboy: [["#0f380f", "gb-escuro"], ["#306230", "gb-medio-escuro"], ["#8bac0f", "gb-medio-claro"], ["#9bbc0f", "gb-claro"]],
+};
+
 const setPalette = def({
   name: "set_palette",
   description:
     'Adiciona ou altera cores da paleta. Se a chave já existe, a cor é substituída — isso recolore instantaneamente todos os pixels daquela cor em todos os frames (ótimo para "deixa o chapéu vermelho"). O TAMANHO da paleta segue o estilo pedido: retrô (NES, Game Boy, 16-bit) usa 4–16 cores; pixel art detalhado usa dezenas. Coesa em qualquer caso: um tom escuro de contorno, sombras e luzes por material.',
   schema: z.object({
+    preset: z.enum(["pico8", "sweetie16", "gameboy"]).optional().describe("Paleta pronta (cria as cores com chaves e nomes; pode combinar com `colors`): pico8 (16), sweetie16 (16), gameboy (4). Poupa mandar hex um a um."),
     colors: z
       .array(
         z.object({
@@ -201,13 +224,16 @@ const setPalette = def({
           name: z.string().max(40).describe('Nome curto e descritivo, ex. "pele-sombra"'),
         }),
       )
-      .min(1)
-      .max(64),
+      .max(64)
+      .default([]),
   }),
   run(p, i) {
     const added: string[] = [];
     const updated: string[] = [];
-    for (const c of i.colors) {
+    const free = [...KEY_CHARS].filter((k) => k !== TRANSPARENT_KEY && !p.palette.some((x) => x.key === k) && !i.colors.some((c) => c.key === k));
+    const presetColors = i.preset ? PRESETS_PALETA[i.preset].map(([hex, name], k) => ({ key: free[k], hex, name })) : [];
+    if (!i.preset && !i.colors.length) throw new Error("Mande `colors` (lista) ou `preset` (pico8, sweetie16, gameboy).");
+    for (const c of [...presetColors, ...i.colors]) {
       if (c.key === TRANSPARENT_KEY || c.key === " " || !KEY_CHARS.includes(c.key)) {
         throw new Error(`Chave "${c.key}" inválida. Use um destes caracteres: ${KEY_CHARS_BASIC} (ou letras acentuadas/gregas)`);
       }
@@ -370,13 +396,13 @@ const setTiming = def({
   name: "set_frame_timing",
   description: 'Define quanto tempo (ms) cada frame fica na tela. Use para segurar poses (antecipação, impacto) ou acelerar trechos. Um número vale para todos os frames escolhidos; uma LISTA dá uma duração por frame. Ex.: {"frames": "all", "duration_ms": [120, 90, 100, 60]}.',
   schema: z.object({
-    frames: framesSel,
+    frames: framesSel.optional().describe('Padrão: "all"'),
     duration_ms: z
       .union([z.number().int().min(10).max(10000), z.null(), z.array(z.number().int().min(10).max(10000)).min(1)])
       .describe("Um número (todos os frames escolhidos), null (volta ao fps global) ou uma LISTA com uma duração por frame, na mesma ordem de `frames`. Ex.: frames \"all\" e [120, 90, 100, 90]."),
   }),
   run(p, i) {
-    const list = resolveFrames(p, i.frames);
+    const list = resolveFrames(p, i.frames ?? "all");
     if (Array.isArray(i.duration_ms)) {
       if (i.duration_ms.length !== list.length) throw new Error(`A lista tem ${i.duration_ms.length} duração(ões), mas ${list.length} frame(s) foram escolhidos (${fmtList(list)}). Mande uma duração por frame.`);
       list.forEach((j, k) => { p.frames[j].duration = (i.duration_ms as number[])[k]; });
@@ -1441,7 +1467,7 @@ const transform = def({
     "- clear: apaga tudo",
   ].join("\n"),
   schema: z.object({
-    frames: framesSel,
+    frames: framesSel.optional().describe("Padrão: frame 0"),
     layer: layerSel,
     op: z.enum(["shift", "flip_horizontal", "flip_vertical", "replace_color", "outline", "shade", "clean", "reflect", "haze", "rotate", "center", "clear"]),
     axis: z.enum(["x", "y", "both"]).optional().describe("center: eixo a centralizar (padrão: both)"),
@@ -1615,13 +1641,12 @@ const reduceColors = def({
 const inspecionar = def({
   name: "inspecionar",
   description: [
-    "DESCRIÇÃO ESTRUTURADA do quadro em palavras e números (um segundo canal além da imagem): quais regiões de cor existem e onde (nome da cor, % da área, caixa x/y, centro), a caixa de cada camada, o mapa de brilho em células e as cores mais usadas.",
+    "DESCRIÇÃO ESTRUTURADA do quadro em palavras e números (um segundo canal além da imagem): quais regiões de cor existem e onde (nome da cor, % da área, caixa x/y, centro), a caixa de cada camada e as cores mais usadas.",
     "Use para conferir o que a imagem mostra sem depender de contar pixels: 'o céu ocupa y0..100?', 'a casa está em x62..122?', 'o que está no terço de cima?'. Funciona em qualquer tamanho de canvas.",
   ].join("\n"),
   schema: z.object({
     frames: framesSel.optional().describe("Padrão: frame 0"),
     minimo: z.number().min(0.05).max(20).default(0.6).describe("Tamanho mínimo de uma região listada, em % do quadro"),
-    celulas: z.number().int().min(2).max(24).default(12).describe("Colunas do mapa de brilho (as linhas seguem a proporção)"),
   }),
   run(p, i) {
     const f = resolveFrames(p, i.frames)[0];
@@ -1654,24 +1679,38 @@ const inspecionar = def({
       if (cel) for (let k = 0; k < N; k++) if (cel[k]) { n++; const x = k % W, y = (k - x) / W; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
       out.push(`- ${l.name}${l.visible ? "" : " (oculta)"}: ${n ? `${n} px, caixa x${x0}..${x1} y${y0}..${y1}` : "vazia"}`);
     }
-    // mapa de brilho
-    const cols = i.celulas, rows = Math.max(2, Math.round((cols * H) / W)), shades = " .:-=+*#%@";
-    out.push(`\nMapa de brilho ${cols}x${rows} (cada célula = ${Math.round(W / cols)}x${Math.round(H / rows)} px; espaço = vazio/escuro, @ = muito claro):`);
-    const rowLabel: string[] = [];
-    for (let r = 0; r < rows; r++) {
-      let line = "";
-      for (let c = 0; c < cols; c++) {
-        let s = 0, n = 0;
-        for (let y = Math.floor((r * H) / rows); y < Math.floor(((r + 1) * H) / rows); y++) for (let x = Math.floor((c * W) / cols); x < Math.floor(((c + 1) * W) / cols); x++) { const v = flat[y * W + x]; if (v) { s += lum(v); n++; } }
-        line += n ? shades[Math.min(shades.length - 1, Math.floor((s / n / 256) * shades.length))] : " ";
-      }
-      rowLabel.push(`y${String(Math.floor((r * H) / rows)).padStart(3)} |${line}|`);
-    }
-    out.push(...rowLabel);
     // cores mais usadas
     const cnt = new Map<number, number>(); for (const v of flat) if (v) cnt.set(v, (cnt.get(v) ?? 0) + 1);
     out.push("\nCores mais usadas: " + [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([c, n]) => `${p.palette[c - 1].name} ${((n / N) * 100).toFixed(1)}%`).join(", ") + ".");
     return { changed: false, text: out.join("\n") };
+  },
+});
+
+const batch = def({
+  name: "batch",
+  description: [
+    "Executa VÁRIOS comandos de uma vez (como o script da cena 320x180) e devolve UMA imagem final + a nota do avaliar em uma linha. É o jeito mais barato de fazer uma etapa inteira: em vez de uma imagem por traço, uma por etapa.",
+    "É atômico: se um comando falhar, nada é aplicado e a resposta diz qual (índice) e por quê. Os comandos do lote rodam sem prévia (preview:false automático). Não aninhe batch nem use export.",
+  ].join("\n"),
+  schema: z.object({
+    comandos: z.array(z.object({ name: z.string(), input: z.record(z.string(), z.unknown()).optional() })).min(1).max(300).describe('Lista de {"name": "draw_shapes", "input": {...}} na ordem de execução'),
+    frame: z.number().int().min(0).default(0).describe("Frame mostrado na imagem final"),
+    nota: z.boolean().default(true).describe("Acrescenta a nota do avaliar (uma linha) ao final"),
+    preview: previewFlag,
+  }),
+  run(p, i) {
+    const lines: string[] = [];
+    for (const [n, c] of i.comandos.entries()) {
+      if (["batch", "export"].includes(c.name)) throw new Error(`comando #${n}: "${c.name}" não pode ir dentro de um batch.`);
+      const cmd = byName.get(c.name);
+      const hasPreview = !!cmd && "shape" in cmd.schema && !!(cmd.schema as unknown as { shape: Record<string, unknown> }).shape.preview;
+      const r = runCommand(p, c.name, hasPreview ? { ...(c.input ?? {}), preview: false } : (c.input ?? {}));
+      if (!r.ok) throw new Error(`comando #${n} (${c.name}) falhou, nada foi aplicado: ${r.text.split("\n")[0]}`);
+      lines.push(`#${n} ${c.name}: ${r.text.split("\n")[0].slice(0, 90)}`);
+    }
+    const shown = lines.length > 8 ? [...lines.slice(0, 4), `... (${lines.length - 8} comandos omitidos)`, ...lines.slice(-4)] : lines;
+    const summary = `${i.comandos.length} comando(s) aplicados:\n${shown.join("\n")}${i.nota ? `\nNota: ${evaluateBeauty(p, [Math.min(i.frame, p.frames.length - 1)]).score}/100 (rode avaliar para os achados)` : ""}`;
+    return result(p, summary, [Math.min(i.frame, p.frames.length - 1)], i.preview);
   },
 });
 
@@ -1836,10 +1875,10 @@ const view = def({
     compare: z.object({ a: z.number().int().min(0), b: z.number().int().min(0) }).optional().describe("Diff do frame a para o frame b."),
     onion: z.boolean().default(false).describe("Onion skin: frame anterior em azul atrás do atual (o do loop, no frame 0)."),
     bones: z.boolean().default(false).describe("Desenha o ESQUELETO (ossos em ciano, juntas em magenta) por cima da imagem; só em projetos com rig."),
-    as_text: z.boolean().default(true),
+    as_text: z.boolean().optional().describe("Grade de texto com régua. Padrão: ligada para 1 frame; desligada quando há vários frames e imagem (a folha de contato já mostra tudo por ~1/10 do custo)."),
     as_image: z.boolean().default(true),
     image_scale: z.number().int().min(1).max(32).optional().describe("Ampliação da imagem (padrão: automático: o quadro inteiro ocupa ~1000 px)"),
-    tiles: z.enum(["2x2", "3x2", "3x3", "4x3"]).optional().describe("Divide o quadro em colunas x linhas de recortes, cada um AMPLIADO com régua e coordenadas. Para inspecionar cenas grandes (320x180...) sem perder detalhe: devolve uma imagem por quadrante."),
+    tiles: z.enum(["2x2", "3x2", "3x3"]).optional().describe("Divide o quadro em colunas x linhas de recortes, cada um AMPLIADO com régua e coordenadas. Para inspecionar cenas grandes (320x180...) sem perder detalhe: devolve uma imagem por quadrante."),
     check: z
       .enum(["normal", "cinza", "luz_sombra", "silhueta"])
       .default("normal")
@@ -1858,7 +1897,7 @@ const view = def({
       resolveFrames(p, [a, b]);
       const d = diffRows(p, a, b);
       const r = region ?? clampRegion(p);
-      if (i.as_text) {
+      if (i.as_text ?? true) {
         parts.push(
           `Diff do frame ${a} para o ${b}: ${d.added} apareceram (+), ${d.removed} sumiram (-), ${d.changed} trocaram de cor (~).\n${withRuler(cropRows(d.rows, r), r.x, r.y)}`,
           "Legenda: # = igual, . = vazio nos dois, + = apareceu, - = sumiu, ~ = outra cor.",
@@ -1872,13 +1911,14 @@ const view = def({
     }
 
     const list = resolveFrames(p, i.frames).slice(0, 12);
+    const wantText = i.as_text ?? !(list.length > 1 && i.as_image);
     if (i.tiles) {
       const [cols, rows] = i.tiles.split("x").map(Number);
       return { changed: false, text: `Quadrantes ${i.tiles} do frame ${list[0]}: uma imagem por quadrante, ampliada, com régua de coordenadas.\n${legend}`, images: { frames: [list[0]], scale, mode: i.check, tiles: { cols, rows } } };
     }
     const bigCanvas = (p.width > MAX_PREVIEW_TEXT || p.height > MAX_PREVIEW_TEXT) && !region;
-    if (bigCanvas && i.as_text) parts.push(`(grade de texto omitida: o canvas tem ${p.width}x${p.height}; leia a IMAGEM, ou peça region/tiles para ver um trecho em texto e ampliado)`);
-    if (i.as_text && !bigCanvas) {
+    if (bigCanvas && wantText) parts.push(`(grade de texto omitida: o canvas tem ${p.width}x${p.height}; leia a IMAGEM, ou peça region/tiles para ver um trecho em texto e ampliado)`);
+    if (wantText && !bigCanvas) {
       const r = region ?? clampRegion(p);
       const where = region ? ` (região x${r.x}..${r.x + r.w - 1}, y${r.y}..${r.y + r.h - 1})` : "";
       const blocks = list.map((f) => {
@@ -2012,6 +2052,7 @@ export const COMMANDS = [
   drawShapes,
   transform,
   polish,
+  batch,
   avaliar,
   inspecionar,
   reduceColors,
@@ -2109,6 +2150,7 @@ export function runCommand(p: Project, name: string, input: unknown): CommandRes
   }
   // Executa numa cópia: se o comando falhar no meio, o projeto fica intacto.
   const work = cloneProject(p);
+  BEFORE = p;
   try {
     const result = cmd.run(work, parsed.data);
     // zoom automático na região que MUDOU (só em canvas grandes, onde o quadro inteiro não mostra o detalhe)
@@ -2128,5 +2170,7 @@ export function runCommand(p: Project, name: string, input: unknown): CommandRes
     return { ok: true, ...result };
   } catch (e) {
     return { ok: false, changed: false, text: `Erro em ${name}: ${(e as Error).message}` };
+  } finally {
+    BEFORE = null;
   }
 }

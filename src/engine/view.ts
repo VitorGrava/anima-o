@@ -50,12 +50,14 @@ export function clampRegion(p: Project, r?: Region): Region {
 }
 
 /**
- * Escala automática para a IA ENXERGAR: o quadro inteiro ocupa ~1000 px na maior dimensão (uma cena 320x180
- * sai em 960x540, não em 320x180 minúsculo) e um recorte ~640 px. Limite de 32x.
+ * Escala automática por TAMANHO do quadro (custo de imagem ~ largura*altura/750 tokens): sprite pequeno não precisa de
+ * 1000 px (≤ 64 px: ~384 px; ≤ 128 px: ~640 px); cena grande usa ~960 px na leitura completa (benchmark: acha 4 de 4
+ * defeitos pequenos com erro ≤ 2 px; a 1x acha 2 de 4) e ~640 px como prévia de um desenho (o zoom da mudança cobre o detalhe).
+ * Recorte: ~512 px. Limite de 32x.
  */
-export function autoScale(p: Project, region?: Region): number {
-  const target = region ? 640 : 1000;
+export function autoScale(p: Project, region?: Region, modo: "view" | "previa" = "view"): number {
   const size = region ? Math.max(region.w, region.h) : Math.max(p.width, p.height);
+  const target = region ? 512 : size <= 64 ? 384 : size <= 128 ? 640 : modo === "previa" ? 640 : 960;
   return Math.max(1, Math.min(32, Math.floor(target / size)));
 }
 
@@ -288,6 +290,22 @@ export function renderImages(p: Project, req: ImageRequest): RenderedImage[] {
   if (req.compare) {
     const { a, b } = req.compare;
     return [make(b, `diff do frame ${a} para o ${b} (vermelho = sumiu, verde = apareceu, amarelo = trocou de cor, cinza = igual)`)];
+  }
+  if (req.frames.length > 1) {
+    // FOLHA DE CONTATO: todos os frames numa imagem só, com o número de cada um (uma imagem em vez de N: ~10x mais barato)
+    const n = req.frames.length, cols = n <= 4 ? n : n <= 8 ? 4 : 6;
+    const sc = Math.max(1, Math.min(req.scale, Math.floor(1400 / (cols * (region.w + 1)))));
+    const tiles2 = req.frames.map((f) => make(f, `frame ${f}`, region, sc, false));
+    const tw = tiles2[0].width, th = tiles2[0].height, gap = 4, lab = GLYPH_H + 2;
+    const rowsN = Math.ceil(n / cols), W = cols * (tw + gap) + gap, H = rowsN * (th + lab + gap) + gap;
+    const data = new Uint8ClampedArray(W * H * 4);
+    for (let i = 0; i < data.length; i += 4) { data[i] = data[i + 1] = data[i + 2] = 30; data[i + 3] = 255; }
+    tiles2.forEach((t, k) => {
+      const ox = gap + (k % cols) * (tw + gap), oy = gap + Math.floor(k / cols) * (th + lab + gap);
+      for (let y = 0; y < th; y++) data.set(t.data.subarray(y * tw * 4, (y + 1) * tw * 4), ((oy + lab + y) * W + ox) * 4);
+      drawText(data, W, String(req.frames[k]), ox + 1, oy + 1);
+    });
+    return [{ label: `folha de contato dos frames ${req.frames.join(", ")} (escala ${sc}x; o número de cada frame está no topo)${notes.length ? ", " + notes.join(", ") : ""}`, width: W, height: H, data }];
   }
   const imgs = req.frames.map((f) =>
     make(f, `frame ${f}${req.onion ? " com onion skin (frame anterior em azul)" : ""}${!req.mode || req.mode === "normal" ? " (fundo cinza = transparente)" : ""}`),

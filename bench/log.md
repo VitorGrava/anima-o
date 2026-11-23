@@ -157,3 +157,8 @@ Dois agentes novos, só com o pedido e o guia, usaram `draw_figure` por conta pr
 - Pedido do usuário: "faltou cor e ficou muito quadrado" (abelha). Causas: desenhar tudo à mão contando colunas dá caixa; paleta sem variedade de matiz; sombreamento fica a cargo do agente.
 - Novo: `transform op shade` (3 tons automáticos, `skip` = cores de detalhe), `outline mode seletivo` (sel-out em qualquer camada), `clean` (quinas em L), `check cantos_quadrados`, `reference circulos` (moldes por diâmetro), guia "ACABAMENTO" no prompt. Exemplo: `examples/acabamento/` (chapado → acabado).
 - Limites: `shade` só pinta rebordos de 1–3 px (não cria volume interno nem luz de 2 fontes); `clean` só remove quinas de ponta com lados vazios.
+
+## Visão da IA — eficiência (benchmark com agentes + 2 auditorias Opus)
+- Benchmark: ver `bench/out/visao/README.md`. Escala 3 acha 4/4 por +850 tokens; escala 1 acha 2/4; quadrantes 4/4 por +3.600 e menos precisos. Auditorias Opus: o erro da minha escala automática era mandar 992 px para sprite 32x32 (~1.300 tokens) junto com a grade de texto (mesma informação duas vezes).
+- Aplicado: escala adaptativa, texto só do trecho alterado, folha de contato, `batch`, padrões tolerantes, preset de paleta, removidos o mapa de brilho do `inspecionar` e `tiles 4x3`. Custo por desenho de sprite: ~1.700-2.500 → ~250 tokens.
+- Não aplicado (ideias dos Opus, pendentes): ferramentas em níveis (rig e draw_figure só sob pedido: −11k tokens fixos por sessão), prompt de sistema mais curto (−3,7k), lupas automáticas nos problemas, painel de conferência 2x2, `scene`/`item` como comando único, `import_image`.

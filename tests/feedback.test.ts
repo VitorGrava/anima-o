@@ -408,11 +408,11 @@ describe("capsule, ignore_codes, flags e erros de formas aceitas", () => {
     expect(base).toMatch(/furo/);
     expect(runCommand(p, "check", { as_image: false, ignore_codes: ["furo"] }).text).not.toMatch(/furo/);
   });
-  it("campo obrigatório ausente em formato com várias formas diz que está faltando (set_frame_timing sem frames)", () => {
+  it("campo obrigatório ausente em formato com várias formas diz que está faltando (copy_layer_content sem to_frames)", () => {
     const p = createProject();
-    const r = runCommand(p, "set_frame_timing", { duration_ms: 100 });
+    const r = runCommand(p, "copy_layer_content", { from_frame: 0, from_layer: "Base", to_layer: "Base" });
     expect(r.ok).toBe(false);
-    expect(r.text).toMatch(/frames: falta este campo obrigatório/);
+    expect(r.text).toMatch(/to_frames: falta este campo obrigatório/);
   });
   it("a CLI aceita --max_cores e --max-cores", async () => {
     const { execSync } = await import("node:child_process");
