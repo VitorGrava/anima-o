@@ -1956,6 +1956,7 @@ const polish = def({
     sombrear: z.boolean().default(true).describe("aplica o sombreamento automático (shade)"),
     contorno: z.enum(["seletivo", "nenhum"]).default("seletivo").describe("contorno seletivo numa camada `contorno` (não mexe numa camada contorno gerada pelo rig_bake)"),
     profundidade: z.number().int().min(1).max(3).default(1).describe("espessura da sombra em px (2 para sprites > 48 px)"),
+    forma: z.enum(["borda", "volume"]).default("borda").describe("sombreamento: borda (rebordo) ou volume (bloco de luz e de sombra por região; para formas orgânicas médias/grandes)"),
     detalhes: z.array(colorRef).optional().describe("cores de detalhe extras a preservar (além das detectadas)"),
     centralizar: z.boolean().default(false).describe("centraliza a figura no quadro (mesmo deslocamento em todos os frames)"),
     preview: previewFlag,
@@ -1986,7 +1987,9 @@ const polish = def({
         }
         for (const v of bigAny) detail.delete(v);
         for (const f of list) {
-          shaded += autoShade(p.frames[f].cels[l.id], p.width, p.height, i.profundidade, (c) => (detail.has(c) ? null : shadeTones(p, c)), (c) => detail.has(c));
+          shaded += i.forma === "volume"
+            ? autoShadeVolume(p.frames[f].cels[l.id], p.width, p.height, (c) => (detail.has(c) ? null : shadeTones(p, c)), (c) => detail.has(c))
+            : autoShade(p.frames[f].cels[l.id], p.width, p.height, i.profundidade, (c) => (detail.has(c) ? null : shadeTones(p, c)), (c) => detail.has(c));
         }
       }
       log.push(shaded ? `sombreamento: ${shaded} pixel(s) em ${figureLayers.length} camada(s)` : "sombreamento: nada a mudar (já sombreado ou só detalhes)");

@@ -178,3 +178,11 @@ describe("transform shade forma volume", () => {
     expect(used(p).size).toBe(1);
   });
 });
+
+describe("polish forma volume", () => {
+  it("aceita forma volume e sombreia por bloco", () => {
+    const p = disc();
+    ok(p, "polish", { forma: "volume", contorno: "nenhum" });
+    expect(used(p).size).toBeGreaterThanOrEqual(3);
+  });
+});
