@@ -14,7 +14,7 @@
  *   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
  *   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N] [--fundo #hex] [--margem N] [--sombra] [--vai-e-volta] [--meta]   (sem --scale a escala é automática; --meta grava <saida>.json com posição e duração de cada frame da folha)
   anima compare <projeto> <ref.png> [--frame N] [--png saida.png] [--fundo auto|nenhum|#hex]   (compara o desenho com uma referência na mesma grade: silhueta, erro de cor, painel lado a lado)
-  anima rodada <projeto> [--frame N] [--ref ref.png] [--nota N]   (UMA chamada por rodada de revisão: exporta a imagem (e a folha), mede, compara com a rodada anterior e com a referência, guarda um snapshot; avisa se PIOROU)
+  anima rodada <projeto> [--frame N] [--ref ref.png] [--nota N] [--saida pasta]   (UMA chamada por rodada de revisão: exporta a imagem (e a folha), mede, compara com a rodada anterior e com a referência, guarda um snapshot; avisa se PIOROU)
   anima restaurar <projeto> <n>   (volta o projeto ao estado da rodada n)
   anima critico <projeto> [--frame N] [--ref referencia.png]   (exporta a imagem e imprime o pedido pronto para um agente INDEPENDENTE criticar; é o passo 4 do reference processo)
   anima import <projeto> <imagem.png> [--largura N|--altura N|--grade auto|N] [--cores N] [--fundo auto|nenhum|#hex] [--tol-fundo N] [--modo auto|dominante|media] [--contraste K] [--saturacao K] [--dither] [--contorno] [--camada nome] [--manter-canvas]   (reduz uma imagem/foto à grade de pixel e à paleta; --contorno cria o contorno seletivo)
@@ -43,7 +43,7 @@ import {
 import { decodePNG, encodePNG } from "../server/png.ts";
 import { ProjectStore, exportToFile } from "../mcp/store.ts";
 import { SHORT_GUIDE, SYSTEM_PROMPT } from "../server/prompt.ts";
-import { writeFile } from "node:fs/promises";
+import { writeFile, mkdir } from "node:fs/promises";
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
@@ -281,7 +281,10 @@ export async function main(argv: string[]): Promise<number> {
       if (!file) break;
       await store.open(file);
       const p = store.project;
-      const base = file.replace(/(\.anima)?\.json$/, "");
+      const outDir = flag(args, "saida");
+      if (outDir) await mkdir(outDir, { recursive: true });
+      const base0 = file.replace(/(\.anima)?\.json$/, "");
+      const base = outDir ? path.join(outDir, path.basename(base0)) : base0;
       const histFile = `${base}.rodadas.json`;
       type Rod = { n: number; png: string; snapshot: string; avaliar: number; iou?: number; erro?: number; nota?: number };
       let hist: Rod[] = [];
@@ -428,6 +431,7 @@ Como isto vira comandos na CLI (sem MCP)
       };
       if (name) {
         const t = all.find((x) => x.name === name);
+        if (!t && /^(rodada|restaurar|critico|import|compare|export|show|check|guide|new|run|view)$/.test(name)) { console.log(`"${name}" é um subcomando da CLI (não um comando de \`run\`): veja \`anima --help\`.`); return 0; }
         if (!t) { console.log(`Comando "${name}" não existe. Rode \`anima tools\` para a lista.`); return 1; }
         console.log(`${t.name}\n${t.description}\n\n  parâmetros (* = obrigatório):\n${describe(t)}\n\nUso em run: [{"name": "${t.name}", "input": { ... }}]`);
         return 0;

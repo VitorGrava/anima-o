@@ -673,8 +673,10 @@ function checkSegmentLengths(p: Project, frames: number[], moving: Set<string>, 
 function checkSplitFigure(p: Project, frames: number[], moving: Set<string>, issues: Issue[]) {
   // a figura = camadas que se movem + camadas estáticas pequenas (um tronco parado); o fundo grande fica de fora
   const figure = new Set(moving);
+  const detached = /sombra|shadow|chao|chão|sparkle|brilho|gota|particula|partícula|fx|efeito/i;   // sombra no chão, gotas e efeitos são separados de propósito
+  for (const l of p.layers) if (detached.test(l.name)) figure.delete(l.id);
   for (const l of p.layers) {
-    if (!l.visible || figure.has(l.id)) continue;
+    if (!l.visible || figure.has(l.id) || detached.test(l.name)) continue;
     const area = p.frames[0].cels[l.id]?.reduce((a, v) => a + (v ? 1 : 0), 0) ?? 0;
     if (area > 0 && area < 0.4 * p.width * p.height) figure.add(l.id);
   }

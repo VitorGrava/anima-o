@@ -214,3 +214,19 @@ describe("check: animação de uma passada", () => {
     expect(r.text).toMatch(/UMA passada/);
   });
 });
+
+describe("check: sombra no chão não é fresta", () => {
+  it("camada Sombra separada do corpo não gera aviso de figura partida", () => {
+    const p = createProject({ width: 16, height: 16, fps: 8 });
+    runCommand(p, "set_palette", { colors: [{ key: "g", hex: "#60c060", name: "g" }, { key: "k", hex: "#665577", name: "k" }] });
+    runCommand(p, "add_layer", { name: "Sombra", position: "bottom" });
+    runCommand(p, "add_layer", { name: "Corpo" });
+    runCommand(p, "add_frames", { count: 3 });
+    for (let f = 0; f < 4; f++) {
+      runCommand(p, "draw_shapes", { frames: f, layer: "Sombra", shapes: [{ type: "rect", x: 4, y: 14, w: 8, h: 2, color: "k", fill: true }] });
+      runCommand(p, "draw_shapes", { frames: f, layer: "Corpo", shapes: [{ type: "rect", x: 4, y: 4 + f, w: 8, h: 6, color: "g", fill: true }] });
+    }
+    const r = runCommand(p, "check", {});
+    expect(r.text).not.toMatch(/se parte em/);
+  });
+});
