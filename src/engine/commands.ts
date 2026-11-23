@@ -15,7 +15,7 @@ import { BG_LAYER, evaluateBeauty, formatCritique, unionBox } from "./critique.t
 import { REFERENCE_TOPICS, bodyProportions, darkOutline, makeRamp, reference } from "./reference.ts";
 import { HUMANOID_BONES, quadrupedBones, walkPoses, boneSegments, capsuleArt, clampAngles, humanoidAngles, humanoidBones, groundedRoot, ellipseArt, renderRigFrame } from "./skeleton.ts";
 import { DEFAULT_POSE, FIGURE_LAYERS, PRESETS as POSE_PRESETS, WALK_CYCLE, clampPose, lerpPose, renderFigure, swapSides, type Pose, type Ramp } from "./rig.ts";
-import type { CheckMode } from "./render.ts";
+import { flattenFrame, type CheckMode } from "./render.ts";
 import { autoScale, clampRegion, diffRows, type ImageRequest } from "./view.ts";
 import {
   KEY_CHARS,
@@ -1612,6 +1612,69 @@ const reduceColors = def({
   },
 });
 
+const inspecionar = def({
+  name: "inspecionar",
+  description: [
+    "DESCRIÇÃO ESTRUTURADA do quadro em palavras e números (um segundo canal além da imagem): quais regiões de cor existem e onde (nome da cor, % da área, caixa x/y, centro), a caixa de cada camada, o mapa de brilho em células e as cores mais usadas.",
+    "Use para conferir o que a imagem mostra sem depender de contar pixels: 'o céu ocupa y0..100?', 'a casa está em x62..122?', 'o que está no terço de cima?'. Funciona em qualquer tamanho de canvas.",
+  ].join("\n"),
+  schema: z.object({
+    frames: framesSel.optional().describe("Padrão: frame 0"),
+    minimo: z.number().min(0.05).max(20).default(0.6).describe("Tamanho mínimo de uma região listada, em % do quadro"),
+    celulas: z.number().int().min(2).max(24).default(12).describe("Colunas do mapa de brilho (as linhas seguem a proporção)"),
+  }),
+  run(p, i) {
+    const f = resolveFrames(p, i.frames)[0];
+    const flat = flattenFrame(p, f), W = p.width, H = p.height, N = W * H;
+    const lum = (idx: number) => { const [r, g, b] = hexToRgb(p.palette[idx - 1].hex); return 0.3 * r + 0.59 * g + 0.11 * b; };
+    const out: string[] = [`Frame ${f}: ${W}x${H} px.`];
+    // regiões conexas por cor
+    const seen = new Uint8Array(N), regions: { c: number; n: number; x0: number; x1: number; y0: number; y1: number; sx: number; sy: number }[] = [];
+    for (let st = 0; st < N; st++) {
+      if (seen[st] || !flat[st]) continue;
+      const c = flat[st], stack = [st]; seen[st] = 1;
+      const r = { c, n: 0, x0: W, x1: -1, y0: H, y1: -1, sx: 0, sy: 0 };
+      while (stack.length) {
+        const k = stack.pop()!; const x = k % W, y = (k - x) / W;
+        r.n++; r.sx += x; r.sy += y; r.x0 = Math.min(r.x0, x); r.x1 = Math.max(r.x1, x); r.y0 = Math.min(r.y0, y); r.y1 = Math.max(r.y1, y);
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue; const q = yy * W + xx; if (!seen[q] && flat[q] === c) { seen[q] = 1; stack.push(q); } }
+      }
+      regions.push(r);
+    }
+    const big = regions.filter((r) => (r.n / N) * 100 >= i.minimo).sort((a, b) => b.n - a.n).slice(0, 24);
+    out.push(`\nRegiões de cor única (≥ ${i.minimo}% do quadro), da maior para a menor:`);
+    for (const r of big) out.push(`- ${p.palette[r.c - 1].name} (${p.palette[r.c - 1].key}, ${p.palette[r.c - 1].hex}): ${((r.n / N) * 100).toFixed(1)}%  caixa x${r.x0}..${r.x1} y${r.y0}..${r.y1}  centro (${Math.round(r.sx / r.n)}, ${Math.round(r.sy / r.n)})`);
+    if (!big.length) out.push("- (nenhuma: a imagem é toda textura/dither; use um mínimo menor)");
+    const covered = flat.reduce((n, v) => n + (v ? 1 : 0), 0);
+    out.push(`\nCobertura: ${((covered / N) * 100).toFixed(1)}% do quadro tem pixel (o resto é transparente).`);
+    // camadas
+    out.push("\nCamadas (baixo→cima), caixa do conteúdo neste frame:");
+    for (const l of p.layers) {
+      const cel = p.frames[f].cels[l.id]; let x0 = W, x1 = -1, y0 = H, y1 = -1, n = 0;
+      if (cel) for (let k = 0; k < N; k++) if (cel[k]) { n++; const x = k % W, y = (k - x) / W; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+      out.push(`- ${l.name}${l.visible ? "" : " (oculta)"}: ${n ? `${n} px, caixa x${x0}..${x1} y${y0}..${y1}` : "vazia"}`);
+    }
+    // mapa de brilho
+    const cols = i.celulas, rows = Math.max(2, Math.round((cols * H) / W)), shades = " .:-=+*#%@";
+    out.push(`\nMapa de brilho ${cols}x${rows} (cada célula = ${Math.round(W / cols)}x${Math.round(H / rows)} px; espaço = vazio/escuro, @ = muito claro):`);
+    const rowLabel: string[] = [];
+    for (let r = 0; r < rows; r++) {
+      let line = "";
+      for (let c = 0; c < cols; c++) {
+        let s = 0, n = 0;
+        for (let y = Math.floor((r * H) / rows); y < Math.floor(((r + 1) * H) / rows); y++) for (let x = Math.floor((c * W) / cols); x < Math.floor(((c + 1) * W) / cols); x++) { const v = flat[y * W + x]; if (v) { s += lum(v); n++; } }
+        line += n ? shades[Math.min(shades.length - 1, Math.floor((s / n / 256) * shades.length))] : " ";
+      }
+      rowLabel.push(`y${String(Math.floor((r * H) / rows)).padStart(3)} |${line}|`);
+    }
+    out.push(...rowLabel);
+    // cores mais usadas
+    const cnt = new Map<number, number>(); for (const v of flat) if (v) cnt.set(v, (cnt.get(v) ?? 0) + 1);
+    out.push("\nCores mais usadas: " + [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([c, n]) => `${p.palette[c - 1].name} ${((n / N) * 100).toFixed(1)}%`).join(", ") + ".");
+    return { changed: false, text: out.join("\n") };
+  },
+});
+
 const avaliar = def({
   name: "avaliar",
   description: [
@@ -1775,7 +1838,8 @@ const view = def({
     bones: z.boolean().default(false).describe("Desenha o ESQUELETO (ossos em ciano, juntas em magenta) por cima da imagem; só em projetos com rig."),
     as_text: z.boolean().default(true),
     as_image: z.boolean().default(true),
-    image_scale: z.number().int().min(1).max(32).optional().describe("Ampliação da imagem (padrão: automático)"),
+    image_scale: z.number().int().min(1).max(32).optional().describe("Ampliação da imagem (padrão: automático: o quadro inteiro ocupa ~1000 px)"),
+    tiles: z.enum(["2x2", "3x2", "3x3", "4x3"]).optional().describe("Divide o quadro em colunas x linhas de recortes, cada um AMPLIADO com régua e coordenadas. Para inspecionar cenas grandes (320x180...) sem perder detalhe: devolve uma imagem por quadrante."),
     check: z
       .enum(["normal", "cinza", "luz_sombra", "silhueta"])
       .default("normal")
@@ -1808,7 +1872,13 @@ const view = def({
     }
 
     const list = resolveFrames(p, i.frames).slice(0, 12);
-    if (i.as_text) {
+    if (i.tiles) {
+      const [cols, rows] = i.tiles.split("x").map(Number);
+      return { changed: false, text: `Quadrantes ${i.tiles} do frame ${list[0]}: uma imagem por quadrante, ampliada, com régua de coordenadas.\n${legend}`, images: { frames: [list[0]], scale, mode: i.check, tiles: { cols, rows } } };
+    }
+    const bigCanvas = (p.width > MAX_PREVIEW_TEXT || p.height > MAX_PREVIEW_TEXT) && !region;
+    if (bigCanvas && i.as_text) parts.push(`(grade de texto omitida: o canvas tem ${p.width}x${p.height}; leia a IMAGEM, ou peça region/tiles para ver um trecho em texto e ampliado)`);
+    if (i.as_text && !bigCanvas) {
       const r = region ?? clampRegion(p);
       const where = region ? ` (região x${r.x}..${r.x + r.w - 1}, y${r.y}..${r.y + r.h - 1})` : "";
       const blocks = list.map((f) => {
@@ -1943,6 +2013,7 @@ export const COMMANDS = [
   transform,
   polish,
   avaliar,
+  inspecionar,
   reduceColors,
   copyCel,
   view,
@@ -2040,6 +2111,19 @@ export function runCommand(p: Project, name: string, input: unknown): CommandRes
   const work = cloneProject(p);
   try {
     const result = cmd.run(work, parsed.data);
+    // zoom automático na região que MUDOU (só em canvas grandes, onde o quadro inteiro não mostra o detalhe)
+    if (result.changed && result.images && !result.images.compare && !result.images.tiles && (work.width > 96 || work.height > 96)) {
+      const f = result.images.frames[0];
+      if (f !== undefined && p.frames[f] && work.frames[f]) {
+        const a = flattenFrame(p, f), b = flattenFrame(work, f);
+        let x0 = work.width, y0 = work.height, x1 = -1, y1 = -1;
+        if (a.length === b.length) for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) { const x = k % work.width, y = (k - x) / work.width; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+        if (x1 >= 0) {
+          const pad = 6, w = Math.max(48, x1 - x0 + 1 + pad * 2), h = Math.max(36, y1 - y0 + 1 + pad * 2);
+          if (w * h < 0.6 * work.width * work.height) result.images = { ...result.images, foco: { x: Math.max(0, Math.min(work.width - w, x0 - pad - Math.floor((w - (x1 - x0 + 1 + pad * 2)) / 2))), y: Math.max(0, Math.min(work.height - h, y0 - pad - Math.floor((h - (y1 - y0 + 1 + pad * 2)) / 2))), w, h } };
+        }
+      }
+    }
     if (result.changed) Object.assign(p, work);
     return { ok: true, ...result };
   } catch (e) {

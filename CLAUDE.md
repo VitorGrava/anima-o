@@ -24,7 +24,7 @@ node bin/anima.mjs tools                                  # comandos e parâmetr
 
 Esqueleto OPCIONAL (só se for pedido ou fizer sentido): `rig_create` → `rig_part` (arte própria presa aos ossos) → `rig_pose` (ângulos, tween) → `rig_bake`; `view --bones` mostra os ossos. Sem `rig_create` o projeto não tem esqueleto.
 Figuras humanas: use o comando `draw_figure` (esqueleto por ângulos de articulação, com anatomia por construção; `cycle: "caminhada"`, `tween`, arma presa à mão), não desenhe membros à mão.
-Depois de desenhar, confira o resultado: os comandos de desenho já devolvem o frame (grade, imagem
+Você enxerga por IMAGEM: no CLI, `run` salva `<projeto>.preview.png` (e `-1.png` com o zoom da mudança em canvas grande) — abra o PNG com a ferramenta Read; `show --region x,y,w,h --grid --png f.png` dá zoom com régua; `view` aceita `tiles` ("3x2") para canvas grande; `inspecionar` descreve em palavras regiões, camadas e brilho. Depois de desenhar, confira o resultado: os comandos de desenho já devolvem o frame (grade, imagem
 e avisos). Use `view` (com `region`+`grid` para zoom, `compare` para diff, `onion`), `check` para
 um relatório com coordenadas e `reference` para proporções de anatomia e técnicas de pixel art.
 Na CLI: `show --region x,y,w,h --grid --png f.png`, `show --diff 0,1`, `check projeto`,

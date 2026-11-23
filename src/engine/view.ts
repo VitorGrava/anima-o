@@ -22,6 +22,10 @@ export interface ImageRequest {
   onion?: boolean;
   /** Pixels a marcar em magenta (problemas encontrados pelo check). */
   highlight?: [number, number][];
+  /** Região da MUDANÇA recente: devolve também uma imagem ampliada só dela, com grade (o zoom que a IA precisaria pedir). */
+  foco?: Region;
+  /** Divide o quadro em colunas x linhas de recortes, cada um ampliado com grade e coordenadas (inspeção de cenas grandes). */
+  tiles?: { cols: number; rows: number };
   /** Esqueleto por frame: segmentos de osso (em coordenadas do canvas) a desenhar por cima. */
   bones?: Record<number, { name: string; x0: number; y0: number; x1: number; y1: number }[]>;
 }
@@ -45,9 +49,12 @@ export function clampRegion(p: Project, r?: Region): Region {
   };
 }
 
-/** Escala automática: preenche ~256 px (canvas inteiro) ou ~384 px (recorte). */
+/**
+ * Escala automática para a IA ENXERGAR: o quadro inteiro ocupa ~1000 px na maior dimensão (uma cena 320x180
+ * sai em 960x540, não em 320x180 minúsculo) e um recorte ~640 px. Limite de 32x.
+ */
 export function autoScale(p: Project, region?: Region): number {
-  const target = region ? 384 : 256;
+  const target = region ? 640 : 1000;
   const size = region ? Math.max(region.w, region.h) : Math.max(p.width, p.height);
   return Math.max(1, Math.min(32, Math.floor(target / size)));
 }
@@ -261,19 +268,35 @@ export function renderImages(p: Project, req: ImageRequest): RenderedImage[] {
     req.mode && req.mode !== "normal" ? `conferência: ${req.mode}` : "",
   ].filter(Boolean);
 
-  const make = (frame: number, label: string): RenderedImage => {
+  const make = (frame: number, label: string, reg: Region = region, scale: number = req.scale, grid: boolean = !!req.grid): RenderedImage => {
     const base = baseImage(p, frame, req);
-    const img = enlarge(base, p.width, region, req.scale, !!req.grid, req.highlight, req.bones?.[frame]);
+    const img = enlarge(base, p.width, reg, scale, grid, req.highlight, req.bones?.[frame]);
     return { label: [label, ...notes].join(", "), ...img };
   };
+
+  if (req.tiles && !req.compare) {
+    const out: RenderedImage[] = [];
+    const f = req.frames[0] ?? 0;
+    const tw = Math.ceil(p.width / req.tiles.cols), th = Math.ceil(p.height / req.tiles.rows);
+    for (let r = 0; r < req.tiles.rows; r++) for (let c = 0; c < req.tiles.cols; c++) {
+      const reg = clampRegion(p, { x: c * tw, y: r * th, w: tw, h: th });
+      out.push(make(f, `quadrante ${c + 1},${r + 1} (coluna,linha) x${reg.x}..${reg.x + reg.w - 1} y${reg.y}..${reg.y + reg.h - 1} do frame ${f}`, reg, autoScale(p, reg), true));
+    }
+    return out;
+  }
 
   if (req.compare) {
     const { a, b } = req.compare;
     return [make(b, `diff do frame ${a} para o ${b} (vermelho = sumiu, verde = apareceu, amarelo = trocou de cor, cinza = igual)`)];
   }
-  return req.frames.map((f) =>
+  const imgs = req.frames.map((f) =>
     make(f, `frame ${f}${req.onion ? " com onion skin (frame anterior em azul)" : ""}${!req.mode || req.mode === "normal" ? " (fundo cinza = transparente)" : ""}`),
   );
+  if (req.foco && req.frames.length) {
+    const reg = clampRegion(p, req.foco);
+    imgs.push(make(req.frames[0], `ZOOM NA MUDANÇA x${reg.x}..${reg.x + reg.w - 1} y${reg.y}..${reg.y + reg.h - 1}`, reg, autoScale(p, reg), true));
+  }
+  return imgs;
 }
 
 /** Texto do diff: # igual, . vazio, + apareceu, - sumiu, ~ trocou de cor. */

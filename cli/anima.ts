@@ -148,7 +148,7 @@ export async function main(argv: string[]): Promise<number> {
         const r = runCommand(store.project, c.name, c.input ?? {});
         const last = n === cmds.length - 1;
         // o último comando e os de leitura (check, view, reference...) mostram tudo; os outros, só a primeira linha
-        const reads = ["check", "view", "reference", "get_project_info"].includes(c.name);
+        const reads = ["check", "view", "reference", "get_project_info", "inspecionar", "avaliar", "polish"].includes(c.name);
         out.push(`${r.ok ? "ok " : "ERRO"} #${n} ${c.name}: ${last || reads || !r.ok ? r.text : r.text.split("\n")[0]}`);
         if (!r.ok) {
           fails++;
@@ -157,7 +157,8 @@ export async function main(argv: string[]): Promise<number> {
             break;
           }
         }
-        if (last && png) await saveImages(store.project, r, png);
+        // a imagem do último comando é SEMPRE salva (padrão: <projeto>.preview.png): a IA enxerga pelo PNG, não pelo ASCII
+        if (last && r.images) await saveImages(store.project, r, png ?? file.replace(/(\.anima)?\.json$/, "") + ".preview.png");
       }
       await store.save();
       if (!quiet) out.push(`\n${describeProject(store.project)}`);

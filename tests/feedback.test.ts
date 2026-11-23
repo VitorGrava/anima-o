@@ -99,7 +99,7 @@ describe("view: zoom, grade, diff e onion", () => {
     expect(gridded.height).toBeGreaterThan(128);
     const zoom = runCommand(p, "view", { region: { x: 0, y: 0, w: 4, h: 4 } });
     expect(zoom.images!.scale).toBe(32); // recorte pequeno => zoom máximo
-    expect(zoom.images!.scale).toBeGreaterThan(runCommand(p, "view", {}).images!.scale);
+    expect(zoom.images!.scale).toBeGreaterThanOrEqual(runCommand(p, "view", {}).images!.scale);   // canvas pequeno: o quadro inteiro já usa a escala máxima
   });
 
   it("compare conta o que apareceu, sumiu e trocou de cor", () => {
