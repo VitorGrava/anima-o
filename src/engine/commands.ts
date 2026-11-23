@@ -157,8 +157,8 @@ const setCanvas = def({
     "Define nome, tamanho (em pixels) e velocidade (fps) da animação. Redimensionar recorta/expande a partir do canto superior esquerdo. Tamanhos típicos de pixel art: 16x16, 32x32, 48x48, 64x64.",
   schema: z.object({
     name: z.string().max(80).optional(),
-    width: z.number().int().min(1).max(256).optional(),
-    height: z.number().int().min(1).max(256).optional(),
+    width: z.number().int().min(1).max(512).optional(),
+    height: z.number().int().min(1).max(512).optional(),
     fps: z.number().min(1).max(60).optional(),
   }),
   run(p, i) {
@@ -399,7 +399,7 @@ const drawRowsCmd = def({
     layer: layerSel,
     x: z.number().int().default(0).describe("Coluna do canto superior esquerdo"),
     y: z.number().int().default(0).describe("Linha do canto superior esquerdo"),
-    rows: z.array(z.string().max(256)).min(1).max(256),
+    rows: z.array(z.string().max(512)).min(1).max(512),
     mirror: z
       .enum(["none", "horizontal"])
       .default("none")
@@ -432,7 +432,7 @@ const drawFramesCmd = def({
           frame: z.number().int().min(0),
           x: z.number().int().default(0),
           y: z.number().int().default(0),
-          rows: z.array(z.string().max(256)).min(1).max(256),
+          rows: z.array(z.string().max(512)).min(1).max(512),
           mirror: z.enum(["none", "horizontal"]).default("none").describe("horizontal: escreva só a metade esquerda (com a coluna do meio por último); a engine espelha."),
         }),
       )

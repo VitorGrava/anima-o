@@ -8,7 +8,7 @@
 
 export const TRANSPARENT = 0;
 export const TRANSPARENT_KEY = ".";
-export const MAX_SIZE = 256;
+export const MAX_SIZE = 512;
 export const MAX_COLORS = 255;
 export const MAX_FRAMES = 128;
 export const MAX_LAYERS = 16;

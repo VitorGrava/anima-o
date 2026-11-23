@@ -30,8 +30,8 @@ const OpenProject = z.object({
   create: z
     .object({
       name: z.string().max(80).optional(),
-      width: z.number().int().min(1).max(256).optional(),
-      height: z.number().int().min(1).max(256).optional(),
+      width: z.number().int().min(1).max(512).optional(),
+      height: z.number().int().min(1).max(512).optional(),
       fps: z.number().min(1).max(60).optional(),
     })
     .optional()
