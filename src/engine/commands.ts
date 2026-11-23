@@ -10,6 +10,7 @@ import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.t
 import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
 import { autoShade, cleanCorners, detailColors, selectiveOutline } from "./polish.ts";
+import { drawGradient, fillPolygon, scatter } from "./paint.ts";
 import { BG_LAYER, evaluateBeauty, formatCritique, unionBox } from "./critique.ts";
 import { REFERENCE_TOPICS, bodyProportions, darkOutline, makeRamp, reference } from "./reference.ts";
 import { HUMANOID_BONES, quadrupedBones, walkPoses, boneSegments, capsuleArt, clampAngles, humanoidAngles, humanoidBones, groundedRoot, ellipseArt, renderRigFrame } from "./skeleton.ts";
@@ -1255,6 +1256,33 @@ const shape = z.discriminatedUnion("type", [
     r2: z.number().min(0.5).max(40).optional().describe("raio no ponto 2 (padrão: igual ao r1)"),
     outline: colorRef, base: colorRef, light: colorRef, shadow: colorRef,
   }).describe("Segmento grosso (membro, tronco, cauda, antena) entre dois pontos, com raios, contorno escuro de 1 px e luz de cima-esquerda. Para braço, perna, rabo: não precisa escrever um gerador."),
+  z.object({
+    type: z.literal("gradient"),
+    x: z.number().int(), y: z.number().int(), w: z.number().int().min(1), h: z.number().int().min(1),
+    colors: z.array(colorRef).min(2).max(16).describe("rampa do início ao fim (vertical: de cima para baixo; horizontal: esquerda→direita; radial: do centro para fora)"),
+    direction: z.enum(["vertical", "horizontal", "radial"]).default("vertical"),
+    dither: z.enum(["bayer2", "bayer4", "bayer8", "nenhum"]).default("bayer4").describe("dithering ordenado de Bayer na transição entre tons (bayer4 é o padrão; bayer8 = transição mais longa e suave)"),
+    suavidade: z.number().min(0.1).max(1).default(0.5).describe("largura da zona de dither dentro de cada passo da rampa: 0.3 = faixas sólidas com transição curta; 1 = degradê todo em dither"),
+    ondas: z.number().min(0).max(12).default(0).describe("ondula a borda dos passos (px) para quebrar faixas retas (céu, água)"),
+    only: colorRef.optional().describe("só pinta onde já há esta cor (textura num plano sem vazar)"),
+    cx: z.number().optional(), cy: z.number().optional(), r: z.number().min(1).optional().describe("radial: centro e raio (padrão: centro da caixa, metade da maior dimensão)"),
+  }).describe("DEGRADÊ com dithering de Bayer entre os tons de uma rampa (céu, água, brilho do sol, sombra de chão). Em pixel art, degradê é dither, não faixas retas."),
+  z.object({
+    type: z.literal("polygon"),
+    points: z.array(z.array(z.number().int()).length(2)).min(3).max(1024).describe("vértices [x, y] em ordem"),
+    color: colorRef,
+  }).describe("Polígono preenchido (montanhas, colinas, telhados, folhas). Gere o contorno do terreno como lista de pontos, incluindo os cantos de baixo."),
+  z.object({
+    type: z.literal("scatter"),
+    x: z.number().int(), y: z.number().int(), w: z.number().int().min(1), h: z.number().int().min(1),
+    colors: z.array(colorRef).min(1).max(8).describe("cores sorteadas (repita uma para pesar)"),
+    densidade: z.number().min(0.001).max(1).default(0.08).describe("fração da área coberta"),
+    forma: z.enum(["pixel", "traco", "cruz", "tufo", "onda"]).default("pixel").describe("pixel: ponto; traco: 2 px na vertical; cruz: flor/estrela de 5 px; tufo: capim de 2–3 px; onda: risco horizontal de 2–6 px (água, brilho no lago)"),
+    distancia: z.number().int().min(1).max(8).default(2).describe("distância mínima entre elementos (evita aglomerar e dá ritmo de textura)"),
+    seed: z.number().int().default(1).describe("semente: mesmo valor = mesma textura (reprodutível); use sementes diferentes por plano"),
+    only: colorRef.optional().describe("só espalha sobre esta cor (grama só sobre o campo)"),
+    ponta: colorRef.optional().describe("cor da ponta do tufo/traço/cruz (ex.: luz)"),
+  }).describe("TEXTURA espalhada com distância mínima (grama, estrelas, flores, pedras, folhas)."),
   z.object({ type: z.literal("fill"), x: z.number().int(), y: z.number().int(), color: colorRef }).describe("Balde de tinta a partir de (x, y)"),
 ]);
 
@@ -1333,7 +1361,7 @@ const drawShapes = def({
     for (const f of list) {
       const s = { width: p.width, height: p.height, data: getCel(p, f, layer.id) };
       for (const sh of i.shapes) {
-        const c = sh.type === "blob" || sh.type === "capsule" ? 0 : colorIndex(p, sh.color);
+        const c = sh.type === "blob" || sh.type === "capsule" || sh.type === "gradient" || sh.type === "scatter" ? 0 : colorIndex(p, sh.color);
         switch (sh.type) {
           case "pixels":
             for (const pt of sh.points) { const [x, y] = Array.isArray(pt) ? pt : [pt.x, pt.y]; draw.setPixel(s, x!, y!, c); }
@@ -1355,6 +1383,15 @@ const drawShapes = def({
             break;
           case "fill":
             draw.floodFill(s, sh.x, sh.y, c);
+            break;
+          case "polygon":
+            fillPolygon(s, sh.points as [number, number][], c);
+            break;
+          case "gradient":
+            drawGradient(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, direction: sh.direction, colors: sh.colors.map((k) => colorIndex(p, k)), dither: sh.dither, suavidade: sh.suavidade, ondas: sh.ondas, only: sh.only ? colorIndex(p, sh.only) : 0, cx: sh.cx, cy: sh.cy, r: sh.r });
+            break;
+          case "scatter":
+            scatter(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, colors: sh.colors.map((k) => colorIndex(p, k)), densidade: sh.densidade, forma: sh.forma, distancia: sh.distancia, seed: sh.seed, only: sh.only ? colorIndex(p, sh.only) : 0, ponta: sh.ponta ? colorIndex(p, sh.ponta) : undefined });
             break;
         }
       }
