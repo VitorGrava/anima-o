@@ -100,6 +100,8 @@ function proportions(height: number, style: NonNullable<ReferenceOptions["style"
   const pr = PRESETS[style];
   const head = height / pr.heads;
   const px = (heads: number) => Math.round(heads * head);
+  const mark = (name: string) => pr.marks.find(([n]) => n.startsWith(name))?.[1] ?? 0;
+  const seg = (from: string, to: string) => Math.max(1, Math.round((mark(to) - mark(from)) * head));
   const lines = [
     `Proporções — ${pr.label} para um sprite de ${height} px de altura.`,
     `Cabeça ≈ ${head.toFixed(1)} px de altura (largura ≈ ${(head * 0.85).toFixed(1)} px).`,
@@ -112,7 +114,11 @@ function proportions(height: number, style: NonNullable<ReferenceOptions["style"
     "Espessuras e tamanhos sugeridos para esta altura:",
     `  braço: ${Math.max(1, Math.round(height / 14))} px de largura · perna (coxa): ${Math.max(2, Math.round(height / 10))} px · pescoço: 1–${Math.max(1, Math.round(head / 4))} px (ou nenhum em estilos de cabeça grande)`,
     `  mão: ${Math.max(1, Math.round(head * 0.3))}×${Math.max(1, Math.round(head * 0.3))} px (≈ 3/4 do tamanho do rosto em estilo realista) · pé: ${Math.max(2, Math.round(head * 0.6))} px de comprimento × ${Math.max(1, Math.round(head * 0.25))} px de altura`,
-    `  comprimento do braço (ombro → ponta dos dedos) ≈ ${px(pr.heads > 5 ? 3 : 1.6)} px; a ponta dos dedos termina na altura da metade da coxa`,
+    `  comprimento do braço (ombro → ponta dos dedos) ≈ ${seg("ombros (linha)", "ponta dos dedos")} px; a ponta dos dedos termina na altura da metade da coxa`,
+    "",
+    "Segmentos para articular (cada um numa camada, com o pivô no topo; o comprimento NÃO muda durante a animação):",
+    `  coxa ≈ ${seg("virilha", "joelho")} px · canela + pé ≈ ${seg("joelho", "chão")} px · braço (parte de cima) ≈ ${seg("ombros (linha)", "cotovelo e cintura")} px · antebraço + mão ≈ ${seg("cotovelo e cintura", "ponta dos dedos")} px`,
+    `  Altura do quadril em pé ≈ ${seg("virilha", "chão")} px do chão; no passo, a perna esticada sobe ou desce o quadril 1–2 px.`,
     "",
     "Dicas: meça a silhueta com `check` (ele mostra altura e largura por camada) e compare com esta tabela. Se a cabeça for maior que o planejado, o personagem ganha cara de criança; se as pernas forem curtas, parece pesado.",
   ];

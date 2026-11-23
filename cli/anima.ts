@@ -3,7 +3,8 @@
  *
  *   anima mcp                              servidor MCP (Claude Code, Codex, ...)
  *   anima view [projeto.anima.json]        abre o app no navegador acompanhando o arquivo ao vivo
- *   anima new <projeto> [LxA] [fps] [--vazio]   cria um projeto (--vazio: sem as cores 0 e 1 padrão)
+ *   anima new <projeto> [LxA] [fps] [--vazio] [--camada nome]
+                                         cria um projeto (--vazio: sem as cores 0 e 1 padrão; --camada: nome da primeira camada, em vez de "Base")
  *   anima run <projeto> <comandos.json|->  aplica uma lista de comandos [{ "name", "input" }]
  *   anima show <projeto> [frame|all] [--png saida.png] [--check cinza|luz_sombra|silhueta]
              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--scale N]
@@ -112,13 +113,17 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "new": {
       const vazio = boolFlag(args, "vazio");
+      const camada = flag(args, "camada");
       rejectUnknownFlags(args, "new");
       const [file, size = "32x32", fps = "8"] = args;
       if (!file) break;
       const [w, h] = size.toLowerCase().split("x").map(Number);
       await store.open(file, { width: w, height: h || w, fps: Number(fps) }, true);
-      if (vazio) { runCommand(store.project, "remove_colors", { keys: ["0", "1"] }); await store.save(); }
+      if (vazio) runCommand(store.project, "remove_colors", { keys: ["0", "1"] });
+      if (camada) runCommand(store.project, "update_layer", { layer: store.project.layers[0].name, rename: camada });
+      if (vazio || camada) await store.save();
       console.log(`Criado: ${store.path}\n${describeProject(store.project)}`);
+      if (!vazio || !camada) console.log(`\nDica: o projeto já vem com ${vazio ? "" : "as cores 0 (contorno) e 1 (branco) e "}${camada ? "" : 'a camada "Base"'}. ${vazio ? "" : "Use --vazio para começar sem as cores. "}${camada ? "" : "Use --camada <nome> para nomear a primeira camada (ex.: fundo)."}`);
       return 0;
     }
     case "run": {
@@ -148,7 +153,7 @@ export async function main(argv: string[]): Promise<number> {
         if (last && png) await saveImages(store.project, r, png);
       }
       await store.save();
-      console.log(`\n${describeProject(store.project)}`);
+      if (!quiet) console.log(`\n${describeProject(store.project)}`);
       const sheet = runCommand(store.project, "view", { frames: "all", as_image: false });
       if (!quiet && sheet.ok && store.project.frames.length > 1) {
         if (sheet.text.length <= 3500) console.log(`\n${sheet.text}`);
@@ -164,6 +169,7 @@ export async function main(argv: string[]): Promise<number> {
       const scale = flag(args, "scale");
       const grid = boolFlag(args, "grid");
       const onion = boolFlag(args, "onion");
+      const boolQuiet = boolFlag(args, "quiet") || boolFlag(args, "q");
       rejectUnknownFlags(args, "show");
       const [file, frame = "0"] = args;
       if (!file) break;
@@ -180,7 +186,8 @@ export async function main(argv: string[]): Promise<number> {
       }
       if (scale) input.image_scale = Number(scale);
       const r = runCommand(p, "view", input);
-      console.log(`${describeProject(p)}\n\n${r.text}`);
+      const focused = !!(region || diff || onion || boolQuiet);
+      console.log(focused ? r.text : `${describeProject(p)}\n\n${r.text}`);
       if (!r.ok) return 1;
       if (png && frame === "all") {
         const done = await exportToFile(p, { format: "spritesheet_png", path: png, scale: Number(scale ?? 6), columns: undefined, frame: 0 });
@@ -253,7 +260,10 @@ Como isto vira comandos na CLI (sem MCP)
       const all = [...commandTools(["export"]), {
         name: "export",
         description: "(CLI: anima export <projeto> <saida>) .gif = animação; .png = spritesheet com todos os frames (--columns N muda o layout; --frame N exporta só um); .json. --scale N amplia (padrão 4).",
-        inputSchema: { type: "object", properties: { scale: { type: "integer" }, columns: { type: "integer" }, frame: { type: "integer" } } },
+        inputSchema: { type: "object", properties: {
+          scale: { type: "integer", description: "--scale N: ampliação dos pixels (padrão 4)", default: 4 },
+          columns: { type: "integer", description: "--columns N: colunas da folha .png (padrão: todos os frames em uma linha)" },
+          frame: { type: "integer", description: "--frame N: exporta só este frame como .png (sem isso, .png é a folha de todos)" } } },
       }];
       if (json) { console.log(JSON.stringify(name ? all.filter((t) => t.name === name) : all, null, 1)); return 0; }
       type Prop = { type?: string; description?: string; default?: unknown; enum?: unknown[]; properties?: Record<string, Prop>; items?: Prop; required?: string[]; anyOf?: Prop[] };

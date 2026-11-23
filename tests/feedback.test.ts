@@ -337,7 +337,9 @@ describe("ferramentas que os agentes pediram", () => {
     expect(r.text).toMatch(/desconhecida/);
     expect(r.text).toMatch(/"frame" não existe \(quis dizer "frames"\?\)/);
     expect(frameToRowsSafe(p)).toBe("........");        // nada foi desenhado
-    expect(runCommand(p, "update_layer", { layer: "Base", name: "x" }).text).toMatch(/quis dizer "rename"/);
+    expect(runCommand(p, "update_layer", { layer: "Base", renam: "x" }).text).toMatch(/quis dizer "rename"/);
+    expect(runCommand(p, "update_layer", { layer: "Base", name: "fundo" }).ok).toBe(true);   // name vale como apelido de rename
+    expect(p.layers[0].name).toBe("fundo");
   });
 
   it("mirror horizontal espelha a metade esquerda (largura final 2n-1)", () => {

@@ -100,6 +100,18 @@ const previewFlag = z
   .default(true)
   .describe("Devolve o frame editado (grade de texto + imagem) e avisos de problemas junto com a resposta. Deixe ligado: é assim que você enxerga o que desenhou.");
 
+/** Linhas de largura diferente das demais (erro de contagem de colunas é a falha mais comum ao desenhar por texto). */
+function widthWarning(rows: string[], label = ""): string {
+  if (rows.length < 2) return "";
+  const lens = rows.map((r) => [...r].length);
+  const freq = new Map<number, number>();
+  for (const l of lens) freq.set(l, (freq.get(l) ?? 0) + 1);
+  const modal = [...freq.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  const off = lens.map((l, k) => ({ l, k })).filter((q) => q.l !== modal);
+  if (!off.length) return "";
+  return `\nATENÇÃO${label}: ${off.length} linha(s) com largura diferente das outras (a maioria tem ${modal}): ${off.slice(0, 6).map((q) => `linha ${q.k} tem ${q.l}`).join(", ")}. Confira a contagem de colunas.`;
+}
+
 /** Canvas grande demais para despejar a grade inteira em texto. */
 const MAX_PREVIEW_TEXT = 64;
 
@@ -269,6 +281,7 @@ const updateLayer = def({
   schema: z.object({
     layer: z.string().describe("Nome ou id da camada"),
     rename: z.string().min(1).max(40).optional(),
+    name: z.string().min(1).max(40).optional().describe("apelido de rename (igual ao add_layer)"),
     visible: z.boolean().optional(),
     move: z.enum(["up", "down", "top", "bottom"]).optional(),
     delete: z.boolean().optional(),
@@ -281,7 +294,7 @@ const updateLayer = def({
       for (const f of p.frames) delete f.cels[layer.id];
       return { changed: true, text: `Camada "${layer.name}" apagada.` };
     }
-    if (i.rename) layer.name = i.rename;
+    if (i.rename ?? i.name) layer.name = (i.rename ?? i.name)!;
     if (i.visible !== undefined) layer.visible = i.visible;
     if (i.move) {
       const idx = p.layers.indexOf(layer);
@@ -322,7 +335,7 @@ const addFrames = def({
 
 const deleteFrames = def({
   name: "delete_frames",
-  description: "Apaga frames da timeline.",
+  description: "Apaga frames da timeline. A duração de cada frame (set_frame_timing) acompanha o frame: os que ficam mantêm a sua.",
   schema: z.object({ frames: framesSel }),
   run(p, i) {
     const del = new Set(resolveFrames(p, i.frames));
@@ -361,7 +374,7 @@ const drawRowsCmd = def({
   name: "draw_rows",
   description: [
     "Desenha arte pixel a pixel usando texto: cada string é uma linha, cada caractere é um pixel com a chave da cor na paleta.",
-    '"." = transparente (apaga), " " (espaço) = não mexe no pixel existente.',
+    '"." = transparente (apaga), " " (espaço) = não mexe no pixel existente. Para mudar poucos pixels de um frame (ex.: fechar o olho), mande só as linhas necessárias com x, y e espaços onde não quer mexer, ou use draw_shapes type=pixels.',
     "Ideal para sprites detalhados (rostos, personagens, objetos). Todas as linhas devem ter a mesma largura.",
     "Exemplo (coração 7x6 com cor 'r' e contorno '0'):",
     '[".00.00.", "0rr0rr0", "0rrrrr0", ".0rrr0.", "..0r0..", "...0..."]',
@@ -388,7 +401,7 @@ const drawRowsCmd = def({
     let n = 0;
     const rows = i.mirror === "horizontal" ? i.rows.map((r) => r + [...r].slice(0, -1).reverse().join("")) : i.rows;
     for (const f of list) n = drawRows(p, getCel(p, f, layer.id), rows, i.x, i.y, i.dot_is_transparent);
-    return result(p, `${n} pixels escritos em "${layer.name}", ${fmtList(list)}.`, list, i.preview);
+    return result(p, `${n} pixels escritos em "${layer.name}", ${fmtList(list)}.${widthWarning(rows)}`, list, i.preview);
   },
 });
 
@@ -422,7 +435,8 @@ const drawFramesCmd = def({
       const rows = it.mirror === "horizontal" ? it.rows.map((r) => r + [...r].slice(0, -1).reverse().join("")) : it.rows;
       n += drawRows(p, getCel(p, it.frame, layer.id), rows, it.x, it.y, i.dot_is_transparent);
     }
-    return result(p, `${n} pixels escritos em "${layer.name}", ${i.items.length} frame(s): ${[...new Set(frames)].join(", ")}.`, [...new Set(frames)], i.preview, i.layer);
+    const warns = i.items.map((it, k) => widthWarning(it.rows, ` (item ${k}, frame ${it.frame})`)).join("");
+    return result(p, `${n} pixels escritos em "${layer.name}", ${i.items.length} frame(s): ${[...new Set(frames)].join(", ")}.${warns}`, [...new Set(frames)], i.preview, i.layer);
   },
 });
 

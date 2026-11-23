@@ -295,9 +295,13 @@ describe("os 12 princípios da animação (Alura/Disney)", () => {
     const solo = ballAnim([[2, 2], [8, 8], [14, 14], [20, 20]]);
     expect(state(panel(solo), 8)).toBe("atencao");
   });
-  it("10. exagero: poses quase iguais são apontadas", () => {
-    const tiny = ballAnim([[20, 20], [21, 20], [20, 20], [21, 20]]);
-    expect(state(panel(tiny), 10)).toBe("atencao");
+  it("10. exagero: movimento sutil (idle) não se aplica; poses quase iguais num movimento maior são apontadas", () => {
+    const idle = ballAnim([[20, 20], [21, 20], [20, 20], [21, 20]]);
+    expect(state(panel(idle), 10)).toBe("na");
+    const timid = sprite(120, 120, { r: "#d02838" });
+    runCommand(timid, "add_frames", { count: 3 });
+    [[40, 60], [43, 60], [40, 60], [43, 60]].forEach(([x, y], f) => draw(timid, ["rr", "rr"], x, y, f));
+    expect(state(panel(timid), 10)).toBe("atencao");
   });
   it("11. desenho sólido herda as regras de estilo (pillow shading derruba o item)", () => {
     const p = sprite(24, 24, { a: "#201028", b: "#50285a", c: "#905a98", d: "#e0b0e8" });
@@ -353,5 +357,89 @@ describe("novas ferramentas: erros úteis, blob, rotação e CLI", () => {
     expect(codes).not.toContain("volume_pulou");
     expect(codes).not.toContain("quase_estatica");
     expect(analyze(p, [0, 1, 2, 3]).issues.map((i) => i.code)).toContain("volume_pulou");
+  });
+});
+
+describe("lições da caminhada e do cavaleiro (rodada 4)", () => {
+  /** figura de 3 camadas que se movem um pouco por frame (como um personagem articulado). */
+  const rig = (wideFrames: boolean[]) => {
+    const p = sprite(40, 40, { r: "#d02838", b: "#2030c0", g: "#30a050" });
+    for (const name of ["perna", "braco", "tronco"]) runCommand(p, "add_layer", { name });
+    runCommand(p, "add_frames", { count: wideFrames.length - 1 });
+    wideFrames.forEach((wide, f) => {
+      runCommand(p, "draw_rows", { frames: f, layer: "perna", x: 17, y: 13 + (f % 2), rows: wide ? ["r....r", ".r..r.", "..rr.."] : ["..rr..", "..rr..", "..rr.."], preview: false });
+      runCommand(p, "draw_rows", { frames: f, layer: "tronco", x: 18, y: 9 + (f % 2), rows: ["bbbb", "bbbb", "bbbb", "bbbb"], preview: false });
+      runCommand(p, "draw_rows", { frames: f, layer: "braco", x: 16 + (f % 2) * 6, y: 10, rows: ["gg", "gg"], preview: false });
+    });
+    return p;
+  };
+  it("figura articulada (3+ camadas se movendo) tolera a variação de área de um passo", () => {
+    const p = rig([true, false, true, false]);
+    expect(analyze(p, [0, 1, 2, 3], { loop: false }).issues.map((i) => i.code)).not.toContain("volume_pulou");
+  });
+  it("squash e stretch não se aplica a ciclo articulado sem deformação", () => {
+    const p = rig([false, false, false, false]);
+    expect(analyze(p, [0, 1, 2, 3]).principles!.find((q) => q.n === 1)!.estado).toBe("na");
+  });
+  it("a fresta entre cabeça e tronco (figura partida em 2 pedaços) é apontada, mesmo com o tronco parado", () => {
+    const p = sprite(20, 20, { r: "#d02838", b: "#2030c0" });
+    runCommand(p, "update_layer", { layer: "Base", name: "tronco" });
+    runCommand(p, "add_layer", { name: "cabeca" });
+    runCommand(p, "add_frames", { count: 3 });
+    for (let f = 0; f < 4; f++) {
+      runCommand(p, "draw_rows", { frames: f, layer: "tronco", x: 8, y: 10, rows: ["bbbb", "bbbb", "bbbb", "bbbb"], preview: false });
+      runCommand(p, "draw_rows", { frames: f, layer: "cabeca", x: 8, y: f === 2 ? 5 : 7, rows: ["rrrr", "rrrr", "rrr."], preview: false }); // no frame 2 a cabeça sobe e abre um vão de 2 linhas
+    }
+    const split = analyze(p, [0, 1, 2, 3], { loop: false }).issues.find((i) => i.code === "figura_partida");
+    expect(split?.message).toMatch(/frames 2/);
+    // se a cabeça só sobe 0 px, nada a avisar
+    runCommand(p, "draw_rows", { frames: 2, layer: "cabeca", x: 8, y: 7, rows: ["rrrr", "rrrr", "rrr."], preview: false });
+    runCommand(p, "transform", { frames: 2, layer: "cabeca", op: "clear", preview: false });
+    runCommand(p, "draw_rows", { frames: 2, layer: "cabeca", x: 8, y: 7, rows: ["rrrr", "rrrr", "rrr."], preview: false });
+    expect(analyze(p, [0, 1, 2, 3], { loop: false }).issues.map((i) => i.code)).not.toContain("figura_partida");
+  });
+  it("segmento rígido: mesma massa e comprimento muito diferente é apontado", () => {
+    const p = sprite(40, 40, { r: "#d02838" });
+    runCommand(p, "add_frames", { count: 3 });
+    const vertical = Array(8).fill("r"), block = ["rr", "rr", "rr", "rr"];     // 8 px nos dois casos
+    [vertical, vertical, block, vertical].forEach((rows, f) => draw(p, rows, 10, 5, f));
+    expect(analyze(p, [0, 1, 2, 3], { loop: false }).issues.map((i) => i.code)).toContain("segmento_muda");
+    const same = sprite(40, 40, { r: "#d02838" });
+    runCommand(same, "add_frames", { count: 3 });
+    [0, 1, 2, 3].forEach((f) => draw(same, vertical, 10 + f, 5, f));
+    expect(analyze(same, [0, 1, 2, 3], { loop: false }).issues.map((i) => i.code)).not.toContain("segmento_muda");
+  });
+  it("emenda do loop: salto grande é acusado; ir e voltar pelo mesmo caminho não", () => {
+    const run = (xs: number[]) => {
+      const p = sprite(30, 12, { r: "#d02838" });
+      runCommand(p, "add_frames", { count: xs.length - 1 });
+      xs.forEach((x, f) => draw(p, ["rrrr", "rrrr", "rrrr", "rrrr"], x, 4, f));
+      return analyze(p, xs.map((_, i) => i)).issues.map((i) => i.code);
+    };
+    expect(run([2, 5, 8, 11])).toContain("emenda_salta");         // anda para longe e volta de uma vez
+    const smooth = run([2, 5, 8, 5]);                              // vai e volta pelo mesmo caminho
+    expect(smooth).not.toContain("emenda_salta");
+    expect(smooth).not.toContain("emenda_loop");
+  });
+  it("emenda_loop compara a diferença de pixels com a média entre frames seguidos", () => {
+    // o centro não se mexe (só a forma muda), então só a comparação de pixels pode pegar o salto
+    const p = sprite(20, 20, { r: "#d02838", b: "#2030c0" });
+    runCommand(p, "add_frames", { count: 3 });
+    const shapes: string[][] = [["rrrr", "rrrr", "rrrr", "rrrr"], ["rrrr", "rrrr", "rrrr", "rrrb"], ["rrrr", "rrrr", "rrrr", "rrbb"], ["bbbb", "bbbb", "bbbb", "bbbb"]];
+    shapes.forEach((rows, f) => draw(p, rows, 8, 8, f));
+    const msg = analyze(p, [0, 1, 2, 3]).issues.find((i) => i.code === "emenda_loop")?.message ?? "";
+    expect(msg).toMatch(/diferença média/);
+  });
+  it("draw_rows avisa quando as linhas têm larguras diferentes (erro de contar colunas)", () => {
+    const p = sprite(20, 20, { r: "#d02838" });
+    const r = runCommand(p, "draw_rows", { rows: ["rrrr", "rrr", "rrrr", "rrrr"], preview: false });
+    expect(r.text).toMatch(/ATENÇÃO.*linha 1 tem 3/);
+    expect(runCommand(p, "draw_rows", { rows: ["rr", "rr"], preview: false }).text).not.toMatch(/ATENÇÃO/);
+  });
+  it("reference proporcoes dá os comprimentos dos segmentos para articular", () => {
+    const t = runCommand(createProject(), "reference", { topic: "proporcoes", height: 32, style: "estilizado" }).text;
+    expect(t).toMatch(/Segmentos para articular/);
+    expect(t).toMatch(/coxa ≈ \d+ px/);
+    expect(t).toMatch(/canela \+ pé ≈ \d+ px/);
   });
 });

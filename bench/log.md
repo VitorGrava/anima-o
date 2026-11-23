@@ -61,3 +61,25 @@ Fonte: https://www.alura.com.br/artigos/12-principios-animacao (definições con
 - `reference principios`: definição do artigo + "Na engine:" + qual regra do `check` verifica.
 - `check` imprime o **painel dos 12** (✓ / ! / –), calculado do movimento real: squash (forma deforma com volume constante), antecipação (passo oposto antes do maior), staging (tamanho e contraste), pose a pose (poses seguradas), sobreposição (camadas com picos em frames diferentes), ease, arcos, ação secundária (camadas que se movem), timing, exagero (amplitude), desenho sólido (herda as regras de estilo) e apelo (avaliação humana, com a pergunta certa).
 - `tests/style.test.ts`: o prompt cita os 12; `reference principios` traz os 12 e a fonte; cada medição do painel tem um caso que passa e um que falha.
+
+## Rodada 4: 07 cavaleiro idle, 08 caminhada (já com os 12 princípios no guia e no painel do check)
+
+| anim | nota | o que ficou bom | o que ficou ruim |
+|---|---|---|---|
+| 07 cavaleiro | 7,5/10 | elmo com pluma, tabardo, cinto, botas; respiração com a cabeça descendo 2 px e o torso 1 px; pluma que atrasa; piscada; tempos de 110 a 700 ms | só 4 frames; a cabeça sobe mal (abria uma fresta no pescoço), então o movimento é só para baixo |
+| 08 caminhada | 7,5/10 | 5 camadas (braço e perna de trás mais escuros, tronco com mochila, bandana que balança), 8 poses (contato, abaixo, passagem, acima + espelho), braços contra as pernas | furo de 1 px entre os pés nos frames 3 e 7; um serrilhado; sem balanço claro do corpo para cima e para baixo |
+
+O painel dos 12 da caminhada deu 11 ✓ (apelo é sempre "–", avaliação humana).
+
+**Atritos → correção**
+- `check` dava "volume mudou 22%" numa caminhada (pernas abrem e fecham) → figura articulada (3+ camadas se movendo) tolera 38% de variação de área, e o painel marca squash como "–" quando não há deformação.
+- O "pose a pose" exigia segurar 1,8× → 1,3× (contato de 120 ms contra 90 ms já é uma pose segurada).
+- "Emenda do loop: 204 px" não dizia se era problema → agora compara com a diferença média entre frames seguidos e só avisa se for 1,6× maior.
+- Ninguém conferia o comprimento dos segmentos → `segmento_muda`: camada com a mesma massa e comprimento muito diferente entre frames.
+- A fresta que abre entre camadas (cabeça sobe e deixa um vão no pescoço) não era vista → `figura_partida`, que inclui camadas estáticas pequenas (o tronco parado).
+- Contar colunas é a maior fonte de erro ao desenhar por texto → `draw_rows`/`draw_frames` avisam "linha N tem X, a maioria tem Y".
+- `reference proporcoes` dava um braço de 13 px que não cabe → agora dá os comprimentos para articular (coxa, canela + pé, braço, antebraço) calculados das medidas do estilo.
+- `update_layer` pedia `rename` e `add_layer` pede `name` → `name` vale nos dois.
+- `check` mostrava a "base" só das camadas que se movem e parecia que o personagem flutuava → imprime também a caixa de tudo.
+- Exagero: num idle o movimento sutil é de propósito → "–" quando o passo é menor que 2 px.
+- `new` ganha `--camada <nome>` e imprime a dica de `--vazio`; `show --region` sem o cabeçalho; `run -q` sem o resumo; `tools export` com as flags descritas.

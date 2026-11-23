@@ -530,7 +530,9 @@ export function frameMetrics(p: Project, frame: number, only?: Set<string>): Fra
   return { frame, bbox: bboxOf(mask, p.width, p.height), area, cx: area ? sx / area : 0, cy: area ? sy / area : 0, layers };
 }
 
-function checkSequence(p: Project, metrics: FrameMetrics[], loop: boolean, issues: Issue[], tipo: "personagem" | "efeito" | "rotacao" = "personagem") {
+function checkSequence(p: Project, metrics: FrameMetrics[], loop: boolean, issues: Issue[], tipo: "personagem" | "efeito" | "rotacao" = "personagem", articulated = false) {
+  // figura articulada (3+ camadas se movendo: pernas, braços, tronco): a área varia naturalmente com a abertura dos membros
+  const tolerance = articulated ? 0.38 : 0.2;
   const pairs: [number, number][] = [];
   for (let k = 0; k + 1 < metrics.length; k++) pairs.push([k, k + 1]);
   if (loop && metrics.length > 1 && metrics[0].frame === 0 && metrics[metrics.length - 1].frame === p.frames.length - 1) {
@@ -543,7 +545,7 @@ function checkSequence(p: Project, metrics: FrameMetrics[], loop: boolean, issue
     const tag = seam ? `último→primeiro (frames ${a.frame}→${b.frame})` : `frames ${a.frame}→${b.frame}`;
     if (!a.area || !b.area) continue;
     const change = (b.area - a.area) / a.area;
-    if (tipo === "personagem" && Math.abs(change) > 0.2) {
+    if (tipo === "personagem" && Math.abs(change) > tolerance) {
       issues.push({
         severity: "aviso",
         code: "volume_pulou",
@@ -572,19 +574,88 @@ function checkSequence(p: Project, metrics: FrameMetrics[], loop: boolean, issue
       }
     }
     if (seam) {
-      const fa = flattenFrame(p, a.frame);
-      const fb = flattenFrame(p, b.frame);
-      let d = 0;
-      for (let i = 0; i < fa.length; i++) if (fa[i] !== fb[i]) d++;
-      if (d > 0 && a.frame !== b.frame) {
+      const diff = (f1: number, f2: number) => {
+        const fa = flattenFrame(p, f1), fb = flattenFrame(p, f2);
+        let d = 0;
+        for (let i = 0; i < fa.length; i++) if (fa[i] !== fb[i]) d++;
+        return d;
+      };
+      const d = diff(a.frame, b.frame);
+      const consecutive = metrics.slice(1).map((m, k) => diff(metrics[k].frame, m.frame));
+      const avg = consecutive.reduce((x, y) => x + y, 0) / Math.max(1, consecutive.length);
+      // só incomoda se a emenda muda bem mais que um passo normal entre frames
+      if (d > 0 && a.frame !== b.frame && avg > 0 && d > avg * 1.6) {
         issues.push({
-          severity: "info",
+          severity: "aviso",
           code: "emenda_loop",
           frame: b.frame,
-          message: `Emenda do loop: ${d} px diferem entre o último e o primeiro frame. Use view com compare para ver se o salto é suave.`,
+          message: `Emenda do loop: o último e o primeiro frame diferem em ${d} px, e a diferença média entre frames seguidos é ${Math.round(avg)} px. O último frame devia chegar perto do primeiro; use view com compare para ver o salto.`,
         });
       }
     }
+  }
+}
+
+// ---------- anatomia: comprimento dos segmentos ----------
+
+/** Diâmetro de Feret aproximado (maior extensão em 4 direções) do conteúdo de uma camada. */
+function feret(cel: Uint8Array, w: number): number {
+  let n = 0;
+  const mm = [[1e9, -1e9], [1e9, -1e9], [1e9, -1e9], [1e9, -1e9]];
+  for (let i = 0; i < cel.length; i++) {
+    if (!cel[i]) continue;
+    n++;
+    const x = i % w, y = Math.floor(i / w);
+    [x, y, (x + y) / Math.SQRT2, (x - y) / Math.SQRT2].forEach((v, k) => { mm[k][0] = Math.min(mm[k][0], v); mm[k][1] = Math.max(mm[k][1], v); });
+  }
+  return n < 6 ? 0 : Math.max(...mm.map(([a, b]) => b - a + 1));
+}
+
+/** Uma camada rígida (coxa, canela, braço) não pode mudar de comprimento ao girar: avisa quando muda demais. */
+function checkSegmentLengths(p: Project, frames: number[], moving: Set<string>, issues: Issue[]) {
+  for (const l of p.layers) {
+    if (!moving.has(l.id)) continue;
+    const lens = frames.map((f) => (p.frames[f].cels[l.id] ? feret(p.frames[f].cels[l.id], p.width) : 0)).filter((v) => v > 0);
+    if (lens.length < 3 || Math.max(...lens) < 7) continue;
+    const ratio = Math.max(...lens) / Math.min(...lens);
+    // só camadas que parecem um segmento (movem-se mas mantêm a massa); ratio alto = o membro "encolhe/estica" sem querer
+    const areas = frames.map((f) => { const c = p.frames[f].cels[l.id]; return c ? c.reduce((a, v) => a + (v ? 1 : 0), 0) : 0; }).filter((v) => v > 0);
+    const areaRatio = Math.max(...areas) / Math.min(...areas);
+    if (ratio > 1.45 && areaRatio < 1.25) {
+      issues.push({
+        severity: "info",
+        code: "segmento_muda",
+        message: `A camada "${l.name}" tem a mesma massa em todos os frames mas o comprimento vai de ${Math.min(...lens).toFixed(0)} a ${Math.max(...lens).toFixed(0)} px. Se é um membro rígido (coxa, canela, braço), o comprimento não pode mudar: gire a partir de uma cópia limpa e confira o pivô.`,
+      });
+    }
+  }
+}
+
+/** Camadas que se movem uma contra a outra podem abrir uma fresta de 1 px (cabeça × tronco): a figura "parte" em dois pedaços. */
+function checkSplitFigure(p: Project, frames: number[], moving: Set<string>, issues: Issue[]) {
+  // a figura = camadas que se movem + camadas estáticas pequenas (um tronco parado); o fundo grande fica de fora
+  const figure = new Set(moving);
+  for (const l of p.layers) {
+    if (!l.visible || figure.has(l.id)) continue;
+    const area = p.frames[0].cels[l.id]?.reduce((a, v) => a + (v ? 1 : 0), 0) ?? 0;
+    if (area > 0 && area < 0.4 * p.width * p.height) figure.add(l.id);
+  }
+  const counts = frames.map((f) => {
+    const flat = flattenLayers(p, f, figure);
+    const big = components(opaqueMask(flat), p.width, p.height).filter((c) => c.length >= 10);
+    return { f, n: big.length };
+  });
+  const freq = new Map<number, number>();
+  for (const c of counts) if (c.n > 0) freq.set(c.n, (freq.get(c.n) ?? 0) + 1);
+  const modal = [...freq.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 1;
+  const split = counts.filter((c) => c.n > modal && c.n > 0);
+  if (split.length && split.length <= Math.ceil(frames.length / 2)) {
+    issues.push({
+      severity: "aviso",
+      code: "figura_partida",
+      frame: split[0].f,
+      message: `Nos frames ${split.map((c) => c.f).join(", ")} a figura se parte em ${split[0].n} pedaços (nos outros são ${modal}): provavelmente uma fresta de 1 px entre camadas que se moveram (ex.: cabeça sobe e abre um vão no pescoço). Faça as camadas se sobreporem 1–2 px no pivô.`,
+    });
   }
 }
 
@@ -670,7 +741,7 @@ function checkMotion(p: Project, metrics: FrameMetrics[], loop: boolean, issues:
  * 12 princípios. Não substitui o olho do animador: o que não dá para medir (encenação, desenho sólido,
  * apelo) vem marcado como avaliação humana, com a pergunta certa para fazer.
  */
-function evaluatePrinciples(p: Project, frames: number[], metrics: FrameMetrics[], issues: Issue[], opts: AnalyzeOptions, moving: Set<string>): PrincipleStatus[] {
+function evaluatePrinciples(p: Project, frames: number[], metrics: FrameMetrics[], issues: Issue[], opts: AnalyzeOptions, moving: Set<string>, articulated = false): PrincipleStatus[] {
   const tipo = opts.tipo ?? "personagem";
   const codes = new Set(issues.map((i) => i.code));
   const ms = metrics.filter((m) => m.area > 0);
@@ -685,6 +756,7 @@ function evaluatePrinciples(p: Project, frames: number[], metrics: FrameMetrics[
   const ws = ms.map((m) => m.bbox?.w ?? 0), hs = ms.map((m) => m.bbox?.h ?? 0);
   const range = (a: number[]) => (Math.max(...a) - Math.min(...a)) / Math.max(1, Math.max(...a));
   if (tipo !== "personagem") add(1, "Squash and Stretch (comprimir e esticar)", "na", "Em efeitos e rotações o tamanho muda por outro motivo.");
+  else if (articulated && !codes.has("volume_pulou") && Math.max(range(ws), range(hs)) < 0.15) add(1, "Squash and Stretch (comprimir e esticar)", "na", "Figura articulada com pouca deformação (idle, andar, correr): o amassar é sutil; o peso aparece no corpo que afunda 1–2 px.");
   else if (codes.has("volume_pulou")) add(1, "Squash and Stretch (comprimir e esticar)", "atencao", "A forma deforma, mas o volume (área) não se mantém: se esticar na vertical, afine na horizontal.");
   else if (Math.max(range(ws), range(hs)) >= 0.15) add(1, "Squash and Stretch (comprimir e esticar)", "ok", "A forma achata e estica e o volume se mantém.");
   else add(1, "Squash and Stretch (comprimir e esticar)", "atencao", "A silhueta não deforma: se há impacto ou salto, amasse no contato e estique na velocidade.");
@@ -710,7 +782,7 @@ function evaluatePrinciples(p: Project, frames: number[], metrics: FrameMetrics[
   const durs = ms.map((m) => dur(m.frame));
   const sortedD = [...durs].sort((a, b) => a - b);
   const medD = sortedD[Math.floor(sortedD.length / 2)] || 1;
-  if (Math.max(...durs) >= Math.min(...durs) * 1.8 || durs.some((d) => d >= medD * 1.5)) add(4, "Straight Ahead and Pose to Pose (ação direta e pose a pose)", "ok", "Há poses-chave seguradas (duração maior) entre intermediários mais rápidos: bom sinal de pose a pose.");
+  if (Math.max(...durs) >= Math.min(...durs) * 1.3 || durs.some((d) => d >= medD * 1.5)) add(4, "Straight Ahead and Pose to Pose (ação direta e pose a pose)", "ok", "Há poses-chave seguradas (duração maior) entre intermediários mais rápidos: bom sinal de pose a pose.");
   else add(4, "Straight Ahead and Pose to Pose (ação direta e pose a pose)", "atencao", "Nenhuma pose é segurada: defina as poses-chave (extremos), segure-as e preencha os intermediários.");
 
   // 5. Follow through e overlapping: partes diferentes se movem com atraso
@@ -760,7 +832,8 @@ function evaluatePrinciples(p: Project, frames: number[], metrics: FrameMetrics[
 
   // 10. Exagero
   const ampl = Math.max(maxStep, range(ws) * p.width * 0.5, range(hs) * p.height * 0.5) / canvas;
-  if (ampl < 0.05) add(10, "Exaggeration (exagero)", "atencao", "As poses são quase iguais: amplie o movimento e a deformação (poses um pouco mais extremas leem melhor em poucos pixels).");
+  if (ampl < 0.05 && maxStep < 2) add(10, "Exaggeration (exagero)", "na", "Movimento sutil (idle, respiração): é de propósito. Só amplie se o pedido for expressivo.");
+  else if (ampl < 0.05) add(10, "Exaggeration (exagero)", "atencao", "As poses são quase iguais: amplie o movimento e a deformação (poses um pouco mais extremas leem melhor em poucos pixels).");
   else add(10, "Exaggeration (exagero)", "ok", "A amplitude é visível no quadro (cuide para não virar irreal).");
 
   // 11. Desenho sólido: volume, luz e contorno consistentes
@@ -853,17 +926,20 @@ export function analyze(p: Project, frames: number[], opts: AnalyzeOptions = {})
   const moving = movingLayerIds(p);
   for (const id of opts.ignoreLayers ?? []) moving.delete(id);
   if (!moving.size) for (const l of p.layers) if (l.visible && !(opts.ignoreLayers ?? []).includes(l.id)) moving.add(l.id);
-  const ignored = p.layers.filter((l) => l.visible && !moving.has(l.id)).map((l) => l.name);
+  const empty = (id: string) => p.frames.every((f) => !f.cels[id] || f.cels[id].every((v) => !v));
+  const ignored = p.layers.filter((l) => l.visible && !moving.has(l.id) && !empty(l.id)).map((l) => l.name);
   const metrics = frames.map((f) => frameMetrics(p, f, frames.length > 1 ? moving : undefined));
   for (const f of frames) issues.push(...analyzeFrame(p, f, { ...opts, figure: frames.length > 1 ? flattenLayers(p, f, moving) : undefined }));
   if (frames.length > 1) checkContrastAndLight(p, frames, moving, issues);
   checkPalette(p, frames, issues);
   let principles: PrincipleStatus[] | undefined;
   if (frames.length > 1) {
-    checkSequence(p, metrics, opts.loop ?? true, issues, opts.tipo ?? "personagem");
+    const articulated = [...moving].filter((id) => !empty(id)).length >= 3;
+    checkSequence(p, metrics, opts.loop ?? true, issues, opts.tipo ?? "personagem", articulated);
+    if ((opts.tipo ?? "personagem") === "personagem") { checkSegmentLengths(p, frames, moving, issues); checkSplitFigure(p, frames, moving, issues); }
     if (frames.length === p.frames.length || frames.length > 2) checkMotion(p, metrics, opts.loop ?? true, issues, opts.tipo ?? "personagem");
   }
-  if (frames.length >= 3) principles = evaluatePrinciples(p, frames, metrics, issues, opts, moving);
+  if (frames.length >= 3) principles = evaluatePrinciples(p, frames, metrics, issues, opts, moving, [...moving].filter((id) => !empty(id)).length >= 3);
   return { issues, metrics, principles, ignoredLayers: frames.length > 1 ? ignored : [] };
 }
 
@@ -888,6 +964,10 @@ export function formatAnalysis(p: Project, r: AnalysisResult): string {
   if (r.ignoredLayers?.length) lines.push(`Medidas de movimento só das camadas que mudam; ignoradas (estáticas): ${r.ignoredLayers.join(", ")}.`);
   if (first) {
     lines.push(`Medidas do frame ${first.frame}: silhueta ${bb(first.bbox)}, ${first.area} px.`);
+    if (r.ignoredLayers?.length) {
+      const all = flattenFrame(p, first.frame);
+      lines.push(`  caixa de TUDO (com ${r.ignoredLayers.join(", ")}): ${bb(bboxOf(opaqueMask(all), p.width, p.height))} — a "base y" abaixo é só das camadas que se movem.`);
+    }
     for (const l of first.layers) lines.push(`  camada "${l.name}": ${bb(l.bbox)}, ${l.area} px`);
     if (r.metrics.length > 1) {
       lines.push("Por frame (área px | caixa LxA | base y):");
