@@ -273,6 +273,7 @@ function checkJaggies(mask: Uint8Array, w: number, h: number, frame: number, iss
  * (o sprite "em caixa"). Formas orgânicas arredondam a quina em degraus (1-2-3).
  */
 function checkSquareCorners(mask: Uint8Array, w: number, h: number, frame: number, issues: Issue[]) {
+  if (mask.reduce((n, v) => n + (v ? 1 : 0), 0) >= 0.9 * w * h) return;          // cena de quadro cheio: os cantos do quadro não são forma da figura
   const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < w && y < h ? mask[y * w + x] : 0);
   const run = (x: number, y: number, dx: number, dy: number, ox: number, oy: number) => {
     for (let k = 1; k <= 4; k++) if (!at(x + dx * k, y + dy * k) || at(x + dx * k + ox, y + dy * k + oy)) return false;
@@ -486,7 +487,7 @@ function checkPalette(p: Project, frames: number[], issues: Issue[], maxColors?:
   const isDefault = (c: { key: string; hex: string }) => (c.key === "0" && c.hex === "#1a1c2c") || (c.key === "1" && c.hex === "#f4f4f4");
   const unused = p.palette.filter((c, i) => !used[i + 1] && !isDefault(c));
   if (unused.length && frames.length === p.frames.length) {
-    issues.push({ severity: "info", code: "cor_sem_uso", message: `Cores da paleta sem uso: ${unused.map((c) => `${c.key}=${c.name}`).join(", ")}.` });
+    issues.push({ severity: "info", code: "cor_sem_uso", message: `Cores da paleta sem uso: ${unused.map((c) => `${c.key}=${c.name}`).join(", ")}. (reduce_colors com cores alto as remove; haze/reflect/polish criam cores novas e deixam as antigas sem uso.)` });
   }
   const dist = (a: string, b: string) => {
     const [x, y] = [hexToRgb(a), hexToRgb(b)];

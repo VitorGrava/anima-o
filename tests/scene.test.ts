@@ -280,3 +280,38 @@ describe("paisagem (atalho de cenário)", () => {
     expect(top(a)).not.toEqual(top(b));
   });
 });
+
+describe("atritos da casa: box3d fora do quadro, quinas de quadro cheio, anima critico", () => {
+  it("box3d avisa quando o telhado sai do quadro e explica que y é a base", () => {
+    const p = createProject({ width: 64, height: 64 });
+    pal(p, "abcd");
+    const r = ok(p, "draw_shapes", { shapes: [{ type: "box3d", x: 10, y: 20, w: 30, h: 24, prof: 14, xv: 100, yh: 8, rise: 12, frente: "a", lado: "b", telhado: "c", empena: "d" }] });
+    expect(r.text).toMatch(/fora do quadro.*y é a BASE/);
+    const ok2 = ok(p, "draw_shapes", { shapes: [{ type: "box3d", x: 10, y: 60, w: 20, h: 14, prof: 10, xv: 100, yh: 8, rise: 8, frente: "a", lado: "b" }] });
+    expect(ok2.text).not.toMatch(/fora do quadro/);
+  });
+  it("cena de quadro cheio não acusa quinas quadradas nos cantos do quadro", () => {
+    const p = createProject({ width: 32, height: 32 });
+    pal(p, "ab");
+    ok(p, "draw_shapes", { shapes: [{ type: "rect", x: 0, y: 0, w: 32, h: 32, color: "a", filled: true }, { type: "ellipse", x: 8, y: 8, w: 16, h: 16, color: "b", filled: true }] });
+    expect(runCommand(p, "check", { as_image: false }).text).not.toMatch(/quina\(s\) de 90/);
+  });
+  it("anima critico exporta a imagem e imprime o pedido pronto", async () => {
+    const { execSync } = await import("node:child_process");
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+    const { writeFileSync } = await import("node:fs");
+    const dir = mkdtempSync(path.join(tmpdir(), "anima-crit-"));
+    const proj = path.join(dir, "p.anima.json");
+    const p = createProject({ width: 16, height: 16 });
+    pal(p, "a");
+    ok(p, "draw_shapes", { shapes: [{ type: "rect", x: 4, y: 4, w: 8, h: 8, color: "a", filled: true }] });
+    const { toJSON } = await import("../src/engine/index.ts");
+    writeFileSync(proj, JSON.stringify(toJSON(p)));
+    const out = execSync(`node bin/anima.mjs critico ${proj}`, { cwd: path.resolve(__dirname, ".."), encoding: "utf8" });
+    expect(out).toMatch(/Imagem para a crítica: .*p\.critico\.png/);
+    expect(out).toMatch(/PEDIDO PRONTO/);
+    expect(out).toMatch(/nota 0-10/);
+  });
+});

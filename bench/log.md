@@ -181,3 +181,8 @@ Dois agentes novos, só com o pedido e o guia, usaram `draw_figure` por conta pr
 | floresta 160x90 | 7 | névoa em faixa dura, pinheiros repetidos | `terrain`, `forest`, `only` composto, aviso quando scatter não desenha, `haze` com faixa/perfil, `reflect dissolver` |
 | cavaleiro 64x64 andando (rig) | 6,5 | torso em bloco, braços quase parados | ossos travados no rig_walk, `rig_info`, aviso de osso novo, `cabeca_reta`, período do chão correto |
 - Pendente (maior): arte do rig por faixa de ângulo (variantes pré-desenhadas) para escudo/cabeça não borrarem; `shade` que siga o volume; preset `cenario_paisagem` em um comando.
+
+### Agentes Opus com pesquisa de referências obrigatória (regra permanente)
+- Dragãozinho 32x32 (4 frames): 6,5/10 pela régua do agente (refs ~8); 4 referências baixadas; 11 rodadas, 1 descartada. Casa de pedra 96x96 em perspectiva + animação: 7/10; 4 referências; 14 rodadas, 1 descartada. As duas ficaram claramente acima de tudo que eu fiz sem referência: a pesquisa antes de desenhar é o maior ganho de qualidade medido.
+- `avaliar` deu 98 e 97 a trabalhos que o próprio agente nota em 6,5–7: a nota só mede defeitos mecânicos (aviso fixo agora no relatório).
+- Corrigido a partir dos atritos: contorno seletivo sem bolsões entre camadas, cores de contorno listadas, aviso de box3d fora do quadro, quinas do quadro em cena de quadro cheio, `anima critico`, rig_part `variantes`, comando `paisagem`.

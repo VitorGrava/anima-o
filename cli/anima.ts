@@ -14,6 +14,7 @@
  *   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
  *   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N] [--fundo #hex] [--margem N] [--sombra] [--vai-e-volta] [--meta]   (sem --scale a escala é automática; --meta grava <saida>.json com posição e duração de cada frame da folha)
   anima compare <projeto> <ref.png> [--frame N] [--png saida.png] [--fundo auto|nenhum|#hex]   (compara o desenho com uma referência na mesma grade: silhueta, erro de cor, painel lado a lado)
+  anima critico <projeto> [--frame N] [--ref referencia.png]   (exporta a imagem e imprime o pedido pronto para um agente INDEPENDENTE criticar; é o passo 4 do reference processo)
   anima import <projeto> <imagem.png> [--largura N|--altura N|--grade auto|N] [--cores N] [--fundo auto|nenhum|#hex] [--camada nome] [--manter-canvas]   (reduz uma imagem à grade de pixel e à paleta)
  *   anima guide                            imprime o guia do animador (fluxo e princípios): leia antes de começar
  *   anima tools                            lista os comandos com seus parâmetros (JSON Schema)
@@ -268,6 +269,18 @@ export async function main(argv: string[]): Promise<number> {
       const out = png ?? file.replace(/(\.anima)?\.json$/, "") + ".comparacao.png";
       await writeFile(out, encodePNG(r.image.width, r.image.height, r.image.data));
       console.log(`${r.text}\nImagem: ${path.resolve(out)}`);
+      return 0;
+    }
+    case "critico": {
+      const [file] = args.filter((a) => !a.startsWith("--"));
+      const frame = Number(flag(args, "frame") ?? 0), ref = flag(args, "ref");
+      if (!file) break;
+      await store.open(file);
+      const out = file.replace(/(\.anima)?\.json$/, "") + ".critico.png";
+      const p = store.project;
+      await exportToFile(p, { format: "frame_png", path: out, frame, fundo: undefined });
+      const abs = path.resolve(out);
+      console.log(`Imagem para a crítica: ${abs}\n\nPEDIDO PRONTO (cole em um agente independente, sem o seu contexto; ele só precisa da ferramenta de leitura de imagens):\n---\nVocê é um diretor de arte de pixel art, rigoroso. Leia (Read) a imagem ${abs}${ref ? ` e compare com a REFERÊNCIA profissional ${path.resolve(ref)}` : ""}: um sprite/cena ${p.width}x${p.height} px ampliado. Responda em português, curto e específico: 1) nota 0-10${ref ? " do sprite e da referência (para calibrar)" : ""}; 2) os 5 piores defeitos, cada um com a região (x0..x1,y0..y1 em coordenadas do canvas = coordenada da imagem / escala) e a correção concreta em pixels; 3) o que NÃO mexer; 4) a maior diferença para o nível de um jogo comercial. Use SOMENTE Read nesses arquivos.\n---\nDepois: corrija só o que ele apontar, compare com a versão anterior (às cegas, se puder) e descarte o que piorar.`);
       return 0;
     }
     case "import": {

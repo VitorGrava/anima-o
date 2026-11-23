@@ -1502,6 +1502,7 @@ const drawShapes = def({
             break;
           case "box3d": {
             const ci = (k?: string) => (k === undefined ? 0 : colorIndex(p, k));
+            if (sh.y - sh.h - sh.rise < 0) avisos.push(`box3d: o topo do telhado fica em y=${sh.y - sh.h - sh.rise}, fora do quadro. Lembre: y é a BASE (chão) da parede da frente, não o topo; o telhado sobe ${sh.h + sh.rise} px a partir dela.`);
             drawBox3d(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, prof: sh.prof, xv: sh.xv, yh: sh.yh, rise: sh.rise, frente: ci(sh.frente), lado: ci(sh.lado), telhado: ci(sh.telhado ?? sh.frente), empena: ci(sh.empena ?? sh.frente), linhas: sh.linhas ? ci(sh.linhas) : undefined, linhasTelhado: sh.linhas_telhado ? ci(sh.linhas_telhado) : undefined, espaco: sh.espaco });
             break;
           }
