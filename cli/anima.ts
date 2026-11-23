@@ -3,8 +3,8 @@
  *
  *   anima mcp                              servidor MCP (Claude Code, Codex, ...)
  *   anima view [projeto.anima.json]        abre o app no navegador acompanhando o arquivo ao vivo
- *   anima new <projeto> [LxA] [fps] [--vazio] [--camada nome]
-                                         cria um projeto (--vazio: sem as cores 0 e 1 padrão; --camada: nome da primeira camada, em vez de "Base")
+ *   anima new <projeto> [LxA] [fps] [--camada nome] [--cores-padrao]
+                                         cria um projeto sem cores (você define a paleta); --camada: nome da primeira camada (padrão "Base"); --cores-padrao: traz as cores 0 (contorno) e 1 (branco)
  *   anima run <projeto> <comandos.json|->  aplica uma lista de comandos [{ "name", "input" }]
  *   anima show <projeto> [frame|all] [--png saida.png] [--check cinza|luz_sombra|silhueta]
              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--scale N]
@@ -30,7 +30,7 @@ import {
 } from "../src/engine/index.ts";
 import { encodePNG } from "../server/png.ts";
 import { ProjectStore, exportToFile } from "../mcp/store.ts";
-import { SYSTEM_PROMPT } from "../server/prompt.ts";
+import { SHORT_GUIDE, SYSTEM_PROMPT } from "../server/prompt.ts";
 import { writeFile } from "node:fs/promises";
 
 function flag(args: string[], name: string): string | undefined {
@@ -79,11 +79,11 @@ const USAGE = `anima — engine de animação pixel art
                                          aplica comandos [{"name": "...", "input": {...}}] EM CIMA do projeto existente (para recomeçar, rode "new", que sobrescreve); o último mostra a prévia; -q/--quiet não mostra a folha de frames
   anima show <projeto> [frame|all] [--png saida.png] [--check cinza|luz_sombra|silhueta]
              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--scale N]
-  anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--png saida.png]
-                                         defeitos da arte e da animação (--efeito: brilho, chama, fumaça; --tipo rotacao: moeda girando)
+  anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--max-cores N] [--png saida.png]
+                                         defeitos da arte e da animação (--max-cores: limite de cores do estilo, ex. 16 para retrô) (--efeito: brilho, chama, fumaça; --tipo rotacao: moeda girando)
   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N]
-  anima guide                            guia do animador: fluxo de trabalho e princípios de pixel art e animação
+  anima guide [--completo]               guia do animador (curto; --completo = o guia inteiro)
   anima tools                            lista os comandos e parâmetros (JSON Schema)`;
 
 // `anima run ... | head` fecha o pipe no meio da saída: isso não pode derrubar o processo antes de salvar o projeto
@@ -115,8 +115,10 @@ export async function main(argv: string[]): Promise<number> {
       return -1;
     }
     case "new": {
-      const vazio = boolFlag(args, "vazio");
+      const padrao = boolFlag(args, "cores-padrao");
+      const vazio = !padrao;
       const camada = flag(args, "camada");
+      boolFlag(args, "vazio");
       rejectUnknownFlags(args, "new");
       const [file, size = "32x32", fps = "8"] = args;
       if (!file) break;
@@ -126,7 +128,7 @@ export async function main(argv: string[]): Promise<number> {
       if (camada) runCommand(store.project, "update_layer", { layer: store.project.layers[0].name, rename: camada });
       if (vazio || camada) await store.save();
       console.log(`Criado: ${store.path}\n${describeProject(store.project)}`);
-      if (!vazio || !camada) console.log(`\nDica: o projeto já vem com ${vazio ? "" : "as cores 0 (contorno) e 1 (branco) e "}${camada ? "" : 'a camada "Base"'}. ${vazio ? "" : "Use --vazio para começar sem as cores. "}${camada ? "" : "Use --camada <nome> para nomear a primeira camada (ex.: fundo)."}`);
+      if (!camada) console.log(`\nDica: o projeto vem com uma camada "Base" vazia. Use --camada <nome> para nomeá-la (ex.: fundo) ou update_layer rename para renomear depois.`);
       return 0;
     }
     case "run": {
@@ -192,7 +194,7 @@ export async function main(argv: string[]): Promise<number> {
       if (scale) input.image_scale = Number(scale);
       const r = runCommand(p, "view", input);
       const focused = !!(region || diff || onion || boolQuiet);
-      console.log(focused ? r.text : `${describeProject(p)}\n\n${r.text}`);
+      if (!(png && frame === "all")) console.log(focused ? r.text : `${describeProject(p)}\n\n${r.text}`);
       if (!r.ok) return 1;
       if (png && frame === "all") {
         const done = await exportToFile(p, { format: "spritesheet_png", path: png, scale: Number(scale ?? 6), columns: undefined, frame: 0 });
@@ -206,11 +208,12 @@ export async function main(argv: string[]): Promise<number> {
       const efeito = boolFlag(args, "efeito");
       const ignorar = flag(args, "ignorar");
       const tipoFlag = flag(args, "tipo");
+      const maxCores = flag(args, "max-cores");
       rejectUnknownFlags(args, "check");
       const [file] = args;
       if (!file) break;
       await store.open(file);
-      const r = runCommand(store.project, "check", { symmetric, tipo: efeito ? "efeito" : tipoFlag === "efeito" || tipoFlag === "rotacao" ? tipoFlag : "personagem", ignore_layers: ignorar ? ignorar.split(",") : undefined });
+      const r = runCommand(store.project, "check", { symmetric, tipo: efeito ? "efeito" : tipoFlag === "efeito" || tipoFlag === "rotacao" ? tipoFlag : "personagem", ignore_layers: ignorar ? ignorar.split(",") : undefined, max_cores: maxCores ? Number(maxCores) : undefined });
       console.log(r.text);
       if (png) await saveImages(store.project, r, png);
       return r.ok ? 0 : 1;
@@ -250,6 +253,8 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "guide": {
+      const full = boolFlag(args, "completo");
+      if (!full) { console.log(SHORT_GUIDE); return 0; }
       console.log(`${SYSTEM_PROMPT}
 
 Como isto vira comandos na CLI (sem MCP)

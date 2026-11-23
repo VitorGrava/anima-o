@@ -113,3 +113,19 @@ O painel dos 12 da caminhada deu 11 ✓ (apelo é sempre "–", avaliação huma
 - Comando `draw_figure`: presets (parado, caminhada_*), `cycle: "caminhada"` (8 frames prontos), `tween` (interpola entre poses-chave com ease in/out: pose a pose, slow in/out e arcos de graça), `facing`, `style` (realista / estilizado / chibi), materiais por cor (a engine cria contorno, sombra e luz), `light`.
 - Prompt: passo 0a manda usar `draw_figure` para humanos e lista os erros que o esqueleto evita; `reference articulacoes` e CLAUDE.md/AGENTS.md apontam para ele.
 - `tests/anatomy.test.ts` (16 testes): comprimento dos ossos constante nos 8 frames e em poses extremas; proporções por estilo; limites anatômicos; sola no chão em todos os frames; pulo; ciclo sem frestas nem pixel solto; arma presa à mão em 4 ângulos; pescoço; tween com ease; `facing: left`; o prompt orienta o uso.
+
+## Verificação da anatomia com agentes novos (08 caminhada v2, 09 golpe de espada v2)
+
+Dois agentes novos, só com o pedido e o guia, usaram `draw_figure` por conta própria:
+- **09 v2 (golpe):** anatomia correta em todos os frames (ombro → cotovelo → mão, espada saindo da mão, pescoço, pé no chão), 8 frames com poses-chave e `tween`. Painel dos 12: 1 a 10 ✓. Atritos: o exemplo de ângulo da arma na descrição estava ERRADO (170° pendura a espada; 180° é para baixo) e confundiu o agente; faltavam presets de golpe e rastro (smear); 27 cores.
+- **08 v2 (caminhada):** ciclo correto por `cycle: "caminhada"`; o agente acrescentou chapéu e mochila por script e a mochila ficou deslocada (não havia âncora do tronco); 35 cores; cabelo "cortina"; braços pouco visíveis; avisos falsos de antecipação e emenda do loop num ciclo no lugar.
+
+**Correções**
+- Documentação do `weapon.angle` corrigida (0° cima, 90° frente horizontal, 180° baixo, negativo = trás; −60° = armada atrás da cabeça) e presets `golpe_armar`, `golpe_impacto`, `golpe_seguir`; `weapon.trail` desenha o rastro da lâmina.
+- `accessories` (chapéu, mochila, capa) ancorados no corpo e que seguem a inclinação do tronco e da cabeça; `hair` curto/longo/careca; `amplitude` exagera o balanço (princípio 10).
+- Paleta: o `draw_figure` só cria as cores usadas (sem metal/ouro se não há arma), reaproveita cores quase iguais e usa um contorno compartilhado por padrão: a caminhada de 8 frames com chapéu e mochila saiu com **19 cores em vez de 35**. `outline: "por-material"` e `tons: 5` dão paletas mais ricas quando o estilo pede.
+- **O número de cores é decisão de estilo, não regra** (pedido do usuário): o `check` não cobra mais "4–16 cores"; só avisa se o estilo pedido tiver limite (`max_cores`, CLI `--max-cores`). O prompt diz que o retrô usa 4–16 e o detalhado, dezenas. O portão do bench não limita mais a paleta.
+- Falsos positivos em caminhada no lugar: antecipação "não se aplica" e emenda do loop só acusa salto maior em figura articulada.
+- Erros: o primeiro problema de validação vem na primeira linha; `frames` em formato errado lista os formatos aceitos; `draw_shapes pixels` aceita `{x, y}`.
+- CLI: `anima guide` agora é curto (o completo em `--completo`); `new` não traz mais as cores 0 e 1 por padrão (`--cores-padrao`); `show all --png` não despeja o texto.
+- A saída antiga com 35 cores foi para `bench/out/_historico/` (fora do portão).

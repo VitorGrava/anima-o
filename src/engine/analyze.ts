@@ -62,6 +62,8 @@ export interface AnalyzeOptions {
   tipo?: "personagem" | "efeito" | "rotacao";
   /** ids de camadas a deixar fora das medidas (efeitos, fundo). */
   ignoreLayers?: string[];
+  /** Limite de cores do ESTILO pedido (ex.: 16 para um visual retrô). Sem isso, o número de cores não é cobrado. */
+  maxColors?: number;
   /** pixels da figura (sem o fundo estático), para as regras de estilo; padrão: o frame inteiro. */
   figure?: Uint8Array;
 }
@@ -439,7 +441,7 @@ function checkNoise(p: Project, flat: Uint8Array, frame: number, issues: Issue[]
 
 // ---------- paleta ----------
 
-function checkPalette(p: Project, frames: number[], issues: Issue[]) {
+function checkPalette(p: Project, frames: number[], issues: Issue[], maxColors?: number) {
   const used = new Array(p.palette.length + 1).fill(0);
   let invalid = 0;
   for (const f of frames) {
@@ -468,12 +470,14 @@ function checkPalette(p: Project, frames: number[], issues: Issue[]) {
       if (dist(p.palette[i].hex, p.palette[j].hex) < 14) near.push(`${p.palette[i].key}≈${p.palette[j].key}`);
     }
   }
-  if (near.length) {
+  // tons quase iguais só embolam em sprite pequeno (ou quando o estilo limita a paleta); em arte grande e detalhada são rampas legítimas
+  if (near.length && (maxColors !== undefined || Math.max(p.width, p.height) <= 48)) {
     issues.push({ severity: "aviso", code: "cores_parecidas", message: `Cores em uso quase iguais (embolam em sprite pequeno): ${near.join(", ")}. Una ou separe mais.` });
   }
+  // o número de cores é decisão de ESTILO (retrô 4–16; detalhado, dezenas): só é cobrado se o estilo pedido tiver um limite
   const inUse = used.slice(1).filter((n) => n > 0).length;
-  if (inUse > 16) {
-    issues.push({ severity: "info", code: "muitas_cores", message: `${inUse} cores em uso. Em sprite pequeno, 4–16 deixam a arte mais coesa (estilo 16-bit: até 15 + transparente).` });
+  if (maxColors !== undefined && inUse > maxColors) {
+    issues.push({ severity: "aviso", code: "paleta_acima_do_limite", message: `${inUse} cores em uso, acima do limite de ${maxColors} do estilo pedido. Compartilhe tons entre materiais e elimine os que ocupam poucos pixels.` });
   }
 }
 
@@ -666,7 +670,7 @@ function checkSplitFigure(p: Project, frames: number[], moving: Set<string>, iss
  * emenda do loop com salto, durações todas iguais, frames repetidos sem segurar a pose,
  * movimento quase nulo e passos de tamanho constante (sem ease).
  */
-function checkMotion(p: Project, metrics: FrameMetrics[], loop: boolean, issues: Issue[], tipo: "personagem" | "efeito" | "rotacao" = "personagem") {
+function checkMotion(p: Project, metrics: FrameMetrics[], loop: boolean, issues: Issue[], tipo: "personagem" | "efeito" | "rotacao" = "personagem", articulated = false) {
   const ms = metrics.filter((m) => m.area > 0);
   if (ms.length < 3) return;
   const dur = (m: FrameMetrics) => p.frames[m.frame].duration ?? Math.round(1000 / p.fps);
@@ -679,7 +683,7 @@ function checkMotion(p: Project, metrics: FrameMetrics[], loop: boolean, issues:
   if (loop && ms.length > 2) {
     const seam = step(ms[ms.length - 1], ms[0]);
     const ref = Math.max(median, 0.5);
-    if (seam > ref * 2.5 && seam > 1.5) {
+    if (seam > ref * 2.5 && seam > (articulated ? 3 : 1.5)) {
       issues.push({
         severity: "aviso",
         code: "emenda_salta",
@@ -762,7 +766,7 @@ function evaluatePrinciples(p: Project, frames: number[], metrics: FrameMetrics[
   else add(1, "Squash and Stretch (comprimir e esticar)", "atencao", "A silhueta não deforma: se há impacto ou salto, amasse no contato e estique na velocidade.");
 
   // 2. Antecipação: um passo no sentido contrário antes do passo maior
-  if (maxStep < 1.5 || steps.length < 3) add(2, "Anticipation (antecipação)", "na", "Sem ação forte o bastante para pedir antecipação.");
+  if (maxStep < (articulated ? 4 : 1.5) || steps.length < 3) add(2, "Anticipation (antecipação)", "na", articulated ? "Ciclo no lugar (andar, correr, idle): sem uma ação forte única, a antecipação não se aplica." : "Sem ação forte o bastante para pedir antecipação.");
   else {
     const k = steps.findIndex((q) => q.len === maxStep);
     const before = steps.slice(0, k).some((q) => q.len >= 0.4 && q.dx * steps[k].dx + q.dy * steps[k].dy < 0);
@@ -957,13 +961,13 @@ export function analyze(p: Project, frames: number[], opts: AnalyzeOptions = {})
   const metrics = frames.map((f) => frameMetrics(p, f, frames.length > 1 ? moving : undefined));
   for (const f of frames) issues.push(...analyzeFrame(p, f, { ...opts, figure: frames.length > 1 ? flattenLayers(p, f, moving) : undefined }));
   if (frames.length > 1) checkContrastAndLight(p, frames, moving, issues);
-  checkPalette(p, frames, issues);
+  checkPalette(p, frames, issues, opts.maxColors);
   let principles: PrincipleStatus[] | undefined;
   if (frames.length > 1) {
     const articulated = [...moving].filter((id) => !empty(id)).length >= 3;
     checkSequence(p, metrics, opts.loop ?? true, issues, opts.tipo ?? "personagem", articulated);
     if ((opts.tipo ?? "personagem") === "personagem") { checkSegmentLengths(p, frames, moving, issues); checkSplitFigure(p, frames, moving, issues); }
-    if (frames.length === p.frames.length || frames.length > 2) checkMotion(p, metrics, opts.loop ?? true, issues, opts.tipo ?? "personagem");
+    if (frames.length === p.frames.length || frames.length > 2) checkMotion(p, metrics, opts.loop ?? true, issues, opts.tipo ?? "personagem", [...moving].filter((id) => !empty(id)).length >= 3);
   }
   if (frames.length >= 3) principles = evaluatePrinciples(p, frames, metrics, issues, opts, moving, [...moving].filter((id) => !empty(id)).length >= 3);
   return { issues, metrics, principles, ignoredLayers: frames.length > 1 ? ignored : [] };

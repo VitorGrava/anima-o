@@ -143,3 +143,116 @@ describe("a IA é orientada a usar o esqueleto para humanos", () => {
     expect(d).toMatch(/draw_figure/);
   });
 });
+
+describe("acessórios, cabelo, amplitude, rastro e paleta enxuta (lições do bench v2)", () => {
+  const baseSpec = (pose: Pose, extra = {}) => spec(pose, extra);
+  const layerBox = (layer: Uint8Array, w = 64) => {
+    let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1;
+    for (let i = 0; i < layer.length; i++) if (layer[i]) { const x = i % w, y = Math.floor(i / w); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    return x1 < 0 ? null : { x0, x1, y0, y1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
+  };
+  const acc = (kind: "chapeu" | "mochila" | "capa") => ({ accessories: [{ kind, ramp: { outline: 5, dark: 6, base: 7, light: 8 } }] });
+
+  it("o chapéu fica em cima da cabeça e a mochila nas costas, e os dois acompanham a inclinação do corpo", () => {
+    const upright = renderFigure(baseSpec(PRESETS.parado, acc("chapeu")));
+    const head = layerBox(upright.layers.cabeca)!, hat = layerBox(upright.layers.chapeu)!;
+    expect(hat.cy).toBeLessThan(head.cy);                              // acima do centro da cabeça
+    expect(Math.abs(hat.cx - head.cx)).toBeLessThan(5);
+    const bag = renderFigure(baseSpec(PRESETS.parado, acc("mochila")));
+    const torso = layerBox(bag.layers.tronco)!, pack = layerBox(bag.layers.mochila)!;
+    expect(pack.cx).toBeLessThan(torso.cx);                            // nas costas (o personagem olha para a direita)
+    const lean = renderFigure(baseSpec({ ...PRESETS.parado, torso: 40 }, acc("mochila")));
+    const leanTorso = layerBox(lean.layers.tronco)!, leanPack = layerBox(lean.layers.mochila)!;
+    expect(Math.abs(leanPack.cx - leanTorso.cx)).toBeLessThan(Math.abs(pack.cx - torso.cx) + 6);   // continua colada ao tronco
+    expect(leanPack.cx).toBeGreaterThan(pack.cx);                      // e foi junto com o tronco que se inclinou para a frente
+    const left = renderFigure(baseSpec(PRESETS.parado, { ...acc("mochila"), facing: "left" }));
+    expect(layerBox(left.layers.mochila)!.cx).toBeGreaterThan(layerBox(left.layers.tronco)!.cx);   // espelhado
+  });
+  it("a capa pende das costas", () => {
+    const out = renderFigure(baseSpec(PRESETS.parado, acc("capa")));
+    const cape = layerBox(out.layers.mochila)!, torso = layerBox(out.layers.tronco)!;
+    expect(cape.cx).toBeLessThan(torso.cx + 1);
+    expect(cape.y1).toBeGreaterThan(torso.cy);
+  });
+  it("estilos de cabelo diferem: careca não tem cabelo, longo cobre mais que curto", () => {
+    const count = (hair: "curto" | "longo" | "careca") => {
+      const out = renderFigure(baseSpec(PRESETS.parado, { hair, ramps: { ...RAMPS, hair: { outline: 11, dark: 12, base: 13, light: 14 } } }));
+      return out.layers.cabeca.filter((v) => v >= 11 && v <= 14).length;
+    };
+    expect(count("careca")).toBe(0);
+    expect(count("longo")).toBeGreaterThan(count("curto"));
+    expect(count("curto")).toBeGreaterThan(0);
+  });
+  it("amplitude exagera o balanço dos braços e das pernas (princípio 10)", () => {
+    const make = (amplitude: number) => {
+      const p = createProject({ width: 40, height: 40 });
+      runCommand(p, "add_frames", { count: 7 });
+      runCommand(p, "draw_figure", { cycle: "caminhada", figure_height: 30, amplitude, preview: false });
+      const wide = (f: number) => { const l = p.layers.find((x) => x.name === "perna-frente")!, c = p.frames[f].cels[l.id]; let a = 99, b = -1; for (let i = 0; i < c.length; i++) if (c[i]) { a = Math.min(a, i % 40); b = Math.max(b, i % 40); } return b - a; };
+      return wide(0);
+    };
+    expect(make(1.6)).toBeGreaterThan(make(0.6));
+  });
+  it("rastro (smear): a lâmina com trail desenha pixels a mais na camada da arma, atrás da ponta", () => {
+    const pose = (trail?: number) => ({ ...PRESETS.parado, shoulder_front: 85, elbow_front: 10, weapon: { hand: "front" as const, angle: 90, length: 16, trail } });
+    const count = (t?: number) => renderFigure(spec(pose(t))).layers.arma.filter(Boolean).length;
+    expect(count(70)).toBeGreaterThan(count(undefined) + 8);
+  });
+  it("os presets de golpe cobrem armar, impacto e seguir, com a espada nas direções certas", () => {
+    const tip = (name: string) => { const j = renderFigure(spec(PRESETS[name])).joints; return { tip: j.weaponTip, hand: j.handFront }; };
+    const armar = tip("golpe_armar"), impacto = tip("golpe_impacto"), seguir = tip("golpe_seguir");
+    expect(armar.tip.y).toBeLessThan(armar.hand.y - 6);              // erguida
+    expect(armar.tip.x).toBeLessThan(armar.hand.x);                  // e para trás
+    expect(Math.abs(impacto.tip.y - impacto.hand.y)).toBeLessThan(3); // horizontal
+    expect(impacto.tip.x).toBeGreaterThan(impacto.hand.x + 10);      // para a frente
+    expect(seguir.tip.y).toBeGreaterThan(seguir.hand.y);             // para baixo
+  });
+  it("por PADRÃO a paleta do ciclo de caminhada com chapéu e mochila é enxuta (≤ 20 cores; o estilo pode pedir mais com tons=5) e sem cores parecidas", () => {
+    const p = createProject({ width: 40, height: 40 });
+    runCommand(p, "remove_colors", { keys: ["0", "1"] });
+    runCommand(p, "add_frames", { count: 7 });
+    const r = runCommand(p, "draw_figure", { cycle: "caminhada", figure_height: 30, preview: false, accessories: [{ kind: "chapeu", color: "#a07840" }, { kind: "mochila", color: "#7a5a2a" }] });
+    expect(r.ok).toBe(true);
+    expect(p.palette.length).toBeLessThanOrEqual(20);
+    expect(analyze(p, p.frames.map((_, i) => i)).issues.map((i) => i.code)).not.toContain("cores_parecidas");
+  });
+  it("sem arma, o draw_figure não cria cores de metal nem ouro", () => {
+    const p = createProject({ width: 40, height: 40 });
+    runCommand(p, "remove_colors", { keys: ["0", "1"] });
+    runCommand(p, "draw_figure", { items: [{ frame: 0, preset: "parado" }], preview: false });
+    expect(p.palette.some((c) => /metal|ouro/.test(c.name))).toBe(false);
+  });
+});
+
+describe("erros legíveis e comandos mais amigáveis", () => {
+  it("o primeiro problema de validação já vem na primeira linha (muitos fluxos só mostram a primeira)", () => {
+    const p = createProject();
+    const r = runCommand(p, "draw_shapes", { shapes: [{ type: "pixels", points: [[1]], color: "0" }] });
+    expect(r.ok).toBe(false);
+    expect(r.text.split("\n")[0]).toMatch(/Entrada inválida para draw_shapes — shapes\[0\]/);
+  });
+  it("frames em formato errado diz os formatos aceitos", () => {
+    const p = createProject();
+    const r = runCommand(p, "set_frame_timing", { frames: { de: 0, ate: 2 }, duration_ms: 100 });
+    expect(r.ok).toBe(false);
+    expect(r.text).toMatch(/"frames" aceita: um número.*lista.*"all".*intervalo/s);
+  });
+  it("draw_shapes pixels aceita {x, y} além de [x, y]", () => {
+    const p = createProject({ width: 4, height: 2 });
+    runCommand(p, "set_palette", { colors: [{ key: "r", hex: "#ff0000", name: "r" }] });
+    const r = runCommand(p, "draw_shapes", { shapes: [{ type: "pixels", points: [{ x: 1, y: 1 }, [2, 0]], color: "r" }], preview: false });
+    expect(r.ok).toBe(true);
+    expect(frameToRowsOf(p)).toEqual([".. r.".replace(" ", "").slice(0, 4).replace("..r.", "..r."), ".r.."]);
+  });
+  it("a antecipação e a emenda não são cobradas em ciclo de caminhada no lugar", () => {
+    const p = createProject({ width: 40, height: 40 });
+    runCommand(p, "add_frames", { count: 7 });
+    runCommand(p, "draw_figure", { cycle: "caminhada", figure_height: 30, preview: false });
+    const r = analyze(p, p.frames.map((_, i) => i));
+    expect(r.issues.map((i) => i.code)).not.toContain("emenda_salta");
+    expect(r.principles!.find((q) => q.n === 2)!.estado).toBe("na");
+  });
+});
+
+import { frameToRows } from "../src/engine/index.ts";
+const frameToRowsOf = (p: Project) => frameToRows(p, 0);

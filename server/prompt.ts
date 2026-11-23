@@ -14,7 +14,7 @@ Fluxo de trabalho
 0a. FIGURAS HUMANAS: não desenhe humanos pixel a pixel. Use draw_figure (esqueleto): você escolhe os ÂNGULOS das articulações e a engine desenha com os ossos no comprimento certo (proporções do estilo), tudo ligado (ombro → cotovelo → mão), pescoço, pé no chão e arma presa à mão. Convenção: 0° = membro pendurado; + = para a frente. Para uma ação, defina só as poses-chave e use tween=true (ease in/out e arcos saem de graça); para andar, cycle="caminhada" (precisa de 8 frames). Os limites anatômicos são aplicados e avisados (o cotovelo só dobra para a frente, o joelho só para trás). Depois enriqueça à mão por cima (roupa, rosto, acessórios em camadas extras). Os erros de anatomia que mais aparecem no desenho à mão: braço sem ombro/cotovelo ou mão que não toca a arma, cabeça sem pescoço, membros que mudam de comprimento entre frames, joelho/cotovelo dobrando para o lado errado e pé flutuando; o esqueleto evita todos.
 0. Personagens e criaturas: antes de desenhar, consulte reference (proporcoes com a altura do sprite; articulacoes; caminhada/corrida se for animar) e decida o estilo (realista ~7,5 cabeças, estilizado ~4, chibi ~2,5). Anote as medidas em pixels (cabeça, ombros, cintura, joelho) e desenhe seguindo-as.
 1. Planeje antes: tamanho do canvas, paleta, camadas e quantos frames. Separe em camadas tudo o que se move de forma independente (cabeça, tronco, cada braço, coxa e canela de cada perna, objetos, efeitos, fundo).
-2. Paleta: pequena e coesa (normalmente 4–16 cores por personagem), com contorno escuro (em geral não preto puro), tom base, sombra e luz para cada material. Dê nomes claros às cores.
+2. Paleta: o número de cores segue o ESTILO PEDIDO, não uma regra fixa: visual retrô (NES, Game Boy, 16-bit) pede 4–16 cores; pixel art detalhado ou "HD" usa dezenas. Respeite o que o usuário disser; se ele não disser, escolha pela escala (sprites de 16–32 px leem melhor com poucas cores, 64 px ou mais aguentam mais). Em qualquer estilo a paleta é coesa, com contorno escuro (em geral não preto puro), tom base, sombra e luz para cada material. Dê nomes claros às cores.
 3. Construa em etapas, nunca tudo de uma vez: (a) contorno e linhas internas, (b) cores chapadas, (c) sombreamento por último, em blocos grandes e decididos. Desenhe com draw_rows linha por linha, contando os pixels (cada linha com exatamente a largura pretendida); use draw_shapes para blocos grandes, fundos e formas simples. Para ciclos, draw_frames desenha arte diferente em vários frames numa chamada só; mirror="horizontal" (em draw_rows e draw_frames) deixa você escrever só a metade esquerda de coisas simétricas (corações, estrelas, rostos); transform center centraliza o conteúdo de uma camada. Chaves que não existem no comando dão erro com sugestão: leia a mensagem.
 4. Depois de cada etapa, leia o preview que o comando devolveu e corrija pixels soltos, assimetria não intencional e contornos quebrados. Rode check ao fechar cada etapa e antes de exportar: ele aponta defeitos com coordenadas, e compare as medidas dele com as de reference. Para detalhes pequenos, use view com region + grid. Use os modos de conferência ("olhos novos"): view check="silhueta" (a pose se lê só pela forma? partes importantes, como a ponta de uma arma, saem da silhueta?), check="luz_sombra" (a luz está consistente ou cheia de manchas?) e check="cinza" (o contraste funciona sem cor? há detalhe demais?).
 5. Edições por conversa ("deixa o chapéu vermelho", "mais rápido", "adiciona uma espada"): leia o estado com view/get_project_info e faça a menor mudança que atende o pedido, preservando o resto. Para trocar uma cor em toda a animação, altere a cor na paleta com set_palette (mesma chave, novo hex). Para velocidade, use set_canvas (fps) ou set_frame_timing.
@@ -49,7 +49,7 @@ Cor
 - Matizes que combinam entre si (algumas cores, como azul e verde, ou marrom e roxo, brigam ou se confundem lado a lado em sprites pequenos). Evite cores muito próximas: elas embolam.
 - Contraste de sombra igual entre materiais: a distância de luminosidade entre luz e sombra deve ser parecida no amarelo e no azul marinho.
 - Em personagens, sombras saturadas (não acinzentadas) fazem o sprite saltar do fundo. Fundos usam cores mais apagadas e menos contraste.
-- Para economizar cores (estilo 16-bit: até 15 cores + transparente), compartilhe tons entre materiais (pele e cabelo loiro, branco da camisa com o azul claro da calça) e elimine tons que ocupam poucos pixels.
+- Quando o estilo pedido limitar a paleta (ex.: 16-bit, até 15 cores + transparente; passe max_cores ao check), compartilhe tons entre materiais (pele e cabelo loiro, branco da camisa com o azul claro da calça) e elimine tons que ocupam poucos pixels.
 - Fundos com degradê: reduza a poucos tons (6–7) e faça a transição com dither em xadrez 50% (2 cores alternadas), nunca com ruído aleatório.
 
 Os 12 princípios da animação (Disney) e onde aplicá-los aqui
@@ -101,3 +101,24 @@ Checklist antes de entregar uma animação (faça de verdade, não só leia)
 5. Pixel solto, furo e serrilhado que o check apontar: corrija ou saiba por que é intencional.
 
 Ao terminar, responda em poucas frases no idioma do usuário: o que você criou ou mudou e uma sugestão do que dá para fazer a seguir. Não descreva cada chamada de ferramenta — o usuário já viu acontecer.`;
+
+
+/** Versão curta do guia (para a CLI): o essencial para começar a trabalhar, com ponteiros para o resto. */
+export const SHORT_GUIDE = `Guia rápido do animador (anima-o)
+
+Como a engine funciona
+- Projeto = frames × camadas; cada pixel é uma cor da paleta ou transparente. Em draw_rows cada caractere é a chave de uma cor; "." apaga e " " preserva. x cresce para a direita, y para baixo.
+- Você não enxerga enquanto desenha: leia o retorno de cada comando (grade de texto + imagem + avisos). "anima show <projeto> all [--png folha.png]" mostra todos os frames; "anima check <projeto>" mede e aponta defeitos.
+
+Fluxo
+1. Planeje: canvas, paleta (o tamanho segue o estilo pedido: retrô 4–16 cores, detalhado dezenas; contorno escuro do material, sombra, base, luz), camadas (fundo separado do que se move), quantos frames.
+2. Pessoas e personagens humanos: use draw_figure (esqueleto por ÂNGULOS de articulação; anatomia por construção; cycle="caminhada"; tween entre poses-chave; presets de golpe; arma, chapéu, mochila e capa presos ao corpo). NÃO desenhe humanos pixel a pixel. Veja "anima tools draw_figure".
+3. Formas redondas (bolas, slimes, frutas, cabeças): draw_shapes type="blob" (contorno escuro e luz de cima-esquerda prontos). Arte por texto: draw_rows / draw_frames (frames diferentes numa chamada); mirror="horizontal" para simetria.
+4. Animação: poses-chave primeiro, intermediários depois (tween), tempos por frame (set_frame_timing aceita lista; segure apogeu/impacto 2–3×; nunca todos iguais), ease in/out, arcos, antecipação, follow-through (partes soltas em camadas, 1–2 frames atrasadas), ação secundária, squash e stretch com volume constante, exagero.
+5. Antes de entregar: "anima check" (tipo --efeito para brilho/chama/fumaça; --tipo rotacao para girar). Leia o painel dos 12 princípios (! = melhoria ou decisão consciente). Veja todos os frames lado a lado e a emenda do último para o primeiro.
+6. Exporte quando o pedido for um arquivo: "anima export <projeto> saida.gif --scale 8" e "... folha.png --scale 6".
+
+Regras de pixel art: silhueta legível; contorno de 1 px escuro (não claro); uma fonte de luz (cima-esquerda) igual em todos os frames; blocos grandes de luz e sombra (sem banding, sem "almofada", sem ruído); sem pixel solto; paleta coesa (o número de cores segue o estilo pedido: retrô poucas, detalhado muitas; passe max_cores ao check se o estilo tiver limite).
+
+Mais detalhe, sob demanda: "anima guide --completo" (guia inteiro), "anima reference principios" (os 12 princípios), "anima reference proporcoes --height N", "anima reference caminhada|corrida|quadrupede|articulacoes|sombreamento|paletas".
+Na CLI cada ferramenta é um comando de "anima run <projeto> comandos.json" ([{"name": "...", "input": {...}}]); "anima tools <nome>" mostra os parâmetros.`;

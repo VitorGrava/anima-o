@@ -180,7 +180,7 @@ const setCanvas = def({
 const setPalette = def({
   name: "set_palette",
   description:
-    'Adiciona ou altera cores da paleta. Se a chave já existe, a cor é substituída — isso recolore instantaneamente todos os pixels daquela cor em todos os frames (ótimo para "deixa o chapéu vermelho"). Use paletas pequenas e coesas (4–16 cores), com um tom escuro de contorno, sombras e luzes.',
+    'Adiciona ou altera cores da paleta. Se a chave já existe, a cor é substituída — isso recolore instantaneamente todos os pixels daquela cor em todos os frames (ótimo para "deixa o chapéu vermelho"). O TAMANHO da paleta segue o estilo pedido: retrô (NES, Game Boy, 16-bit) usa 4–16 cores; pixel art detalhado usa dezenas. Coesa em qualquer caso: um tom escuro de contorno, sombras e luzes por material.',
   schema: z.object({
     colors: z
       .array(
@@ -470,6 +470,7 @@ const poseSchema = z
         hand: z.enum(["front", "back"]).default("front").describe("em qual mão: a do braço da frente ou a do de trás"),
         angle: z.number().describe("direção da lâmina no mundo: 0 = para cima, 90 = para a frente (horizontal), 180 = para baixo, negativo = para trás"),
         length: z.number().min(3).max(60).default(12).describe("comprimento da lâmina em px"),
+        trail: z.number().min(0).max(180).optional().describe("rastro (smear): arco claro dos N graus anteriores da lâmina, para golpes rápidos"),
       })
       .optional()
       .describe("arma PRESA à mão (nunca flutua): cabo, guarda e lâmina saem da mão"),
@@ -478,20 +479,36 @@ const poseSchema = z
 
 const PRESET_NAMES = Object.keys(POSE_PRESETS) as [string, ...string[]];
 
+/** Exagera (amp > 1) ou suaviza (amp < 1) os ângulos de uma pose em relação à pose parada. */
+function scalePose(pose: Pose, amp: number): Pose {
+  if (amp === 1) return pose;
+  const out = { ...pose } as unknown as Record<string, unknown>;
+  for (const k of Object.keys(DEFAULT_POSE)) {
+    if (k === "weapon") continue;
+    const d = (DEFAULT_POSE as unknown as Record<string, number>)[k], v = (pose as unknown as Record<string, number>)[k];
+    out[k] = d + (v - d) * amp;
+  }
+  return out as unknown as Pose;
+}
+
 /** Cor (hex) → índice da paleta; cria a cor se não existir. */
 function ensureColor(p: Project, hex: string, name: string): number {
   const h = normalizeHex(hex);
   const found = p.palette.findIndex((c) => c.hex === h);
   if (found >= 0) return found + 1;
+  // cor quase igual a uma que já existe (distância RGB < 14): reutiliza, para a paleta não inchar com tons que embolam
+  const rgb = (x: string) => [1, 3, 5].map((i) => parseInt(x.slice(i, i + 2), 16));
+  const near = p.palette.findIndex((c) => { const a = rgb(c.hex), b = rgb(h); return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 14; });
+  if (near >= 0) return near + 1;
   const key = [...KEY_CHARS].find((k) => !p.palette.some((c) => c.key === k) && k !== TRANSPARENT_KEY);
   if (!key || p.palette.length >= MAX_COLORS) throw new Error("Paleta cheia: não dá para criar as cores da figura.");
   p.palette.push({ key, hex: h, name });
   return p.palette.length;
 }
 /** Rampa de 4 tons com mudança de matiz (contorno, sombra, base, luz) a partir de uma cor base. */
-function ensureRamp(p: Project, hex: string, name: string): Ramp {
+function ensureRamp(p: Project, hex: string, name: string, sharedOutline?: string, withHighlight = false): Ramp {
   const r = makeRamp(hex, 5);
-  const outline = darkOutline(hex);
+  const outline = sharedOutline ?? darkOutline(hex);
   const mix = (a: string, b: string, t: number) => {
     const [x, y] = [a, b].map((h) => [1, 3, 5].map((i) => parseInt(normalizeHex(h).slice(i, i + 2), 16)));
     return `#${x.map((v, k) => Math.round(v * (1 - t) + y[k] * t).toString(16).padStart(2, "0")).join("")}`;
@@ -503,6 +520,7 @@ function ensureRamp(p: Project, hex: string, name: string): Ramp {
     dark: ensureColor(p, skin ? mix(hex, outline, 0.32) : r[1], `${name}-sombra`),
     base: ensureColor(p, hex, `${name}`),
     light: ensureColor(p, skin ? mix(hex, "#fff0dc", 0.4) : r[3], `${name}-luz`),
+    ...(withHighlight ? { highlight: ensureColor(p, skin ? mix(hex, "#ffffff", 0.62) : r[4], `${name}-brilho`) } : {}),
   };
 }
 
@@ -513,7 +531,10 @@ const drawFigure = def({
     "Vista lateral, olhando para a direita (facing=left espelha). Cria/usa as camadas contorno, braco-tras, perna-tras, tronco, cabeca, perna-frente, braco-frente e arma, e as cores (contorno, sombra, base e luz de cada material) na paleta.",
     "Cada item diz o frame e a pose: `preset` (parado, caminhada_contato, caminhada_abaixo, caminhada_passagem, caminhada_acima) e/ou `pose` com ângulos (que sobrescrevem o preset); `swap` troca o lado da frente com o de trás.",
     '`cycle: "caminhada"` faz um ciclo completo de 8 frames (contato, abaixo, passagem, acima e o espelho): precisa de 8 frames. `tween: true` preenche os frames que estão ENTRE dois itens interpolando os ângulos com ease in/out (pose a pose + slow in/slow out + arcos, de graça): defina só as poses-chave.',
-    "Convenção: 0° = membro pendurado para baixo; + = para a frente. Ex. de golpe de espada: shoulder_front 160 + elbow_front 60 + weapon {angle: 170} (espada erguida atrás), depois shoulder_front 85 + elbow_front 10 + weapon {angle: 90} (golpe horizontal).",
+    "Convenção dos ÂNGULOS DE MEMBRO: 0° = pendurado para baixo; + = para a frente (ombro 90° = braço horizontal à frente, 180° = para cima).",
+    "Convenção do ÂNGULO DA ARMA (weapon.angle): 0° = lâmina para CIMA, 90° = horizontal para a frente, 180° = para BAIXO, negativo = para trás (−60° = erguida para cima e para trás, a espada armada atrás da cabeça; −90° = horizontal para trás). `trail: 60` desenha o rastro (smear) dos 60° anteriores, para frames de golpe rápido.",
+    "Golpe de espada pronto: presets golpe_armar (armada atrás da cabeça), golpe_impacto (horizontal à frente) e golpe_seguir (para baixo, follow-through); defina esses 3 frames e use tween=true.",
+    "Acessórios (`accessories`: chapeu, mochila, capa) ficam ANCORADOS no corpo e seguem a inclinação do tronco e da cabeça em cada frame: não desenhe chapéu ou mochila à mão. `hair`: curto, longo ou careca. `amplitude` > 1 exagera os movimentos do preset (braços e pernas balançam mais).",
   ].join("\n"),
   schema: z.object({
     items: z
@@ -543,6 +564,15 @@ const drawFigure = def({
       .default({ skin: "#f0c09a", hair: "#6b3b1e", top: "#3d7fd0", bottom: "#6a4a8a", boots: "#5a3420", metal: "#b9c4d6", gold: "#e0b040" })
       .describe("cores base (hex) de cada material; a engine cria sombra, luz e contorno com mudança de matiz"),
     face: z.boolean().default(true).describe("olho, nariz e boca"),
+    hair: z.enum(["curto", "longo", "careca"]).default("curto"),
+    accessories: z
+      .array(z.object({ kind: z.enum(["chapeu", "mochila", "capa"]), color: z.string().describe("cor base (hex)") }))
+      .max(6)
+      .optional()
+      .describe("chapéu, mochila ou capa ancorados no corpo"),
+    amplitude: z.number().min(0.2).max(2.5).default(1).describe("1 = normal; 1.5 = balanço 50% maior (exagero em poucos pixels)"),
+    tons: z.union([z.literal(4), z.literal(5)]).default(4).describe("tons por material: 4 = contorno, sombra, base, luz (paleta enxuta); 5 acrescenta um BRILHO (mais cores, mais volume): use em estilos detalhados"),
+    outline: z.enum(["compartilhado", "por-material"]).default("compartilhado").describe("compartilhado: um contorno escuro só (paleta enxuta); por-material: contorno do tom do material (mais cores)"),
     light: z.enum(["frente", "esquerda"]).default("frente").describe('"frente": luz de cima e do lado para onde ele olha (o rosto fica iluminado e legível). "esquerda": de cima-esquerda, igual ao resto da cena.'),
     preview: previewFlag,
   }),
@@ -557,7 +587,7 @@ const drawFigure = def({
     if (i.cycle === "caminhada") {
       if (p.frames.length < 8) throw new Error(`O ciclo de caminhada tem 8 frames, e o projeto tem ${p.frames.length}. Rode add_frames com count ${8 - p.frames.length} antes.`);
       items = Array.from({ length: 8 }, (_, f) => {
-        const base = POSE_PRESETS[WALK_CYCLE[f % 4]];
+        const base = scalePose(POSE_PRESETS[WALK_CYCLE[f % 4]], i.amplitude);
         return { frame: f, pose: f >= 4 ? swapSides(base) : base };
       });
     }
@@ -565,6 +595,7 @@ const drawFigure = def({
       resolveFrames(p, it.frame);
       let base = it.preset ? POSE_PRESETS[it.preset] : DEFAULT_POSE;
       if (it.swap) base = swapSides(base);
+      base = scalePose(base, i.amplitude);
       items = items.filter((x) => x.frame !== it.frame);
       items.push({ frame: it.frame, pose: merge(base, it.pose as Record<string, unknown> | undefined), airborne: it.airborne });
     }
@@ -591,10 +622,16 @@ const drawFigure = def({
     for (const l of figureLayers) for (const f of p.frames) if (!f.cels[l.id]) f.cels[l.id] = new Uint8Array(p.width * p.height);
 
     const m = i.materials;
+    const shared = i.outline === "compartilhado" ? darkOutline(m.boots) : undefined;
+    const usesWeapon = items.some((x) => x.pose.weapon);
+    const R = (hex: string, name: string) => ensureRamp(p, hex, name, shared, i.tons === 5);
     const ramps = {
-      skin: ensureRamp(p, m.skin, "pele"), hair: ensureRamp(p, m.hair, "cabelo"), top: ensureRamp(p, m.top, "roupa"),
-      bottom: ensureRamp(p, m.bottom, "calca"), boots: ensureRamp(p, m.boots, "bota"), metal: ensureRamp(p, m.metal, "metal"), gold: ensureRamp(p, m.gold, "ouro"),
+      skin: R(m.skin, "pele"), hair: i.hair === "careca" ? R(m.skin, "pele") : R(m.hair, "cabelo"), top: R(m.top, "roupa"),
+      bottom: R(m.bottom, "calca"), boots: R(m.boots, "bota"),
+      // só cria as cores da arma se alguma pose tiver arma
+      metal: usesWeapon ? R(m.metal, "metal") : R(m.boots, "bota"), gold: usesWeapon ? R(m.gold, "ouro") : R(m.boots, "bota"),
     };
+    const accessories = (i.accessories ?? []).map((a) => ({ kind: a.kind, ramp: R(a.color, a.kind) }));
     const figureHeight = i.figure_height ?? Math.round(p.height * 0.7);
     const warns = new Set<string>();
     for (const it of items) {
@@ -602,7 +639,7 @@ const drawFigure = def({
       warnings.forEach((w) => warns.add(`frame ${it.frame}: ${w}`));
       const out = renderFigure({
         width: p.width, height: p.height, figureHeight, style: i.style, x: i.x ?? Math.round(p.width / 2), ground: i.ground ?? p.height - 2,
-        facing: i.facing, pose: it.pose, ramps, face: i.face, airborne: it.airborne, light: i.light,
+        facing: i.facing, pose: it.pose, ramps, face: i.face, airborne: it.airborne, light: i.light, hair: i.hair, accessories,
       });
       for (const l of figureLayers) {
         const cel = getCel(p, it.frame, l.id);
@@ -618,7 +655,7 @@ const drawFigure = def({
 });
 
 const shape = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("pixels"), points: z.array(z.array(z.number().int()).length(2)).min(1).max(4096).describe("Lista de [x, y]"), color: colorRef }),
+  z.object({ type: z.literal("pixels"), points: z.array(z.union([z.array(z.number().int()).length(2), z.object({ x: z.number().int(), y: z.number().int() })])).min(1).max(4096).describe("Lista de [x, y] ou {x, y}"), color: colorRef }),
   z.object({ type: z.literal("line"), x1: z.number().int(), y1: z.number().int(), x2: z.number().int(), y2: z.number().int(), color: colorRef }),
   z.object({
     type: z.literal("rect"),
@@ -703,7 +740,7 @@ const drawShapes = def({
         const c = sh.type === "blob" ? 0 : colorIndex(p, sh.color);
         switch (sh.type) {
           case "pixels":
-            for (const [x, y] of sh.points) draw.setPixel(s, x!, y!, c);
+            for (const pt of sh.points) { const [x, y] = Array.isArray(pt) ? pt : [pt.x, pt.y]; draw.setPixel(s, x!, y!, c); }
             break;
           case "line":
             draw.line(s, sh.x1, sh.y1, sh.x2, sh.y2, c);
@@ -932,12 +969,13 @@ const check = def({
       .default("personagem")
       .describe('"efeito" (brilho, chama, fumaça, estrela...) muda de tamanho de propósito e emite luz: não cobra volume, base, largura, contorno nem pillow. "rotacao" (moeda girando, objeto virando): a largura muda sozinha e o centro fica parado: não cobra volume, base, largura nem movimento. "personagem": cobra tudo.'),
     ignore_layers: z.array(z.string()).optional().describe("Camadas a deixar fora das medidas (ex.: faíscas e efeitos que se mexem de propósito, ou o fundo)."),
+    max_cores: z.number().int().min(2).max(255).optional().describe("Limite de cores do ESTILO pedido (ex.: 16 para visual retrô/16-bit). Sem isso o número de cores não é cobrado: estilos detalhados usam muitas."),
     as_image: z.boolean().default(true).describe("Devolve a imagem com os pixels problemáticos marcados em magenta."),
   }),
   run(p, i) {
     const list = resolveFrames(p, i.frames ?? "all");
     const ignore = (i.ignore_layers ?? []).map((n) => findLayer(p, n).id);
-    const r = analyze(p, list, { symmetric: i.symmetric, loop: i.loop, tipo: i.tipo, ignoreLayers: ignore });
+    const r = analyze(p, list, { symmetric: i.symmetric, loop: i.loop, tipo: i.tipo, ignoreLayers: ignore, maxColors: i.max_cores });
     const marked = r.issues.find((x) => x.points?.length && x.frame !== undefined);
     const f = marked?.frame ?? list[0];
     const highlight = r.issues.filter((x) => x.frame === f).flatMap((x) => x.points ?? []);
@@ -1087,9 +1125,11 @@ function describeIssues(name: string, error: z.ZodError): string {
   const lines = error.issues.slice(0, 5).map((i) => {
     const where = i.path.length ? i.path.map((q, k) => (typeof q === "number" ? `[${q}]` : k ? `.${String(q)}` : String(q))).join("") : "(entrada)";
     const missing = i.code === "invalid_type" && /received undefined/.test(i.message);
-    return `- ${where}: ${missing ? "falta este campo obrigatório" : i.message}`;
+    const isFrames = /(^|\.)frames$/.test(where) && i.code === "invalid_union";
+    return `- ${where}: ${missing ? "falta este campo obrigatório" : isFrames ? 'formato inválido; "frames" aceita: um número (0), uma lista ([0, 2, 4]), "all" ou um intervalo {"from": 0, "to": 3}' : i.code === "invalid_union" ? "não bate com nenhuma das formas aceitas (veja `anima tools` para as formas possíveis)" : i.message}`;
   });
-  return `Entrada inválida para ${name}:\n${lines.join("\n")}\nVeja os parâmetros com: anima tools ${name}`;
+  const first = lines[0]?.replace(/^- /, "") ?? "";
+  return `Entrada inválida para ${name} — ${first}${lines.length > 1 ? ` (+${lines.length - 1} problema(s))` : ""}\n${lines.join("\n")}\nVeja os parâmetros com: anima tools ${name}`;
 }
 
 /** Valida e executa um comando. Erros viram texto amigável — nunca exceções. */

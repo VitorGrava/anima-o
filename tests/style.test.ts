@@ -198,17 +198,17 @@ describe("contrato: o prompt da IA ensina cada regra que o check cobra", () => {
 
 describe("portão de qualidade: animações geradas pelos agentes (bench/out)", () => {
   const dir = path.join(ROOT, "bench/out");
-  const ids = existsSync(dir) ? readdirSync(dir).filter((d) => existsSync(path.join(dir, d, "anim.anima.json"))) : [];
+  // pastas que começam com "_" guardam saídas antigas (histórico) que já motivaram correções e não entram no portão
+  const ids = existsSync(dir) ? readdirSync(dir).filter((d) => !d.startsWith("_") && existsSync(path.join(dir, d, "anim.anima.json"))) : [];
   it("existe ao menos uma animação no bench", () => expect(ids.length).toBeGreaterThan(0));
   for (const id of ids) {
-    it(`${id}: sem erros, paleta contida, tempos variados e emenda do loop suave`, () => {
+    it(`${id}: sem erros, tempos variados e emenda do loop suave`, () => {
       const p = fromJSON(JSON.parse(readFileSync(path.join(dir, id, "anim.anima.json"), "utf8")));
       const frames = p.frames.map((_, i) => i);
       const efeito = /estrela|fogueira|brilho|chama|fumaça/.test(id);
       const r = analyze(p, frames, { tipo: efeito ? "efeito" : "personagem" });
       const found = r.issues.map((i) => i.code);
       expect(r.issues.filter((i) => i.severity === "erro")).toEqual([]);
-      expect(p.palette.length).toBeLessThanOrEqual(32);
       if (frames.length >= 4) expect(found, "todos os frames com a mesma duração").not.toContain("tempo_uniforme");
       expect(found, "o loop salta na emenda").not.toContain("emenda_salta");
       expect(found, "contorno claro").not.toContain("contorno_claro");
@@ -507,5 +507,43 @@ describe("lições do golpe de espada e do cachorro (rodada 5)", () => {
     expect(t).toMatch(/Medidas para um quadrúpede com 12 px/);
     expect(t).toMatch(/passada ≈ \d+–\d+ px/);
     expect(t).toMatch(/dianteira esquerda/);
+  });
+});
+
+describe("o número de cores é decisão de estilo, não regra", () => {
+  const manyColors = (n: number) => {
+    const p = createProject({ width: 96, height: 96 });
+    runCommand(p, "remove_colors", { keys: ["0", "1"] });
+    const colors = Array.from({ length: n }, (_, k) => ({ key: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[k], hex: `#${((k * 37) % 200 + 30).toString(16).padStart(2, "0")}${((k * 91) % 200 + 30).toString(16).padStart(2, "0")}${((k * 53) % 200 + 30).toString(16).padStart(2, "0")}`, name: `c${k}` }));
+    runCommand(p, "set_palette", { colors });
+    runCommand(p, "draw_rows", { rows: Array.from({ length: n }, (_, k) => colors[k].key.repeat(n)), preview: false });
+    return p;
+  };
+  it("por padrão uma paleta de 40 cores não gera nenhum aviso de quantidade", () => {
+    const codes = analyze(manyColors(40), [0]).issues.map((i) => i.code);
+    expect(codes).not.toContain("muitas_cores");
+    expect(codes).not.toContain("paleta_acima_do_limite");
+  });
+  it("se o estilo pedido tem um limite (max_cores), passar dele é avisado; dentro do limite, não", () => {
+    const p = manyColors(24);
+    const over = analyze(p, [0], { maxColors: 16 }).issues.find((i) => i.code === "paleta_acima_do_limite");
+    expect(over?.message).toMatch(/24 cores em uso, acima do limite de 16/);
+    expect(analyze(p, [0], { maxColors: 32 }).issues.map((i) => i.code)).not.toContain("paleta_acima_do_limite");
+    expect(runCommand(p, "check", { max_cores: 16, as_image: false }).text).toMatch(/acima do limite de 16/);
+    expect(runCommand(p, "check", { as_image: false }).text).not.toMatch(/acima do limite/);
+  });
+  it("o prompt trata o número de cores como estilo (retrô poucas, detalhado muitas), sem impor 4–16", () => {
+    expect(SYSTEM_PROMPT).toMatch(/segue o ESTILO PEDIDO/);
+    expect(SYSTEM_PROMPT).toMatch(/dezenas/);
+    expect(SYSTEM_PROMPT).not.toMatch(/normalmente 4–16 cores por personagem/);
+  });
+  it("draw_figure com tons=5 acrescenta um brilho a cada material (paleta mais rica, a pedido do estilo)", () => {
+    const make = (tons: 4 | 5) => {
+      const p = createProject({ width: 48, height: 48 });
+      runCommand(p, "remove_colors", { keys: ["0", "1"] });
+      runCommand(p, "draw_figure", { items: [{ frame: 0, preset: "parado" }], tons, outline: "por-material", preview: false });
+      return p.palette.length;
+    };
+    expect(make(5)).toBeGreaterThan(make(4));
   });
 });

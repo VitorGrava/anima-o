@@ -32,7 +32,7 @@ export interface Pose {
   knee_back: number;
   ankle_back: number;
   /** Arma presa a uma mão. */
-  weapon?: { hand: "front" | "back"; angle: number; length: number };
+  weapon?: { hand: "front" | "back"; angle: number; length: number; trail?: number };
 }
 
 export const DEFAULT_POSE: Pose = {
@@ -49,6 +49,10 @@ export const PRESETS: Record<string, Pose> = {
   caminhada_contato: P({ torso: 4, shoulder_front: -24, elbow_front: 14, shoulder_back: 26, elbow_back: 20, hip_front: 28, knee_front: 3, ankle_front: 18, hip_back: -22, knee_back: 18, ankle_back: -24 }),
   caminhada_abaixo: P({ torso: 5, shoulder_front: -14, elbow_front: 12, shoulder_back: 16, elbow_back: 18, hip_front: 20, knee_front: 22, ankle_front: 4, hip_back: -12, knee_back: 36, ankle_back: -28 }),
   caminhada_passagem: P({ torso: 3, shoulder_front: -2, elbow_front: 10, shoulder_back: 4, elbow_back: 12, hip_front: 0, knee_front: 4, ankle_front: 0, hip_back: 22, knee_back: 62, ankle_back: -10 }),
+  // golpe de espada (arma na mão da frente): armar atrás da cabeça, golpe horizontal à frente, seguir para baixo
+  golpe_armar: P({ torso: -12, head: -6, shoulder_front: 170, elbow_front: 70, shoulder_back: 30, elbow_back: 40, hip_front: 8, knee_front: 18, hip_back: -24, knee_back: 24, weapon: { hand: "front", angle: -55, length: 14 } }),
+  golpe_impacto: P({ torso: 18, head: 8, shoulder_front: 88, elbow_front: 8, shoulder_back: -40, elbow_back: 30, hip_front: 52, knee_front: 55, ankle_front: 0, hip_back: -28, knee_back: 10, ankle_back: -20, weapon: { hand: "front", angle: 90, length: 14 } }),
+  golpe_seguir: P({ torso: 22, head: 10, shoulder_front: 60, elbow_front: 12, shoulder_back: -44, elbow_back: 30, hip_front: 54, knee_front: 58, hip_back: -30, knee_back: 8, ankle_back: -24, weapon: { hand: "front", angle: 125, length: 14 } }),
   caminhada_acima: P({ torso: 4, shoulder_front: 10, elbow_front: 10, shoulder_back: -10, elbow_back: 14, hip_front: -14, knee_front: 2, ankle_front: -30, hip_back: 30, knee_back: 28, ankle_back: 12 }),
 };
 
@@ -110,7 +114,7 @@ const mul = (a: V, k: number): V => ({ x: a.x * k, y: a.y * k });
 /** Direção de um membro: 0° = para baixo, + = para a frente (+x). */
 const limbDir = (deg: number): V => ({ x: Math.sin(rad(deg)), y: Math.cos(rad(deg)) });
 
-export interface Ramp { outline: number; dark: number; base: number; light: number }
+export interface Ramp { outline: number; dark: number; base: number; light: number; /** opcional: ponto de maior luz (estilos detalhados) */ highlight?: number }
 
 export interface FigureSpec {
   width: number;
@@ -128,11 +132,15 @@ export interface FigureSpec {
   face: boolean;
   /** Pés no ar (px), para pulos. */
   airborne?: number;
+  /** Acessórios ancorados no corpo (seguem a inclinação do tronco e da cabeça em cada frame). */
+  accessories?: { kind: "chapeu" | "mochila" | "capa"; ramp: Ramp }[];
+  /** Cabelo: curto (padrão), longo ou nenhum. */
+  hair?: "curto" | "longo" | "careca";
   /** "frente": a luz vem de cima e do lado para onde ele olha (o rosto fica iluminado); "esquerda": de cima-esquerda (igual ao resto da cena). */
   light?: "frente" | "esquerda";
 }
 
-export const FIGURE_LAYERS = ["contorno", "braco-tras", "perna-tras", "tronco", "cabeca", "perna-frente", "braco-frente", "arma"] as const;
+export const FIGURE_LAYERS = ["contorno", "braco-tras", "perna-tras", "mochila", "tronco", "cabeca", "chapeu", "perna-frente", "braco-frente", "arma"] as const;
 export type FigureLayer = (typeof FIGURE_LAYERS)[number];
 
 interface Part {
@@ -222,6 +230,8 @@ export function renderFigure(spec: FigureSpec): FigureResult {
   // arma presa à mão
   const joints: Record<string, V> = { pelvis, shoulder, headCenter, handFront: aF.hand, handBack: aB.hand, footFront: lF.toe, footBack: lB.toe, elbowFront: aF.elbow, elbowBack: aB.elbow, kneeFront: lF.knee, kneeBack: lB.knee };
   let weaponLayer = false;
+  let weaponTrail = 0;
+  let weaponAt: { hand: V; angle: number; len: number } | undefined;
   if (pose.weapon) {
     const hand = pose.weapon.hand === "front" ? aF.hand : aB.hand;
     const d = { x: Math.sin(rad(pose.weapon.angle)), y: -Math.cos(rad(pose.weapon.angle)) };
@@ -232,6 +242,8 @@ export function renderFigure(spec: FigureSpec): FigureResult {
     addCap("arma", add(hand, mul(d, 1.4)), add(hand, mul(d, len)), 0.9, 0.55, ramps.metal);                           // lâmina
     joints.weaponTip = add(hand, mul(d, len));
     weaponLayer = true;
+    weaponTrail = pose.weapon.trail ?? 0;
+    weaponAt = { hand, angle: pose.weapon.angle, len };
   }
   void weaponLayer;
 
@@ -250,6 +262,7 @@ export function renderFigure(spec: FigureSpec): FigureResult {
   const owner = new Int16Array(W * H).fill(-1);
   const shade = (sd: number, ramp: Ramp, far: boolean): number => {
     const [hi, mid, lo] = far ? [ramp.base, ramp.dark, ramp.outline] : [ramp.light, ramp.base, ramp.dark];
+    if (!far && ramp.highlight !== undefined && sd > 0.72) return ramp.highlight;
     return sd > 0.3 ? hi : sd < -0.35 ? lo : mid;
   };
   parts.forEach((part, idx) => {
@@ -286,6 +299,21 @@ export function renderFigure(spec: FigureSpec): FigureResult {
     }
   });
 
+  // ----- rastro do golpe (smear): arcos claros atrás da ponta da lâmina, para ações muito rápidas -----
+  if (weaponTrail > 0 && weaponAt) {
+    const wa = weaponAt;
+    const sparse = (v: number) => v;
+    void sparse;
+    for (const f of [0.55, 0.8, 1.0]) {
+      for (let a = wa.angle - weaponTrail; a <= wa.angle - 2; a += 1.5) {
+        const v = place({ x: wa.hand.x, y: wa.hand.y });                   // `hand` já está em coordenadas do corpo; precisa do mesmo deslocamento
+        const rr = wa.len * f;
+        const px = Math.floor(v.x + sgn * Math.sin(rad(a)) * rr * 1 - 0), py = Math.floor(v.y - Math.cos(rad(a)) * rr);
+        if (px >= 0 && py >= 0 && px < W && py < H && !layers.arma[py * W + px]) layers.arma[py * W + px] = f === 1 ? spec.ramps.metal.light : spec.ramps.metal.base;
+      }
+    }
+  }
+
   // ----- cabelo e rosto (na camada da cabeça) -----
   const hc = joints.headCenter;
   const hAngle = rad(pose.torso + pose.head) * sgn;
@@ -297,7 +325,8 @@ export function renderFigure(spec: FigureSpec): FigureResult {
       if (!inHead(x, y)) continue;
       // coordenadas locais da cabeça (+x = para a frente do personagem)
       const lx = (x + 0.5 - hc.x) * sgn / pr.head, ly = (y + 0.5 - hc.y) / pr.head;
-      const hair = ly < -0.17 || (lx < -0.2 && ly < 0.1);
+      const hairStyle = spec.hair ?? "curto";
+      const hair = hairStyle === "careca" ? false : hairStyle === "longo" ? ly < -0.17 || (lx < -0.18 && ly < 0.38) : ly < -0.2 || (lx < -0.3 && ly < 0.02);
       if (hair) layers.cabeca[y * W + x] = ly < -0.3 ? (lx < 0 ? hairRamp.light : hairRamp.base) : hairRamp.dark;
     }
   }
@@ -308,6 +337,43 @@ export function renderFigure(spec: FigureSpec): FigureResult {
     if (pr.head >= 10) put({ x: eye.x, y: eye.y - 1 }, skinRamp.outline);
     put(nose, skinRamp.light);
     if (pr.head >= 7) put(rot(0.32 * pr.head * sgn, 0.22 * pr.head), skinRamp.dark);   // boca
+  }
+
+  // ----- acessórios ancorados: seguem o tronco e a cabeça em cada frame -----
+  for (const acc of spec.accessories ?? []) {
+    const put = (layer: FigureLayer, x: number, y: number, k: number) => { const xx = Math.floor(x), yy = Math.floor(y); if (xx >= 0 && yy >= 0 && xx < W && yy < H) { layers[layer][yy * W + xx] = k; owner[yy * W + xx] = owner[yy * W + xx] >= 0 ? owner[yy * W + xx] : 0; } };
+    const fill = (layer: FigureLayer, c: V, rx: number, ry: number, ang: number, ramp: Ramp, only?: (lx: number, ly: number) => boolean) => {
+      for (let y = Math.floor(c.y - rx - ry - 1); y <= Math.ceil(c.y + rx + ry + 1); y++) {
+        for (let x = Math.floor(c.x - rx - ry - 1); x <= Math.ceil(c.x + rx + ry + 1); x++) {
+          const dx = x + 0.5 - c.x, dy = y + 0.5 - c.y;
+          const lx = dx * Math.cos(ang) + dy * Math.sin(ang), ly = -dx * Math.sin(ang) + dy * Math.cos(ang);
+          if ((lx / rx) ** 2 + (ly / ry) ** 2 > 1 || (only && !only(lx, ly))) continue;
+          const sd = (dx / rx) * LIGHT.x + (dy / ry) * LIGHT.y;
+          if (x >= 0 && y >= 0 && x < W && y < H) { layers[layer][y * W + x] = sd > 0.3 ? ramp.light : sd < -0.35 ? ramp.dark : ramp.base; owner[y * W + x] = owner[y * W + x] >= 0 ? owner[y * W + x] : 0; }
+        }
+      }
+    };
+    const headAng = rad(pose.torso + pose.head) * sgn;
+    if (acc.kind === "chapeu") {
+      const top = { x: hc.x + Math.sin(headAng) * pr.head * 0.34, y: hc.y - Math.cos(headAng) * pr.head * 0.34 };
+      fill("chapeu", top, pr.head * 0.34, pr.head * 0.2, headAng, acc.ramp);                                       // copa
+      fill("chapeu", { x: top.x + Math.cos(headAng) * 0, y: top.y + pr.head * 0.18 }, pr.head * 0.62, pr.head * 0.09, headAng, acc.ramp);   // aba
+      put("chapeu", top.x, top.y + pr.head * 0.06, acc.ramp.outline);
+    } else if (acc.kind === "mochila") {
+      const back = { x: joints.shoulder.x - sgn * (rTorsoUp + pr.head * 0.18), y: (joints.shoulder.y + joints.pelvis.y) / 2 - 0.5 };
+      fill("mochila", back, pr.head * 0.22, pr.head * 0.38, rad(pose.torso) * sgn, acc.ramp);
+    } else {
+      // capa: trapézio que pende das costas e balança com o tronco
+      const sh = joints.shoulder, pv = joints.pelvis;
+      const tail = { x: pv.x - sgn * (pr.head * 0.5 + Math.abs(pose.torso) * 0.12) - sgn * pose.torso * 0.08, y: pv.y + pr.head * 0.55 };
+      const steps = 14;
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const x = sh.x - sgn * rTorsoUp * 0.8 + (tail.x - (sh.x - sgn * rTorsoUp * 0.8)) * t, y = sh.y + (tail.y - sh.y) * t;
+        const w = rTorsoUp * 0.5 + t * pr.head * 0.28;
+        for (let k = -Math.round(w * 0.5); k <= Math.round(w * 0.5); k++) put("mochila", x + sgn * k * 0.5, y, k < 0 ? acc.ramp.dark : acc.ramp.base);
+      }
+    }
   }
 
   // ----- contorno externo: 1 px em volta da silhueta, no tom escuro do material vizinho -----

@@ -277,7 +277,7 @@ Depois repete espelhado (outro lado) = 8 frames para o ciclo completo (2 passos)
   tamanhos: `Tamanho do sprite × nível de detalhe:
 - 8×8: ícones/itens; uma ideia só. 16×16: personagem de 3 cabeças, olhos de 1 px, cor de 4–6 tons; tipo NES/GB.
 - 24×24 a 32×32: personagem de 3,5–4 cabeças; cabeça 8–10 px; olhos 1×2; mãos e pés em blocos; 8–12 cores (SNES/GBA).
-- 48×48: 4–5 cabeças; começam a aparecer dedos agrupados, dobras da roupa, 12–16 cores.
+- 48×48: 4–5 cabeças; começam a aparecer dedos agrupados, dobras da roupa (convenção retrô: 12–16 cores; estilos detalhados usam mais).
 - 64×64 e acima: anatomia e roupas detalhadas; exige disciplina com clusters e rampas; use camadas por membro.
 - Regra: quanto menor o sprite, mais a silhueta e o contraste fazem o trabalho; corte detalhes antes de adicionar.
 - Cabeça em pixels por altura (estilizado): 16→5–6 px, 24→7, 32→8–9, 48→11–12, 64→14–16.
