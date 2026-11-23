@@ -40,6 +40,7 @@ import {
   type CommandResult,
   type Project,
 } from "../src/engine/index.ts";
+import { flattenFrame } from "../src/engine/render.ts";
 import { decodePNG, encodePNG } from "../server/png.ts";
 import { ProjectStore, exportToFile } from "../mcp/store.ts";
 import { SHORT_GUIDE, SYSTEM_PROMPT } from "../server/prompt.ts";
@@ -333,7 +334,20 @@ export async function main(argv: string[]): Promise<number> {
       const p = store.project;
       await exportToFile(p, { format: "frame_png", path: out, frame, fundo: undefined });
       const abs = path.resolve(out);
-      console.log(`Imagem para a crítica: ${abs}\n\nPEDIDO PRONTO (cole em um agente independente, sem o seu contexto; ele só precisa da ferramenta de leitura de imagens):\n---\nVocê é um diretor de arte de pixel art, rigoroso. Leia (Read) a imagem ${abs}${ref ? ` e compare com a REFERÊNCIA profissional ${path.resolve(ref)}` : ""}: um sprite/cena ${p.width}x${p.height} px ampliado. Responda em português, curto e específico: 1) nota 0-10${ref ? " do sprite e da referência (para calibrar)" : ""}; 2) os 5 piores defeitos, cada um com a região (x0..x1,y0..y1 em coordenadas do canvas = coordenada da imagem / escala) e a correção concreta em pixels; 3) o que NÃO mexer; 4) a maior diferença para o nível de um jogo comercial. Use SOMENTE Read nesses arquivos.\n---\nDepois: corrija só o que ele apontar, compare com a versão anterior (às cegas, se puder) e descarte o que piorar.`);
+      // animação: folha com todos os frames + diferença entre o par mais distinto (movimento de 1 px é invisível na folha)
+      let animaTxt = "";
+      if (p.frames.length > 1) {
+        const base = out.replace(/\.critico\.png$/, "");
+        const sheetP = `${base}.critico-folha.png`, diffP = `${base}.critico-diff.png`;
+        await exportToFile(p, { format: "spritesheet_png", path: sheetP, frame: 0, scale: undefined, columns: Math.min(p.frames.length, 8) });
+        const flats = p.frames.map((_, k) => flattenFrame(p, k));
+        let best = [0, 1], bestD = -1;
+        for (let a2 = 0; a2 < flats.length; a2++) for (let b2 = a2 + 1; b2 < flats.length; b2++) { let d = 0; for (let i = 0; i < flats[a2].length; i++) if (flats[a2][i] !== flats[b2][i]) d++; if (d > bestD) { bestD = d; best = [a2, b2]; } }
+        const r = runCommand(p, "view", { frames: best[0], compare: { a: best[0], b: best[1] } });
+        await saveImages(p, r, diffP);
+        animaTxt = ` Para a ANIMAÇÃO leia também a folha de todos os frames ${path.resolve(sheetP)} e o diff entre os frames ${best[0]} e ${best[1]} (os mais distintos: vermelho = sumiu, verde = apareceu, amarelo = trocou, cinza = igual) ${path.resolve(diffP)}: movimentos de 1 px não aparecem na folha mas aparecem no diff; avalie amplitude, antecipação, atraso entre partes (follow through) e se o ciclo fecha. Dê nota separada para a animação.`;
+      }
+      console.log(`Imagem para a crítica: ${abs}\n\nPEDIDO PRONTO (cole em um agente independente, sem o seu contexto; ele só precisa da ferramenta de leitura de imagens):\n---\nVocê é um diretor de arte de pixel art, rigoroso. Leia (Read) a imagem ${abs}${ref ? ` e compare com a REFERÊNCIA profissional ${path.resolve(ref)}` : ""}: um sprite/cena ${p.width}x${p.height} px ampliado. Responda em português, curto e específico: 1) nota 0-10${ref ? " do sprite e da referência (para calibrar)" : ""}; 2) os 5 piores defeitos, cada um com a região (x0..x1,y0..y1 em coordenadas do canvas = coordenada da imagem / escala) e a correção concreta em pixels; 3) o que NÃO mexer; 4) a maior diferença para o nível de um jogo comercial. ${animaTxt} Use SOMENTE Read nesses arquivos.\n---\nDepois: corrija só o que ele apontar, compare com a versão anterior (às cegas, se puder) e descarte o que piorar.`);
       return 0;
     }
     case "import": {
