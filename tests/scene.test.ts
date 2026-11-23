@@ -335,3 +335,20 @@ describe("atritos da vila: only em lista, paleta grande, folga alta", () => {
     expect(r3.ok, r3.text).toBe(true);
   });
 });
+
+describe("terrain com vale", () => {
+  it("a crista desce no centro do vale", () => {
+    const mk = (vale?: object) => {
+      const p = createProject({ width: 64, height: 40 });
+      runCommand(p, "set_palette", { colors: [{ key: "m", hex: "#605070", name: "monte" }] });
+      const r = runCommand(p, "draw_shapes", { shapes: [{ type: "terrain", topo: 14, amp: 0, ate: 39, color: "m", vale }] });
+      expect(r.ok, r.text).toBe(true);
+      const cel = p.frames[0].cels[p.layers[0].id];
+      const top = (x: number) => { for (let y = 0; y < 40; y++) if (cel[y * 64 + x]) return y; return 40; };
+      return { c: top(32), b: top(4) };
+    };
+    const sem = mk(), com = mk({ x: 32, largura: 20, profundidade: 12 });
+    expect(com.c - sem.c).toBeGreaterThanOrEqual(10);        // no centro desceu ~12
+    expect(com.b).toBe(sem.b);                                // fora do vale não mexe
+  });
+});

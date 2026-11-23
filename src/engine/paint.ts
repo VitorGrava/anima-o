@@ -219,14 +219,19 @@ export function drawCurve(s: Surface, pts: [number, number][], r1: number, r2: n
 
 function mulberry(seed: number) { let a = seed | 0; return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
-export interface TerrainSpec { x: number; w: number; topo: number; amp: number; rugosidade: number; seed: number; ate: number; color: number }
+export interface TerrainSpec { x: number; w: number; topo: number; amp: number; rugosidade: number; seed: number; ate: number; color: number; vale?: { x: number; largura: number; profundidade: number } }
 
 /** Crista de terreno fractal (deslocamento do ponto médio) preenchida até a linha `ate`: montanhas, colinas, dunas. */
 export function drawTerrain(s: Surface, t: TerrainSpec): void {
   const N = 64, off = new Array(N + 1).fill(0), rnd = mulberry(t.seed);
   const mid = (a: number, b: number, d: number) => { if (b - a < 2) return; const m = (a + b) >> 1; off[m] = (off[a] + off[b]) / 2 + (rnd() - 0.5) * d; mid(a, m, d * t.rugosidade); mid(m, b, d * t.rugosidade); };
   mid(0, N, t.amp);
-  const pts: [number, number][] = off.map((o: number, i: number) => [Math.round(t.x + (i * t.w) / N), Math.round(t.topo + o)]);
+  const pts: [number, number][] = off.map((o: number, i: number) => {
+    const px = t.x + (i * t.w) / N;
+    let dip = 0;
+    if (t.vale) { const d = Math.abs(px - t.vale.x) / Math.max(1, t.vale.largura / 2); if (d < 1) dip = t.vale.profundidade * (0.5 + 0.5 * Math.cos(Math.PI * d)); }   // sino suave: abre um vale (sol entre montanhas)
+    return [Math.round(px), Math.round(t.topo + o + dip)];
+  });
   fillPolygon(s, [...pts, [t.x + t.w, t.ate], [t.x, t.ate]], t.color);
 }
 

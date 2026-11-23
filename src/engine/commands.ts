@@ -1398,6 +1398,7 @@ const shape = z.discriminatedUnion("type", [
     rugosidade: z.number().min(0.2).max(0.9).default(0.55).describe("0.4 = suave, 0.7 = áspero"),
     seed: z.number().int().default(1),
     ate: z.number().int().describe("preenche da crista até esta linha y (o chão do plano)"),
+    vale: z.object({ x: z.number().int().describe("centro do vale (x)"), largura: z.number().int().min(4), profundidade: z.number().int().min(1).max(120) }).optional().describe("abre um VALE na crista (a crista desce `profundidade` px em forma de sino): o sol entre duas montanhas, uma passagem"),
     color: colorRef,
   }).describe("CRISTA DE TERRENO fractal (montanhas, colinas, dunas) já preenchida. Um por plano, com seeds e cores diferentes; depois use transform haze por plano."),
   z.object({
@@ -1522,7 +1523,7 @@ const drawShapes = def({
             break;
           }
           case "terrain":
-            drawTerrain(s, { x: sh.x, w: sh.w ?? p.width - sh.x, topo: sh.topo, amp: sh.amp, rugosidade: sh.rugosidade, seed: sh.seed, ate: sh.ate, color: colorIndex(p, sh.color) });
+            drawTerrain(s, { x: sh.x, w: sh.w ?? p.width - sh.x, topo: sh.topo, amp: sh.amp, rugosidade: sh.rugosidade, seed: sh.seed, ate: sh.ate, color: colorIndex(p, sh.color), vale: sh.vale });
             break;
           case "forest":
             if (!drawForest(s, { x: sh.x, w: sh.w ?? p.width - sh.x, base: sh.base, alturaMin: sh.altura_min, alturaMax: Math.max(sh.altura_min, sh.altura_max), larguraMin: sh.largura_min, larguraMax: Math.max(sh.largura_min, sh.largura_max), folga: sh.folga, seed: sh.seed, colors: sh.cores.map((k) => colorIndex(p, k)), tipo: sh.tipo })) avisos.push("forest não desenhou nenhuma árvore (largura 0?)");
