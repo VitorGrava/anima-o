@@ -265,3 +265,65 @@ describe("reference: anatomia e pixel art", () => {
     expect(r.text).toMatch(/sprite de 48 px/);
   });
 });
+
+describe("check: movimento, tempos e efeitos", () => {
+  const ball = (ys: number[], durations?: number[]) => {
+    const p = setup(16, 20);
+    runCommand(p, "add_frames", { count: ys.length - 1 });
+    ys.forEach((y, f) => {
+      runCommand(p, "draw_shapes", { frames: f, shapes: [{ type: "ellipse", x: 6, y, w: 4, h: 4, color: "r" }], preview: false });
+      if (durations) runCommand(p, "set_frame_timing", { frames: f, duration_ms: durations[f] });
+    });
+    return p;
+  };
+
+  it("emenda do loop que salta é apontada; loop suave não", () => {
+    const jump = ball([2, 4, 6, 8, 10, 12]);        // sobe de 2 a 12 e volta de repente para 2
+    expect(analyze(jump, [0, 1, 2, 3, 4, 5]).issues.some((i) => i.code === "emenda_salta")).toBe(true);
+    const smooth = ball([2, 6, 10, 12, 10, 6]);
+    expect(analyze(smooth, [0, 1, 2, 3, 4, 5]).issues.some((i) => i.code === "emenda_salta")).toBe(false);
+  });
+
+  it("tempos todos iguais viram sugestão; tempos variados não", () => {
+    const same = ball([2, 6, 10, 12, 10, 6]);
+    expect(analyze(same, [0, 1, 2, 3, 4, 5]).issues.some((i) => i.code === "tempo_uniforme")).toBe(true);
+    const varied = ball([2, 6, 10, 12, 10, 6], [80, 70, 70, 160, 70, 70]);
+    expect(analyze(varied, [0, 1, 2, 3, 4, 5]).issues.some((i) => i.code === "tempo_uniforme")).toBe(false);
+  });
+
+  it("passos constantes sugerem ease; frames repetidos sugerem segurar a duração", () => {
+    const linear = ball([2, 4, 6, 8, 10, 12]);
+    expect(analyze(linear, [0, 1, 2, 3, 4, 5], { loop: false }).issues.some((i) => i.code === "sem_ease")).toBe(true);
+    const dup = ball([2, 6, 6, 10]);
+    expect(analyze(dup, [0, 1, 2, 3]).issues.some((i) => i.code === "frame_repetido")).toBe(true);
+  });
+
+  it("tipo efeito não cobra volume nem base; personagem cobra", () => {
+    const p = setup(20, 20);
+    runCommand(p, "draw_rows", { x: 8, y: 8, rows: ["rr", "rr"], preview: false });
+    runCommand(p, "add_frames", { count: 1, copy_from: 0 });
+    runCommand(p, "draw_shapes", { frames: 1, shapes: [{ type: "rect", x: 4, y: 4, w: 12, h: 12, color: "r" }], preview: false });
+    expect(analyze(p, [0, 1]).issues.some((i) => i.code === "volume_pulou")).toBe(true);
+    const fx = analyze(p, [0, 1], { tipo: "efeito" }).issues.map((i) => i.code);
+    expect(fx).not.toContain("volume_pulou");
+    expect(fx).not.toContain("base_mudou");
+    expect(runCommand(p, "check", { tipo: "efeito" }).ok).toBe(true);
+  });
+
+  it("cores padrão do `new` sem uso não geram ruído", () => {
+    const p = setup(8, 8);
+    runCommand(p, "draw_rows", { rows: ["rr"], preview: false });
+    const msg = analyze(p, [0]).issues.find((i) => i.code === "cor_sem_uso")?.message ?? "";
+    expect(msg).not.toMatch(/\b0=|\b1=/);     // q e b (do setup) são avisadas; 0 e 1 (padrão do new) não
+    expect(msg).toMatch(/q=/);
+  });
+
+  it("view com vários frames mostra lado a lado numa só grade", () => {
+    const p = setup(6, 4);
+    runCommand(p, "add_frames", { count: 2 });
+    runCommand(p, "draw_rows", { frames: 1, rows: ["r"], preview: false });
+    const r = runCommand(p, "view", { frames: "all", as_image: false });
+    expect(r.text).toMatch(/lado a lado/);
+    expect(r.text.split("\n").find((l) => l.includes("Frame 0") && l.includes("Frame 1") && l.includes("Frame 2"))).toBeTruthy();
+  });
+});

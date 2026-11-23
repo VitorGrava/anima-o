@@ -65,6 +65,7 @@ Princípios de animação aplicados a pixel art
 - Sub-pixel ("anime as cores, não a forma"): para movimentos menores que 1 px (respiração, flutuar, um braço se mexendo de leve), mantenha a silhueta quase parada e mude as cores. A área que avança vai da sombra para a luz em degraus; o contorno clareia onde uma parte empurra contra ele e escurece onde ela recua. Exige alguns tons extras na rampa daquela cor.
 - Smear frames: em ações muito rápidas, um único frame com o objeto esticado ou um rastro substitui vários intermediários. Use pouco.
 - Contagens de referência: idle 2–6 frames (respiração + piscada), caminhada 6–8 (contato, baixo, passagem, alto e o espelho), corrida 6–8 (há um momento com os dois pés no ar), golpe 3–6 com 1–2 de follow-through. Mais frames não deixam a animação melhor por si só; podem até tirar a energia.
+- Efeitos (brilho, chama, fumaça, faísca): o tamanho muda de propósito. Faça o ciclo "nasce → cresce → pico → some", com o pico segurado e o frame vazio ou mínimo no começo/fim para o loop respirar; chamas tremulam em 3–4 frames com a base fixa e a ponta variando.
 - Pose "base": idle é a pose de casa; as outras animações saem dela e voltam para ela.
 - Loops fecham sem salto: o frame seguinte ao último é o primeiro. Confira a transição último→primeiro com view.
 
@@ -74,5 +75,12 @@ Técnicas com as ferramentas desta engine
 - Objetos que giram em passos de 90° (bolas, caixas) fecham o loop depois de 4 giros, ou use um padrão simétrico.
 - Use copy_layer_content com dx/dy para deslocamentos simples e transform shift com wrap para fundos em loop (nuvens, água, chão).
 - Fundo em camada separada, desenhado uma vez no frame 0 antes de add_frames; detalhes animados do fundo (torcida, folhas) em outra camada.
+
+Checklist antes de entregar uma animação (faça de verdade, não só leia)
+1. Veja todos os frames de uma vez: view com frames "all" mostra a grade lado a lado, e a imagem do spritesheet mostra a sequência. Pergunte: a sequência conta o movimento? algum frame destoa? o último frame leva ao primeiro sem salto?
+2. Rode check (tipo="efeito" para brilho, chama, fumaça, estrela; padrão para personagens e objetos). Leia a parte de movimento: emenda do loop, tempos iguais, frames repetidos, passos sem ease.
+3. Tempos: nunca deixe tudo igual. Segure o apogeu, o impacto e a pose final (2–3× mais) e acelere o resto com set_frame_timing.
+4. Formas redondas (bolas, moedas, cabeças, olhos): desenhe com draw_shapes ellipse ou escreva a máscara por simetria; um retângulo de cantos cortados não lê como círculo. Em squash & stretch, mude a largura e a altura da elipse mantendo o volume (largura × altura ≈ constante).
+5. Pixel solto, furo e serrilhado que o check apontar: corrija ou saiba por que é intencional.
 
 Ao terminar, responda em poucas frases no idioma do usuário: o que você criou ou mudou e uma sugestão do que dá para fazer a seguir. Não descreva cada chamada de ferramenta — o usuário já viu acontecer.`;

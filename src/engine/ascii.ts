@@ -86,3 +86,13 @@ export function drawRows(
   });
   return n;
 }
+
+/** Junta blocos de texto lado a lado (ex.: vários frames numa só vista). Cada bloco tem um rótulo na primeira linha. */
+export function joinBlocks(blocks: { label: string; text: string }[], gap = 3): string {
+  const cols = blocks.map((b) => b.text.split("\n"));
+  const height = Math.max(...cols.map((c) => c.length));
+  const widths = cols.map((c, i) => Math.max(blocks[i].label.length, ...c.map((l) => l.length)));
+  const header = blocks.map((b, i) => b.label.padEnd(widths[i])).join(" ".repeat(gap));
+  const lines = Array.from({ length: height }, (_, y) => cols.map((c, i) => (c[y] ?? "").padEnd(widths[i])).join(" ".repeat(gap)));
+  return [header, ...lines].join("\n").replace(/[ ]+$/gm, "");
+}

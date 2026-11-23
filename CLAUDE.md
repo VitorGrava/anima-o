@@ -8,13 +8,17 @@ Use o servidor MCP `anima` (ferramentas `open_project`, `draw_rows`, `draw_shape
 `transform`, `add_frames`, `view`, `export_file`, ...). As instruções do servidor trazem
 os princípios de pixel art e de animação: siga-os.
 
-Sem MCP, use a CLI pelo terminal:
+Sem MCP, **comece lendo o guia do animador** (`node bin/anima.mjs guide`: fluxo, anatomia, princípios de pixel art e de
+animação, checklist de entrega) e use a CLI pelo terminal:
 
 ```bash
-node bin/anima.mjs new projeto.anima.json 32x32 12
+node bin/anima.mjs new projeto.anima.json 32x32 12       # já define tamanho e fps (sobrescreve se existir)
 node bin/anima.mjs run projeto.anima.json comandos.json   # [{"name": "...", "input": {...}}]
 node bin/anima.mjs show projeto.anima.json 0 --png frame0.png --check silhueta
 node bin/anima.mjs export projeto.anima.json saida.gif --scale 6
+node bin/anima.mjs export projeto.anima.json sheet.png --scale 6 --columns 8   # spritesheet; com --frame N, só um frame
+node bin/anima.mjs show projeto.anima.json all            # todos os frames lado a lado, em texto
+node bin/anima.mjs check projeto.anima.json [--efeito]    # defeitos, movimento e tempos (--efeito: brilho, chama, fumaça)
 node bin/anima.mjs tools                                  # comandos e parâmetros
 ```
 

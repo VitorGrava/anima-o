@@ -38,6 +38,8 @@ export interface FrameMetrics {
 export interface AnalysisResult {
   issues: Issue[];
   metrics: FrameMetrics[];
+  /** Camadas estáticas (chão, fundo) deixadas de fora das medidas de movimento. */
+  ignoredLayers?: string[];
 }
 
 export interface AnalyzeOptions {
@@ -45,6 +47,8 @@ export interface AnalyzeOptions {
   symmetric?: boolean;
   /** Inclui a transição último → primeiro frame. */
   loop?: boolean;
+  /** "efeito" (brilho, chama, fumaça...) muda de tamanho de propósito: não cobra volume, base nem largura. */
+  tipo?: "personagem" | "efeito";
 }
 
 const MAX_POINTS = 12;
@@ -287,7 +291,9 @@ function checkPalette(p: Project, frames: number[], issues: Issue[]) {
     }
   }
   if (invalid) issues.push({ severity: "erro", code: "indice_invalido", message: `${invalid} pixel(s) com índice de cor que não existe na paleta.` });
-  const unused = p.palette.filter((_, i) => !used[i + 1]);
+  // as cores padrão de `new` (0 = contorno, 1 = branco) não contam como "esquecidas"
+  const isDefault = (c: { key: string; hex: string }) => (c.key === "0" && c.hex === "#1a1c2c") || (c.key === "1" && c.hex === "#f4f4f4");
+  const unused = p.palette.filter((c, i) => !used[i + 1] && !isDefault(c));
   if (unused.length && frames.length === p.frames.length) {
     issues.push({ severity: "info", code: "cor_sem_uso", message: `Cores da paleta sem uso: ${unused.map((c) => `${c.key}=${c.name}`).join(", ")}.` });
   }
@@ -313,8 +319,37 @@ function checkPalette(p: Project, frames: number[], issues: Issue[]) {
 
 // ---------- métricas e consistência entre frames ----------
 
-export function frameMetrics(p: Project, frame: number): FrameMetrics {
-  const flat = flattenFrame(p, frame);
+/** Camadas visíveis cujo conteúdo muda entre frames. Chão e fundo estáticos ficam de fora das medidas de movimento. */
+export function movingLayerIds(p: Project): Set<string> {
+  const ids = new Set<string>();
+  for (const l of p.layers) {
+    if (!l.visible) continue;
+    const first = p.frames[0].cels[l.id];
+    const changes = p.frames.some((f) => {
+      const c = f.cels[l.id];
+      if (!c || !first) return c !== first;
+      for (let i = 0; i < c.length; i++) if (c[i] !== first[i]) return true;
+      return false;
+    });
+    if (changes) ids.add(l.id);
+  }
+  // animação toda estática: mede tudo
+  return ids.size ? ids : new Set(p.layers.filter((l) => l.visible).map((l) => l.id));
+}
+
+function flattenLayers(p: Project, frame: number, ids: Set<string>): Uint8Array {
+  const out = new Uint8Array(p.width * p.height);
+  for (const l of p.layers) {
+    if (!ids.has(l.id)) continue;
+    const cel = p.frames[frame]?.cels[l.id];
+    if (!cel) continue;
+    for (let i = 0; i < out.length; i++) if (cel[i]) out[i] = cel[i];
+  }
+  return out;
+}
+
+export function frameMetrics(p: Project, frame: number, only?: Set<string>): FrameMetrics {
+  const flat = only ? flattenLayers(p, frame, only) : flattenFrame(p, frame);
   const mask = opaqueMask(flat);
   let area = 0;
   let sx = 0;
@@ -335,7 +370,7 @@ export function frameMetrics(p: Project, frame: number): FrameMetrics {
   return { frame, bbox: bboxOf(mask, p.width, p.height), area, cx: area ? sx / area : 0, cy: area ? sy / area : 0, layers };
 }
 
-function checkSequence(p: Project, metrics: FrameMetrics[], loop: boolean, issues: Issue[]) {
+function checkSequence(p: Project, metrics: FrameMetrics[], loop: boolean, issues: Issue[], tipo: "personagem" | "efeito" = "personagem") {
   const pairs: [number, number][] = [];
   for (let k = 0; k + 1 < metrics.length; k++) pairs.push([k, k + 1]);
   if (loop && metrics.length > 1 && metrics[0].frame === 0 && metrics[metrics.length - 1].frame === p.frames.length - 1) {
@@ -348,7 +383,7 @@ function checkSequence(p: Project, metrics: FrameMetrics[], loop: boolean, issue
     const tag = seam ? `último→primeiro (frames ${a.frame}→${b.frame})` : `frames ${a.frame}→${b.frame}`;
     if (!a.area || !b.area) continue;
     const change = (b.area - a.area) / a.area;
-    if (Math.abs(change) > 0.2) {
+    if (tipo === "personagem" && Math.abs(change) > 0.2) {
       issues.push({
         severity: "aviso",
         code: "volume_pulou",
@@ -356,7 +391,7 @@ function checkSequence(p: Project, metrics: FrameMetrics[], loop: boolean, issue
         message: `${tag}: a área da silhueta mudou ${Math.round(change * 100)}% (${a.area}→${b.area} px). Em squash & stretch o volume deve se manter; confira se não é erro de desenho.`,
       });
     }
-    if (a.bbox && b.bbox) {
+    if (tipo === "personagem" && a.bbox && b.bbox) {
       const baseJump = b.bbox.y + b.bbox.h - (a.bbox.y + a.bbox.h);
       if (Math.abs(baseJump) >= 3) {
         issues.push({
@@ -393,6 +428,81 @@ function checkSequence(p: Project, metrics: FrameMetrics[], loop: boolean, issue
   }
 }
 
+// ---------- movimento e tempo ----------
+
+/**
+ * Trajetória do centro de massa e tempos: aponta o que faz uma animação parecer "dura":
+ * emenda do loop com salto, durações todas iguais, frames repetidos sem segurar a pose,
+ * movimento quase nulo e passos de tamanho constante (sem ease).
+ */
+function checkMotion(p: Project, metrics: FrameMetrics[], loop: boolean, issues: Issue[], tipo: "personagem" | "efeito" = "personagem") {
+  const ms = metrics.filter((m) => m.area > 0);
+  if (ms.length < 3) return;
+  const dur = (m: FrameMetrics) => p.frames[m.frame].duration ?? Math.round(1000 / p.fps);
+  const step = (a: FrameMetrics, b: FrameMetrics) => Math.hypot(b.cx - a.cx, b.cy - a.cy);
+  const steps = ms.slice(1).map((m, i) => step(ms[i], m));
+  const sorted = [...steps].sort((x, y) => x - y);
+  const median = sorted[Math.floor(sorted.length / 2)];
+
+  // emenda do loop: o salto último → primeiro deve ser parecido com um passo normal
+  if (loop && ms.length > 2) {
+    const seam = step(ms[ms.length - 1], ms[0]);
+    const ref = Math.max(median, 0.5);
+    if (seam > ref * 2.5 && seam > 1.5) {
+      issues.push({
+        severity: "aviso",
+        code: "emenda_salta",
+        frame: ms[0].frame,
+        message: `Emenda do loop: o centro da arte salta ${seam.toFixed(1)} px do último para o primeiro frame, mas um passo normal é ~${ref.toFixed(1)} px. O loop vai "engasgar": faça o último frame chegar perto do primeiro.`,
+      });
+    }
+  }
+  // tempos: tudo igual deixa o movimento mecânico
+  const durs = ms.map(dur);
+  if (ms.length >= 4 && new Set(durs).size === 1) {
+    issues.push({
+      severity: "info",
+      code: "tempo_uniforme",
+      message: `Todos os ${ms.length} frames duram ${durs[0]} ms. Segure as poses importantes (apogeu, impacto, pose final: 2–3× mais) e acelere o resto com set_frame_timing.`,
+    });
+  }
+  // frames repetidos em sequência: some a diferença sem ganhar tempo
+  const repeats: number[] = [];
+  for (let k = 1; k < ms.length; k++) {
+    const fa = flattenFrame(p, ms[k - 1].frame);
+    const fb = flattenFrame(p, ms[k].frame);
+    let same = true;
+    for (let i = 0; i < fa.length; i++) if (fa[i] !== fb[i]) { same = false; break; }
+    if (same) repeats.push(ms[k].frame);
+  }
+  if (repeats.length) {
+    issues.push({
+      severity: "info",
+      code: "frame_repetido",
+      message: `Frame(s) ${repeats.join(", ")} idêntico(s) ao anterior. Para segurar uma pose, aumente a duração do frame em vez de duplicá-lo.`,
+    });
+  }
+  // quase parado
+  if (tipo === "personagem" && Math.max(...steps) < 0.35) {
+    issues.push({
+      severity: "aviso",
+      code: "quase_estatica",
+      message: "O centro da arte quase não se move entre os frames. Se a animação deveria ter movimento visível, exagere mais as poses (ou anime as cores, se for um movimento de sub-pixel).",
+    });
+  }
+  // passos constantes: sem aceleração/desaceleração (ease)
+  if (tipo === "personagem" && steps.length >= 4 && median >= 1) {
+    const spread = (sorted[sorted.length - 1] - sorted[0]) / median;
+    if (spread < 0.2) {
+      issues.push({
+        severity: "info",
+        code: "sem_ease",
+        message: `Os passos do movimento têm tamanho quase igual (~${median.toFixed(1)} px). Movimentos naturais aceleram e desaceleram: aproxime os frames perto das poses-chave e espace mais no meio.`,
+      });
+    }
+  }
+}
+
 // ---------- API ----------
 
 /** Checagens de um único frame (rápidas: usadas no preview automático dos comandos de desenho). */
@@ -413,11 +523,16 @@ export function analyzeFrame(p: Project, frame: number, opts: AnalyzeOptions = {
 
 export function analyze(p: Project, frames: number[], opts: AnalyzeOptions = {}): AnalysisResult {
   const issues: Issue[] = [];
-  const metrics = frames.map((f) => frameMetrics(p, f));
+  const moving = movingLayerIds(p);
+  const ignored = p.layers.filter((l) => l.visible && !moving.has(l.id)).map((l) => l.name);
+  const metrics = frames.map((f) => frameMetrics(p, f, frames.length > 1 ? moving : undefined));
   for (const f of frames) issues.push(...analyzeFrame(p, f, opts));
   checkPalette(p, frames, issues);
-  if (frames.length > 1) checkSequence(p, metrics, opts.loop ?? true, issues);
-  return { issues, metrics };
+  if (frames.length > 1) {
+    checkSequence(p, metrics, opts.loop ?? true, issues, opts.tipo ?? "personagem");
+    if (frames.length === p.frames.length || frames.length > 2) checkMotion(p, metrics, opts.loop ?? true, issues, opts.tipo ?? "personagem");
+  }
+  return { issues, metrics, ignoredLayers: frames.length > 1 ? ignored : [] };
 }
 
 const ICON: Record<Severity, string> = { erro: "ERRO", aviso: "AVISO", info: "info" };
@@ -438,6 +553,7 @@ const bb = (b: BBox | null) => (b ? `x${b.x}..${b.x + b.w - 1} y${b.y}..${b.y + 
 export function formatAnalysis(p: Project, r: AnalysisResult): string {
   const lines: string[] = [];
   const first = r.metrics[0];
+  if (r.ignoredLayers?.length) lines.push(`Medidas de movimento só das camadas que mudam; ignoradas (estáticas): ${r.ignoredLayers.join(", ")}.`);
   if (first) {
     lines.push(`Medidas do frame ${first.frame}: silhueta ${bb(first.bbox)}, ${first.area} px.`);
     for (const l of first.layers) lines.push(`  camada "${l.name}": ${bb(l.bbox)}, ${l.area} px`);

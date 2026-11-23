@@ -7,7 +7,7 @@
  */
 import { z } from "zod";
 import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.ts";
-import { celToRows, cropRows, drawRows, frameToRows, withRuler } from "./ascii.ts";
+import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
 import { REFERENCE_TOPICS, reference } from "./reference.ts";
 import type { CheckMode } from "./render.ts";
@@ -601,13 +601,20 @@ const view = def({
       };
     }
 
-    const list = resolveFrames(p, i.frames).slice(0, 8);
+    const list = resolveFrames(p, i.frames).slice(0, 12);
     if (i.as_text) {
       const r = region ?? clampRegion(p);
-      for (const f of list) {
+      const where = region ? ` (região x${r.x}..${r.x + r.w - 1}, y${r.y}..${r.y + r.h - 1})` : "";
+      const blocks = list.map((f) => {
         const rows = i.layer ? celToRows(p, getCel(p, f, findLayer(p, i.layer).id)) : frameToRows(p, f);
-        const where = region ? ` (região x${r.x}..${r.x + r.w - 1}, y${r.y}..${r.y + r.h - 1})` : "";
-        parts.push(`Frame ${f}${i.layer ? ` (camada ${i.layer})` : ""}${where}:\n${withRuler(cropRows(rows, r), r.x, r.y)}`);
+        return { label: `Frame ${f}`, text: withRuler(cropRows(rows, r), r.x, r.y) };
+      });
+      // vários frames: lado a lado quando cabem (dá para ver o movimento de uma vez); senão, um embaixo do outro
+      const sideWidth = blocks.reduce((n, b) => n + Math.max(...b.text.split("\n").map((l) => l.length)) + 3, 0);
+      if (blocks.length > 1 && sideWidth <= 170) {
+        parts.push(`Frames ${list.join(", ")}${i.layer ? ` (camada ${i.layer})` : ""}${where}, lado a lado:\n${joinBlocks(blocks)}`);
+      } else {
+        for (const b of blocks) parts.push(`${b.label}${i.layer ? ` (camada ${i.layer})` : ""}${where}:\n${b.text}`);
       }
     }
     parts.push(legend);
@@ -624,7 +631,7 @@ const check = def({
   description: [
     "Checagem automática da arte: aponta defeitos com coordenadas em vez de você ter que achá-los no olho. Rode ao terminar uma etapa, e sempre antes de exportar.",
     "Arte: pixels soltos, furos na silhueta, serrilhado irregular, assimetria (com symmetric), cores quase iguais, cores sem uso.",
-    "Animação: volume que pula entre frames (anatomia 'pulando'), base/pés que mudam, largura, e a emenda do último para o primeiro frame.",
+    "Animação: volume que pula entre frames (anatomia 'pulando'), base/pés que mudam, largura; movimento: emenda do loop que salta, tempos todos iguais, frames repetidos, movimento quase nulo e passos sem ease. Use tipo=\"efeito\" em brilhos, chamas e fumaça.",
     "Também devolve as medidas da silhueta e de cada camada (altura da cabeça, do tronco...) para comparar com as proporções do comando reference.",
     "É heurístico: corrija o que for defeito e ignore o que for intencional (faíscas, squash & stretch).",
   ].join("\n"),
@@ -632,11 +639,15 @@ const check = def({
     frames: framesSel.optional().describe('Padrão: "all"'),
     symmetric: z.boolean().default(false).describe("true: o sprite deveria ser simétrico (de frente/costas); aponta pixels sem par no lado oposto."),
     loop: z.boolean().default(true).describe("Confere também a transição do último para o primeiro frame."),
+    tipo: z
+      .enum(["personagem", "efeito"])
+      .default("personagem")
+      .describe('"efeito" (brilho, chama, fumaça, estrela...) muda de tamanho de propósito: não cobra volume, base nem largura. "personagem": cobra.'),
     as_image: z.boolean().default(true).describe("Devolve a imagem com os pixels problemáticos marcados em magenta."),
   }),
   run(p, i) {
     const list = resolveFrames(p, i.frames ?? "all");
-    const r = analyze(p, list, { symmetric: i.symmetric, loop: i.loop });
+    const r = analyze(p, list, { symmetric: i.symmetric, loop: i.loop, tipo: i.tipo });
     const marked = r.issues.find((x) => x.points?.length && x.frame !== undefined);
     const f = marked?.frame ?? list[0];
     const highlight = r.issues.filter((x) => x.frame === f).flatMap((x) => x.points ?? []);

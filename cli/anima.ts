@@ -5,14 +5,15 @@
  *   anima view [projeto.anima.json]        abre o app no navegador acompanhando o arquivo ao vivo
  *   anima new <projeto> [LxA] [fps]        cria um projeto vazio
  *   anima run <projeto> <comandos.json|->  aplica uma lista de comandos [{ "name", "input" }]
- *   anima show <projeto> [frame] [--png saida.png] [--check cinza|luz_sombra|silhueta]
+ *   anima show <projeto> [frame|all] [--png saida.png] [--check cinza|luz_sombra|silhueta]
              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--scale N]
-  anima check <projeto> [--symmetric] [--png saida.png]   aponta defeitos da arte e da animação
+  anima check <projeto> [--symmetric] [--efeito] [--png saida.png]   aponta defeitos da arte e da animação (--efeito: brilhos, chamas, fumaça)
   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
  *              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--scale N]
- *   anima check <projeto> [--symmetric] [--png saida.png]   aponta defeitos da arte e da animação
+ *   anima check <projeto> [--symmetric] [--efeito] [--png saida.png]   aponta defeitos da arte e da animação
  *   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
  *   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N]
+ *   anima guide                            imprime o guia do animador (fluxo e princípios): leia antes de começar
  *   anima tools                            lista os comandos com seus parâmetros (JSON Schema)
  */
 import { readFile } from "node:fs/promises";
@@ -29,6 +30,7 @@ import {
 } from "../src/engine/index.ts";
 import { encodePNG } from "../server/png.ts";
 import { ProjectStore, exportToFile } from "../mcp/store.ts";
+import { SYSTEM_PROMPT } from "../server/prompt.ts";
 import { writeFile } from "node:fs/promises";
 
 function flag(args: string[], name: string): string | undefined {
@@ -74,6 +76,7 @@ const USAGE = `anima — engine de animação pixel art
   anima check <projeto> [--symmetric] [--png saida.png]   aponta defeitos da arte e da animação
   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N]
+  anima guide                            guia do animador: fluxo de trabalho e princípios de pixel art e animação
   anima tools                            lista os comandos e parâmetros (JSON Schema)`;
 
 export async function main(argv: string[]): Promise<number> {
@@ -122,6 +125,8 @@ export async function main(argv: string[]): Promise<number> {
       }
       await store.save();
       console.log(`\n${describeProject(store.project)}`);
+      const sheet = runCommand(store.project, "view", { frames: "all", as_image: false });
+      if (sheet.ok && store.project.frames.length > 1) console.log(`\n${sheet.text}`);
       return fails ? 1 : 0;
     }
     case "show": {
@@ -136,7 +141,7 @@ export async function main(argv: string[]): Promise<number> {
       if (!file) break;
       await store.open(file);
       const p = store.project;
-      const input: Record<string, unknown> = { frames: Number(frame), check, grid, onion };
+      const input: Record<string, unknown> = { frames: frame === "all" ? "all" : Number(frame), check, grid, onion };
       if (region) {
         const [x, y, w, h] = region.split(",").map(Number);
         input.region = { x, y, w, h };
@@ -155,10 +160,11 @@ export async function main(argv: string[]): Promise<number> {
     case "check": {
       const png = flag(args, "png");
       const symmetric = boolFlag(args, "symmetric");
+      const efeito = boolFlag(args, "efeito");
       const [file] = args;
       if (!file) break;
       await store.open(file);
-      const r = runCommand(store.project, "check", { symmetric });
+      const r = runCommand(store.project, "check", { symmetric, tipo: efeito ? "efeito" : "personagem" });
       console.log(r.text);
       if (png) await saveImages(store.project, r, png);
       return r.ok ? 0 : 1;
@@ -195,8 +201,17 @@ export async function main(argv: string[]): Promise<number> {
       console.log(`Exportado: ${done}`);
       return 0;
     }
+    case "guide": {
+      console.log(SYSTEM_PROMPT);
+      return 0;
+    }
     case "tools": {
-      console.log(JSON.stringify(commandTools(["export"]), null, 1));
+      const tools = [...commandTools(["export"]), {
+        name: "export (CLI: anima export <projeto> <saida>)",
+        description: "Exporta: .gif (animação), .png (spritesheet com todos os frames; use --columns N para o layout; com --frame N exporta só um frame), .json. --scale N amplia os pixels (padrão 4).",
+        inputSchema: { type: "object", properties: { scale: { type: "integer" }, columns: { type: "integer" }, frame: { type: "integer" } } },
+      }];
+      console.log(JSON.stringify(tools, null, 1));
       return 0;
     }
   }
