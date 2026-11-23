@@ -95,3 +95,15 @@ describe("polish", () => {
     expect((Math.min(...xs) + Math.max(...xs) + 1) / 2).toBeCloseTo(16, 0);
   });
 });
+
+describe("avaliar tipo cena", () => {
+  it("acusa céu em faixas duras e áreas chapadas enormes", () => {
+    const p = createProject({ width: 160, height: 90 });
+    ok(p, "set_palette", { colors: ["#2b1b4a", "#4a2a6a", "#7a3a82", "#b04a86", "#e0627a"].map((hex, i) => ({ key: "abcde"[i], hex, name: `c${i}` })) });
+    ok(p, "draw_shapes", { shapes: "abcde".split("").map((k, i) => ({ type: "rect", x: 0, y: i * 18, w: 160, h: 18, color: k, filled: true })) });
+    const codes = evaluateBeauty(p, [0], "cena").findings.map((f) => f.code);
+    expect(codes).toContain("degrade_em_faixas");
+    expect(codes).toContain("areas_chapadas");
+    expect(evaluateBeauty(p, [0], "cena").score).toBeLessThan(90);
+  });
+});

@@ -1467,10 +1467,13 @@ const avaliar = def({
     "- Composição: figura cortada nas bordas, fora do centro, pequena demais no quadro.",
     "Use depois de desenhar e antes de entregar; `polish` corrige sozinho o que é mecânico. É heurístico: ignore o que for intencional.",
   ].join("\n"),
-  schema: z.object({ frames: framesSel.optional().describe('Padrão: "all"') }),
+  schema: z.object({
+    frames: framesSel.optional().describe('Padrão: "all"'),
+    tipo: z.enum(["auto", "personagem", "cena"]).default("auto").describe('"cena" (fundo completo, paisagem, tela cheia): avalia faixas duras no degradê, áreas chapadas enormes, formas repetidas, regiões vazias e profundidade em vez de enquadramento de figura. "auto" escolhe cena em canvas grande (≥ 24000 px).'),
+  }),
   run(p, i) {
     const list = resolveFrames(p, i.frames ?? "all");
-    return { changed: false, text: formatCritique(evaluateBeauty(p, list)) };
+    return { changed: false, text: formatCritique(evaluateBeauty(p, list, i.tipo)) };
   },
 });
 

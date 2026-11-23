@@ -37,18 +37,62 @@ const FROM_CHECK: Record<string, { category: Category; fix: string }> = {
 
 const lumOf = (hex: string) => { const [r, g, b] = hexToRgb(hex); return 0.3 * r + 0.59 * g + 0.11 * b; };
 
-function frameFindings(p: Project, f: number): Omit<Finding, "frames">[] {
+
+/** Achados de CENA (fundo completo): degradê em faixas duras, áreas chapadas enormes, formas repetidas, vazio, falta de profundidade. */
+function sceneFindings(p: Project, f: number, flat: Uint8Array): Omit<Finding, "frames">[] {
   const out: Omit<Finding, "frames">[] = [];
   const add = (category: Category, severity: Finding["severity"], code: string, message: string, fix: string) => out.push({ category, severity, code, message, fix });
   const W = p.width, H = p.height;
-  // figura = camadas que não são fundo/chão
+  void f;
+  // 1) faixas duras: linhas inteiras de uma cor só, em sequência, com a troca de cor retilínea
+  const rowColor = (y: number) => { const c = new Map<number, number>(); for (let x = 0; x < W; x++) c.set(flat[y * W + x], (c.get(flat[y * W + x]) ?? 0) + 1); const [k, n] = [...c].sort((a, b) => b[1] - a[1])[0]; return n >= 0.92 * W ? k : -1; };
+  let bands = 0, last = -2;
+  for (let y = 0; y < H; y++) { const c = rowColor(y); if (c !== -1 && c !== last) { if (last !== -2) bands++; last = c; } else if (c === -1) last = -2; }
+  if (bands >= 3) add("paradigmas", "aviso", "degrade_em_faixas", `${bands} faixas horizontais de cor única com troca reta (céu/água/chão "de papel"). Degradês em pixel art usam dithering (xadrez/Bayer) na transição entre os tons, e a borda de cada faixa deve ondular.`, "draw_shapes type gradient (dithering entre os tons da rampa)");
+  // 2) áreas chapadas grandes
+  const seen = new Uint8Array(W * H);
+  let flatArea = 0;
+  for (let st = 0; st < W * H; st++) {
+    if (seen[st]) continue;
+    const c = flat[st], stack = [st]; seen[st] = 1; let n = 0;
+    while (stack.length) { const k = stack.pop()!; n++; const x = k % W, y = (k - x) / W; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue; const q = yy * W + xx; if (!seen[q] && flat[q] === c) { seen[q] = 1; stack.push(q); } } }
+    if (n >= 0.02 * W * H) flatArea += n;
+  }
+  if (flatArea > 0.3 * W * H) add("paradigmas", flatArea > 0.6 * W * H ? "erro" : "aviso", "areas_chapadas", `${Math.round((flatArea / (W * H)) * 100)}% do quadro é feito de poucas áreas de cor única enormes: lê como "papel recortado". Texture (grama, pedra, nuvem, ondas) e variação de tom dentro de cada plano.`, "draw_shapes type scatter / gradient com dithering; polish");
+  // 3) formas repetidas: blocos 12x12 idênticos e não vazios
+  const B = 12, seenPatch = new Map<string, number>(); let patches = 0, dup = 0;
+  for (let by = 0; by + B <= H; by += B) for (let bx = 0; bx + B <= W; bx += B) {
+    let key = "", colors = new Set<number>();
+    for (let y = 0; y < B; y++) for (let x = 0; x < B; x++) { const v = flat[(by + y) * W + bx + x]; key += String.fromCharCode(48 + (v % 70)); colors.add(v); }
+    if (colors.size < 3) continue;
+    patches++; const n = seenPatch.get(key) ?? 0; if (n) dup++; seenPatch.set(key, n + 1);
+  }
+  if (patches >= 12 && dup / patches > 0.12) add("composicao", "aviso", "formas_repetidas", `${Math.round((dup / patches) * 100)}% dos blocos de detalhe são cópias idênticas (árvores/nuvens/grama iguais): parece carimbo. Varie tamanho, forma e tom.`, "use sementes diferentes por elemento (seed) e variação de tamanho");
+  // 4) vazio: quadrantes sem nenhum detalhe (1-2 cores)
+  let empty = 0;
+  for (let qy = 0; qy < 3; qy++) for (let qx = 0; qx < 4; qx++) { const cs = new Set<number>(); for (let y = Math.floor((qy * H) / 3); y < Math.floor(((qy + 1) * H) / 3); y++) for (let x = Math.floor((qx * W) / 4); x < Math.floor(((qx + 1) * W) / 4); x++) cs.add(flat[y * W + x]); if (cs.size <= 2) empty++; }
+  if (empty >= 3) add("composicao", "info", "regioes_vazias", `${empty} de 12 regiões do quadro têm 1–2 cores (vazias). Distribua pontos de interesse e textura; o olho precisa de onde pousar.`, "adicione elementos/texture nessas regiões");
+  // 5) profundidade: o fundo (terço de cima) deve ter menos contraste local que o primeiro plano (terço de baixo)
+  const lumOfIdx = (v: number) => (v ? lumOf(p.palette[v - 1].hex) : 0);
+  const localContrast = (y0: number, y1: number) => { let s = 0, n = 0; for (let y = y0; y < y1 - 1; y++) for (let x = 0; x < W - 1; x++) { const a = lumOfIdx(flat[y * W + x]); s += Math.abs(a - lumOfIdx(flat[y * W + x + 1])) + Math.abs(a - lumOfIdx(flat[(y + 1) * W + x])); n += 2; } return s / Math.max(1, n); };
+  const farC = localContrast(0, Math.floor(H / 3)), nearC = localContrast(Math.floor((2 * H) / 3), H);
+  if (nearC < 0.6 * farC && farC > 1.5) add("composicao", "info", "sem_profundidade", "O primeiro plano tem menos contraste/detalhe que o fundo: a cena fica achatada. Perspectiva atmosférica: o que está longe é mais claro, menos saturado e com menos contraste; o que está perto tem mais detalhe e contraste.", "mais textura e contraste no primeiro plano; fundo mais suave");
+  return out;
+}
+
+function frameFindings(p: Project, f: number, scene: boolean): Omit<Finding, "frames">[] {
+  const out: Omit<Finding, "frames">[] = [];
+  const add = (category: Category, severity: Finding["severity"], code: string, message: string, fix: string) => out.push({ category, severity, code, message, fix });
+  const W = p.width, H = p.height;
+  // figura = camadas que não são fundo/chão (em cena, tudo conta)
   const figure = new Uint8Array(W * H);
   for (const l of p.layers) {
-    if (!l.visible || BG_LAYER.test(l.name)) continue;
+    if (!l.visible || (!scene && BG_LAYER.test(l.name))) continue;
     const cel = p.frames[f].cels[l.id];
     if (cel) for (let i = 0; i < cel.length; i++) if (cel[i]) figure[i] = cel[i];
   }
   const flatAll = flattenFrame(p, f);
+  if (scene) out.push(...sceneFindings(p, f, flatAll));
   const area = figure.reduce((n, v) => n + (v ? 1 : 0), 0);
   if (!area) return out;
 
@@ -105,7 +149,7 @@ function frameFindings(p: Project, f: number): Omit<Finding, "frames">[] {
   const hueD = (a: number, b: number) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
   const lit = big.filter((c) => c.lum >= 70);
   const flat = lit.filter((c) => !info.some((o) => o !== c && o.share >= 0.006 && o.share <= 0.5 * c.share && hueD(o.h, c.h) < 18 && Math.abs(o.lum - c.lum) >= 8 && Math.abs(o.lum - c.lum) <= 45 && (adj.get(c.idx < o.idx ? `${c.idx}:${o.idx}` : `${o.idx}:${c.idx}`) ?? 0) >= 3));
-  if (area >= 150 && lit.length >= 2 && flat.length >= Math.ceil(lit.length / 2)) {
+  if (!scene && area >= 150 && lit.length >= 2 && flat.length >= Math.ceil(lit.length / 2)) {
     add("cor", "aviso", "arte_chapada", `${flat.length} de ${lit.length} região(ões) grande(s) está(ão) chapada(s): uma cor só, sem luz nem sombra, o que lê como "adesivo" e não como volume.`, "transform op shade (ou `polish`): 3 tons com mudança de matiz");
   }
 
@@ -121,6 +165,7 @@ function frameFindings(p: Project, f: number): Omit<Finding, "frames">[] {
     const inner = Math.max(0, ...[[-1, 0], [1, 0], [0, -1], [0, 1]].map(([dx, dy]) => { const o = at(x + dx, y + dy); return o ? lumOf(p.palette[o - 1].hex) : 0; }));
     if (me < 95 || (inner > 0 && me < 0.8 * inner)) dark++;
   }
+  if (scene) return out;
   if (edge >= 20 && dark / edge < 0.1) {
     add("forma", "info", "sem_contorno", "A figura não tem contorno escuro. É um estilo válido, mas em sprite pequeno o contorno separa a figura do fundo e das partes; sem ele a silhueta se perde em fundos variados.", "transform op outline mode seletivo (ou `polish`)");
   }
@@ -155,17 +200,18 @@ export function unionBox(p: Project, frames: number[]): { x0: number; y0: number
 }
 
 /** Avalia a arte em todos os frames dados; achados iguais entre frames viram um só, com a lista de frames. */
-export function evaluateBeauty(p: Project, frames: number[] = p.frames.map((_, i) => i)): Critique {
+export function evaluateBeauty(p: Project, frames: number[] = p.frames.map((_, i) => i), tipo: "auto" | "personagem" | "cena" = "auto"): Critique {
+  const scene = tipo === "cena" || (tipo === "auto" && p.width * p.height >= 24000);
   const merged = new Map<string, Finding>();
   for (const f of frames) {
-    for (const x of frameFindings(p, f)) {
+    for (const x of frameFindings(p, f, scene)) {
       const hit = merged.get(x.code);
       if (hit) hit.frames.push(f);
       else merged.set(x.code, { ...x, frames: [f] });
     }
   }
   // enquadramento do conjunto: a união das caixas de todos os frames deve estar perto do centro do quadro
-  const box = unionBox(p, frames);
+  const box = scene ? null : unionBox(p, frames);
   if (box && frames.length) {
     const dx = (box.x0 + box.x1 + 1) / 2 - p.width / 2, dy = (box.y0 + box.y1 + 1) / 2 - p.height / 2;
     if (Math.abs(dx) > 0.16 * p.width || Math.abs(dy) > 0.16 * p.height) {
