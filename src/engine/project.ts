@@ -11,11 +11,14 @@ export const TRANSPARENT_KEY = ".";
 export const MAX_SIZE = 512;
 export const MAX_COLORS = 255;
 export const MAX_FRAMES = 128;
-export const MAX_LAYERS = 16;
+export const MAX_LAYERS = 32;
 
 /** Caracteres válidos para chaves de cor (usados no desenho por texto/ASCII). */
-export const KEY_CHARS =
+export const KEY_CHARS_BASIC =
   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ#@$%&*+=-~^!?:;<>/|";
+/** chaves extras (letras acentuadas e gregas) para paletas grandes: cenas com sombreamento, névoa e reflexo passam de 80 cores */
+const KEY_CHARS_EXTRA = [...Array(0xff - 0xc0 + 1)].map((_, i) => String.fromCharCode(0xc0 + i)).filter((c) => c !== "\u00d7" && c !== "\u00f7").join("") + [...Array(0x3c9 - 0x391 + 1)].map((_, i) => String.fromCharCode(0x391 + i)).filter((c) => c !== "\u03a2" && c !== "\u03aa" && c !== "\u03ab").join("");
+export const KEY_CHARS = KEY_CHARS_BASIC + KEY_CHARS_EXTRA;
 
 export interface PaletteColor {
   /** Um caractere que representa a cor no desenho por texto. Nunca ".". */

@@ -93,3 +93,27 @@ describe("shade com cores de detalhe", () => {
     expect(d[4 * w + 4]).toBe(9);
   });
 });
+
+describe("reduce_colors", () => {
+  it("funde as cores mais parecidas e remapeia todos os pixels", () => {
+    const p = createProject({ width: 12, height: 4 });
+    ok(p, "set_palette", { colors: [
+      { key: "a", hex: "#ff0000", name: "a" }, { key: "b", hex: "#fe0505", name: "b" }, { key: "c", hex: "#0000ff", name: "c" }, { key: "d", hex: "#0505fe", name: "d" },
+    ] });
+    ok(p, "draw_shapes", { shapes: [{ type: "rect", x: 0, y: 0, w: 4, h: 4, color: "a", filled: true }, { type: "rect", x: 4, y: 0, w: 1, h: 4, color: "b", filled: true }, { type: "rect", x: 5, y: 0, w: 4, h: 4, color: "c", filled: true }, { type: "rect", x: 9, y: 0, w: 1, h: 4, color: "d", filled: true }] });
+    const r = ok(p, "reduce_colors", { cores: 2 });
+    expect(r.text).toMatch(/para 2 cores/);
+    expect(p.palette.length).toBe(2);
+    const cel = p.frames[0].cels[p.layers[0].id];
+    expect(new Set(Array.from(cel).filter((v) => v)).size).toBe(2);
+    expect(cel[4]).toBe(cel[0]);          // o vermelho quase igual virou o vermelho principal
+    expect(cel[9]).toBe(cel[5]);
+  });
+  it("não mexe nas cores protegidas", () => {
+    const p = createProject({ width: 8, height: 2 });
+    ok(p, "set_palette", { colors: [{ key: "a", hex: "#101010", name: "contorno" }, { key: "b", hex: "#141414", name: "quase" }, { key: "c", hex: "#ff8800", name: "laranja" }] });
+    ok(p, "draw_shapes", { shapes: [{ type: "rect", x: 0, y: 0, w: 3, h: 2, color: "a", filled: true }, { type: "rect", x: 3, y: 0, w: 1, h: 2, color: "b", filled: true }, { type: "rect", x: 4, y: 0, w: 4, h: 2, color: "c", filled: true }] });
+    ok(p, "reduce_colors", { cores: 2, proteger: ["a"] });
+    expect(p.palette.some((c) => c.name === "contorno")).toBe(true);
+  });
+});

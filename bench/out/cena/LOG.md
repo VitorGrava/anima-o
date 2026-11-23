@@ -9,3 +9,5 @@
 | r05a | 86 | PIOROU e foi revertido: reflexo com dithering desde o começo encheu o lago de ruído e escondeu o reflexo do pôr do sol | `reflect` v1 (descartado) |
 | r05 | 92 (régua corrigida: r03=r04=r05) / visual melhor | MELHOR visualmente: pinheiros espelhados na água, sólidos e dissolvendo só no fim, ondulação em faixas; régua `contraste` passou a usar percentis 5–95 da cena | `transform reflect` v2 |
 | r06 | 92 / visual melhor | MELHOR: 3 planos de montanha com névoa crescente (longe rosado, perto escuro), mais profundidade e harmonia com o céu | `transform haze` |
+| r07 | 92 / visual melhor | MELHOR: protagonista (abelha do projeto abelha32), pinheiro grande em 1º plano, vaga-lumes; defeitos: vaga-lumes grandes, abelha sobre a água | alfabeto de chaves de cor ampliado (80 → ~270), camadas até 32 |
+| r08 | 95 | MELHOR: abelha no campo, vaga-lumes pequenos, pinheiro com luz de borda e agulhas, vinheta em dither nos cantos, paleta enxuta | `reduce_colors` (quantização por fusão), check `paleta_duplicada` |

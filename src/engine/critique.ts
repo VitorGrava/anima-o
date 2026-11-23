@@ -112,6 +112,8 @@ function frameFindings(p: Project, f: number, scene: boolean): Omit<Finding, "fr
     return { idx, n, share: n / area, hex, h, s, l, lum: lumOf(hex) };
   });
   const big = info.filter((c) => c.share >= 0.04);
+  const dupHex = p.palette.filter((c, i) => p.palette.findIndex((o) => o.hex === c.hex) !== i && count.has(i + 1));
+  if (dupHex.length) add("cor", "info", "paleta_duplicada", `${dupHex.length} entrada(s) da paleta têm exatamente a mesma cor de outra (${dupHex.slice(0, 4).map((c) => c.name).join(", ")}): paleta inchada sem ganho.`, "reduce_colors ou transform replace_color para unir");
   if (info.some((c) => c.share >= 0.02 && (c.lum < 12 || c.lum > 253))) {
     add("cor", "aviso", "preto_puro", "Há preto/branco puro em área grande. O preto puro endurece a arte e o branco puro estoura; contornos e sombras ficam melhores em um tom escuro colorido.", "troque o preto por um tom escuro do material (reference rampa) ou rode `polish`");
   }

@@ -19,6 +19,7 @@ import type { CheckMode } from "./render.ts";
 import { autoScale, clampRegion, diffRows, type ImageRequest } from "./view.ts";
 import {
   KEY_CHARS,
+  KEY_CHARS_BASIC,
   MAX_COLORS,
   MAX_FRAMES,
   MAX_LAYERS,
@@ -195,7 +196,7 @@ const setPalette = def({
           key: z
             .string()
             .length(1)
-            .describe(`1 caractere único usado no desenho por texto. Permitidos: ${KEY_CHARS}`),
+            .describe(`1 caractere único usado no desenho por texto. Permitidos: ${KEY_CHARS_BASIC} (e letras acentuadas/gregas para paletas grandes)`),
           hex: z.string().describe("Cor #rrggbb"),
           name: z.string().max(40).describe('Nome curto e descritivo, ex. "pele-sombra"'),
         }),
@@ -208,7 +209,7 @@ const setPalette = def({
     const updated: string[] = [];
     for (const c of i.colors) {
       if (c.key === TRANSPARENT_KEY || c.key === " " || !KEY_CHARS.includes(c.key)) {
-        throw new Error(`Chave "${c.key}" inválida. Use um destes caracteres: ${KEY_CHARS}`);
+        throw new Error(`Chave "${c.key}" inválida. Use um destes caracteres: ${KEY_CHARS_BASIC} (ou letras acentuadas/gregas)`);
       }
       const hex = normalizeHex(c.hex);
       const existing = p.palette.find((x) => x.key === c.key);
@@ -1280,6 +1281,7 @@ const shape = z.discriminatedUnion("type", [
     forma: z.enum(["pixel", "traco", "cruz", "tufo", "onda"]).default("pixel").describe("pixel: ponto; traco: 2 px na vertical; cruz: flor/estrela de 5 px; tufo: capim de 2–3 px; onda: risco horizontal de 2–6 px (água, brilho no lago)"),
     distancia: z.number().int().min(1).max(48).default(2).describe("distância mínima entre elementos (evita aglomerar e dá ritmo de textura)"),
     seed: z.number().int().default(1).describe("semente: mesmo valor = mesma textura (reprodutível); use sementes diferentes por plano"),
+    variar_por_frame: z.boolean().default(false).describe("soma o índice do frame à semente: a textura muda a cada frame (brilho de água, cintilar de estrelas, chuva) com frames:\"all\" numa só chamada"),
     only: colorRef.optional().describe("só espalha sobre esta cor (grama só sobre o campo)"),
     ponta: colorRef.optional().describe("cor da ponta do tufo/traço/cruz (ex.: luz)"),
     evitar: z.array(z.string()).max(8).optional().describe("camadas onde NÃO espalhar: o elemento não cai onde estas camadas já têm arte (flores fora da casa)"),
@@ -1392,7 +1394,7 @@ const drawShapes = def({
             drawGradient(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, direction: sh.direction, colors: sh.colors.map((k) => colorIndex(p, k)), dither: sh.dither, suavidade: sh.suavidade, ondas: sh.ondas, only: sh.only ? colorIndex(p, sh.only) : 0, cx: sh.cx, cy: sh.cy, r: sh.r });
             break;
           case "scatter":
-            scatter(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, colors: sh.colors.map((k) => colorIndex(p, k)), densidade: sh.densidade, forma: sh.forma, distancia: sh.distancia, seed: sh.seed, only: sh.only ? colorIndex(p, sh.only) : 0, ponta: sh.ponta ? colorIndex(p, sh.ponta) : undefined, blocked: sh.evitar?.length ? ((cels) => (x: number, y: number) => cels.some((c) => c[y * p.width + x] !== 0))(sh.evitar.map((n) => getCel(p, f, findLayer(p, n).id))) : undefined });
+            scatter(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, colors: sh.colors.map((k) => colorIndex(p, k)), densidade: sh.densidade, forma: sh.forma, distancia: sh.distancia, seed: sh.seed + (sh.variar_por_frame ? f * 7919 : 0), only: sh.only ? colorIndex(p, sh.only) : 0, ponta: sh.ponta ? colorIndex(p, sh.ponta) : undefined, blocked: sh.evitar?.length ? ((cels) => (x: number, y: number) => cels.some((c) => c[y * p.width + x] !== 0))(sh.evitar.map((n) => getCel(p, f, findLayer(p, n).id))) : undefined });
             break;
         }
       }
@@ -1542,6 +1544,50 @@ const transform = def({
       }
     }
     return result(p, `${i.op} aplicado em "${layer.name}", ${fmtList(list)}.`, list, i.preview);
+  },
+});
+
+const reduceColors = def({
+  name: "reduce_colors",
+  description: "QUANTIZA a paleta para no máximo `cores`: funde repetidamente as duas cores mais parecidas (ponderado pelo uso: cores raras somem primeiro no tom mais próximo), remapeia todos os pixels de todos os frames e camadas e remove as entradas sem uso. Use quando o sombreamento/névoa/reflexo automáticos inflaram a paleta, ou para atender um limite de estilo (ex.: 16 cores retrô, 48–64 numa cena). Não troca matizes: só junta tons vizinhos.",
+  schema: z.object({
+    cores: z.number().int().min(2).max(255),
+    proteger: z.array(colorRef).optional().describe("cores que NUNCA são fundidas (ex.: contorno, olhos, o brilho do sol)"),
+  }),
+  run(p, i) {
+    const n = p.palette.length;
+    const usage = new Array(n + 1).fill(0);
+    for (const f of p.frames) for (const cel of Object.values(f.cels)) for (const v of cel) if (v) usage[v]++;
+    const keep = new Set((i.proteger ?? []).map((c) => colorIndex(p, c)));
+    const rgb = p.palette.map((c) => hexToRgb(c.hex));
+    const alive = new Set<number>();
+    for (let k = 1; k <= n; k++) if (usage[k] > 0) alive.add(k);
+    const target = new Map<number, number>();
+    const root = (k: number): number => { let r = k; while (target.has(r)) r = target.get(r)!; return r; };
+    const before = alive.size;
+    while (alive.size > i.cores) {
+      let best: [number, number, number] | null = null;
+      const list = [...alive];
+      for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) {
+        const x = list[a], y = list[b];
+        if (keep.has(x) && keep.has(y)) continue;
+        const d = (rgb[x - 1][0] - rgb[y - 1][0]) ** 2 + (rgb[x - 1][1] - rgb[y - 1][1]) ** 2 + (rgb[x - 1][2] - rgb[y - 1][2]) ** 2;
+        const cost = d * (usage[x] * usage[y]) / (usage[x] + usage[y]);
+        if (!best || cost < best[0]) best = [cost, x, y];
+      }
+      if (!best) break;
+      let [, x, y] = best;
+      // a cor protegida ou mais usada fica; a outra é fundida nela
+      if (keep.has(x) || (!keep.has(y) && usage[x] >= usage[y])) { /* x fica */ } else [x, y] = [y, x];
+      target.set(y, x); usage[x] += usage[y]; alive.delete(y);
+    }
+    const remap = new Uint8Array(n + 1);
+    const kept: Project["palette"] = [];
+    for (let k = 1; k <= n; k++) if (alive.has(k)) { kept.push(p.palette[k - 1]); remap[k] = kept.length; }
+    for (let k = 1; k <= n; k++) if (!alive.has(k)) remap[k] = usage[k] > 0 || target.has(k) ? remap[root(k)] || 0 : 0;
+    for (const f of p.frames) for (const cel of Object.values(f.cels)) for (let k = 0; k < cel.length; k++) if (cel[k]) cel[k] = remap[cel[k]];
+    p.palette = kept;
+    return { changed: true, text: `Paleta reduzida de ${before} (em uso) para ${kept.length} cores.` };
   },
 });
 
@@ -1876,6 +1922,7 @@ export const COMMANDS = [
   transform,
   polish,
   avaliar,
+  reduceColors,
   copyCel,
   view,
   check,
