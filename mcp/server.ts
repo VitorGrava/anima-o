@@ -9,7 +9,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { describeProject, jsonSchemaOf, commandTools, renderImages, runCommand, importImage, importIntoProject, type Project } from "../src/engine/index.ts";
+import { describeProject, jsonSchemaOf, commandTools, renderImages, runCommand, importImage, importIntoProject, compareToReference, type Project } from "../src/engine/index.ts";
 import { SYSTEM_PROMPT } from "../server/prompt.ts";
 import { decodePNG, encodePNG } from "../server/png.ts";
 import { readFile } from "node:fs/promises";
@@ -52,6 +52,12 @@ const ImportImage = z.object({
   ajustar_canvas: z.boolean().default(true).describe("Redimensiona o canvas para o tamanho importado"),
 });
 
+const CompareImage = z.object({
+  path: z.string().min(1).describe("PNG de referência"),
+  frame: z.number().int().min(0).default(0),
+  fundo: z.string().default("auto").describe('"auto", "nenhum" ou "#rrggbb"'),
+});
+
 const ExportFile = z.object({
   format: z.enum(["gif", "spritesheet_png", "frame_png", "json"]),
   path: z.string().min(1).describe("Arquivo de saída (relativo ao diretório atual), ex. saida/slime.gif"),
@@ -89,6 +95,11 @@ export function createAnimaServer(store = new ProjectStore()) {
       description: "IMPORTA um PNG para a grade de pixel art: detecta o tamanho do pixel de uma arte ampliada (ou reamostra para `largura`), corta à grade pela cor mais frequente de cada célula, torna o fundo transparente e quantiza a paleta (median cut). Use para trazer uma referência, ou a saída de um gerador de imagem, e então contornar, sombrear, animar e conferir com a engine.",
       inputSchema: jsonSchemaOf(ImportImage),
     },
+    {
+      name: "compare_image",
+      description: "COMPARA o desenho com uma imagem de referência reduzida à mesma grade: sobreposição da silhueta, erro médio de cor, as piores regiões e um painel [referência | desenho | diferença]. Use para ficar FIEL a uma foto ou arte (confira de tempos em tempos, corrija as regiões piores).",
+      inputSchema: jsonSchemaOf(CompareImage),
+    },
     ...commandTools(["export"]),
   ];
 
@@ -115,6 +126,12 @@ export function createAnimaServer(store = new ProjectStore()) {
         const content: Content[] = [{ type: "text", text: `Importado: ${r.width}x${r.height} px (pixel da origem ${r.cell || "reamostrado"}x), ${r.palette.length} cor(es) (${out.adicionadas} nova(s)), fundo ${r.fundo ?? "nenhum"} → camada "${out.camada}".` }];
         if (shown.ok && shown.images) for (const img of renderImages(project, shown.images)) content.push({ type: "image", data: encodePNG(img.width, img.height, img.data).toString("base64"), mimeType: "image/png" });
         return reply(content);
+      }
+      if (name === "compare_image") {
+        const i = CompareImage.parse(args ?? {});
+        const ref = importImage(decodePNG(await readFile(path.resolve(process.cwd(), i.path))), { largura: project.width, altura: project.height, cores: 255, fundo: i.fundo });
+        const r = compareToReference(project, i.frame, ref);
+        return reply([{ type: "text", text: r.text }, { type: "image", data: encodePNG(r.image.width, r.image.height, r.image.data).toString("base64"), mimeType: "image/png" }]);
       }
       if (name === "export_file") {
         const i = ExportFile.parse(args ?? {});

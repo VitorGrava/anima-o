@@ -123,3 +123,52 @@ export function importIntoProject(p: Project, r: ImportResult, o: { camada?: str
   for (let i = 0; i < r.indices.length; i++) cel[i] = r.indices[i] ? map[r.indices[i] - 1] : 0;
   return { adicionadas, camada: layer.name };
 }
+
+import { flattenFrame } from "./render.ts";
+import { hexToRgb } from "./project.ts";
+
+export interface CompareResult {
+  text: string;
+  iou: number;
+  erroCor: number;
+  image: { width: number; height: number; data: Uint8ClampedArray<ArrayBuffer> };
+}
+
+/**
+ * Compara um frame do projeto com uma imagem de referência reduzida à MESMA grade: sobreposição da silhueta (IoU),
+ * erro médio de cor onde os dois têm pixel, as células piores e um painel [referência | desenho | diferença].
+ * Diferença: azul = só a referência tem pixel, vermelho = só o desenho, do preto ao amarelo = erro de cor.
+ */
+export function compareToReference(p: Project, frame: number, ref: ImportResult, escala = 0): CompareResult {
+  if (ref.width !== p.width || ref.height !== p.height) throw new Error(`A referência tem ${ref.width}x${ref.height} e o projeto ${p.width}x${p.height}: importe a referência com largura/altura do projeto.`);
+  const W = p.width, H = p.height, flat = flattenFrame(p, frame);
+  const mine = (i: number): [number, number, number] | null => (flat[i] ? hexToRgb(p.palette[flat[i] - 1].hex) : null);
+  const theirs = (i: number): [number, number, number] | null => (ref.indices[i] ? hexToRgb(ref.palette[ref.indices[i] - 1]) : null);
+  let inter = 0, uni = 0, errSum = 0, errN = 0;
+  const cellW = Math.max(1, Math.ceil(W / 4)), cellH = Math.max(1, Math.ceil(H / 4));
+  const cells = Array.from({ length: 16 }, () => ({ miss: 0, err: 0, n: 0 }));
+  const dist: number[] = new Array(W * H).fill(-1);
+  for (let i = 0; i < W * H; i++) {
+    const a = mine(i), b = theirs(i), c = cells[Math.min(3, Math.floor(i / W / cellH)) * 4 + Math.min(3, Math.floor((i % W) / cellW))];
+    if (a || b) uni++;
+    if (a && b) { inter++; const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) / 441.67; dist[i] = d; errSum += d; errN++; c.err += d; c.n++; }
+    else if (a || b) c.miss++;
+  }
+  const iou = uni ? inter / uni : 1, erro = errN ? errSum / errN : 0;
+  const worst = cells.map((c, k) => ({ k, score: c.miss + c.err * 2 })).sort((x, y) => y.score - x.score).slice(0, 3).filter((c) => c.score > 0)
+    .map((c) => `x${(c.k % 4) * cellW}..${Math.min(W - 1, (c.k % 4) * cellW + cellW - 1)} y${Math.floor(c.k / 4) * cellH}..${Math.min(H - 1, Math.floor(c.k / 4) * cellH + cellH - 1)}`);
+  const s = escala > 0 ? escala : Math.max(1, Math.min(12, Math.floor(320 / Math.max(W, H)))), gap = 3 * s;
+  const PW = W * s * 3 + gap * 2, PH = H * s, data = new Uint8ClampedArray(PW * PH * 4);
+  for (let i = 0; i < data.length; i += 4) { data[i] = data[i + 1] = data[i + 2] = 40; data[i + 3] = 255; }
+  const paint = (px0: number, i: number, rgb: [number, number, number]) => { const x = i % W, y = (i - x) / W; for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) { const o = ((y * s + dy) * PW + px0 + x * s + dx) * 4; data[o] = rgb[0]; data[o + 1] = rgb[1]; data[o + 2] = rgb[2]; } };
+  for (let i = 0; i < W * H; i++) {
+    const a = mine(i), b = theirs(i);
+    paint(0, i, b ?? [90, 90, 90]); paint(W * s + gap, i, a ?? [90, 90, 90]);
+    let diff: [number, number, number] = [60, 60, 60];
+    if (a && b) { const d = Math.min(1, dist[i] * 3); diff = [Math.round(255 * d), Math.round(220 * d), 0]; }
+    else if (b) diff = [60, 120, 255]; else if (a) diff = [255, 60, 60];
+    paint((W * s + gap) * 2, i, diff);
+  }
+  const text = `Comparação do frame ${frame} com a referência (${W}x${H}): sobreposição da silhueta ${(iou * 100).toFixed(0)}%, erro médio de cor ${(erro * 100).toFixed(0)}% onde os dois têm pixel.${worst.length ? ` Piores regiões: ${worst.join("; ")}.` : ""}\nPainel: referência | desenho | diferença (azul = só a referência tem pixel, vermelho = só o desenho, preto→amarelo = erro de cor).`;
+  return { text, iou, erroCor: erro, image: { width: PW, height: PH, data } };
+}

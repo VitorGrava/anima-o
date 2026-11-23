@@ -13,6 +13,7 @@
  *   anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--png saida.png]
  *   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
  *   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N] [--fundo #hex] [--margem N] [--sombra] [--vai-e-volta]   (sem --scale a escala é automática)
+  anima compare <projeto> <ref.png> [--frame N] [--png saida.png] [--fundo auto|nenhum|#hex]   (compara o desenho com uma referência na mesma grade: silhueta, erro de cor, painel lado a lado)
   anima import <projeto> <imagem.png> [--largura N|--altura N|--grade auto|N] [--cores N] [--fundo auto|nenhum|#hex] [--camada nome] [--manter-canvas]   (reduz uma imagem à grade de pixel e à paleta)
  *   anima guide                            imprime o guia do animador (fluxo e princípios): leia antes de começar
  *   anima tools                            lista os comandos com seus parâmetros (JSON Schema)
@@ -26,6 +27,7 @@ import {
   describeProject,
   renderImages,
   importImage,
+  compareToReference,
   importIntoProject,
   runCommand,
   type CommandResult,
@@ -243,6 +245,19 @@ export async function main(argv: string[]): Promise<number> {
       });
       console.log(r.text);
       return r.ok ? 0 : 1;
+    }
+    case "compare": {
+      const [file, img] = args.filter((a) => !a.startsWith("--"));
+      const frame = Number(flag(args, "frame") ?? 0), png = flag(args, "png"), fundo = flag(args, "fundo"), cores = flag(args, "cores");
+      if (!file || !img) break;
+      await store.open(file);
+      const p = store.project;
+      const ref = importImage(decodePNG(await readFile(img)), { largura: p.width, altura: p.height, cores: cores ? Number(cores) : 255, fundo });
+      const r = compareToReference(p, frame, ref);
+      const out = png ?? file.replace(/(\.anima)?\.json$/, "") + ".comparacao.png";
+      await writeFile(out, encodePNG(r.image.width, r.image.height, r.image.data));
+      console.log(`${r.text}\nImagem: ${path.resolve(out)}`);
+      return 0;
     }
     case "import": {
       const [file, img] = args.filter((a) => !a.startsWith("--"));

@@ -79,3 +79,23 @@ describe("anima import (CLI)", () => {
     expect(saved.width).toBe(8);
   });
 });
+
+describe("compareToReference", () => {
+  it("o próprio desenho exportado dá 100% de silhueta e erro de cor zero; mudar uma região derruba e aponta onde", async () => {
+    const { compareToReference, presentFrame, presentedToRGBA } = await import("../src/engine/index.ts");
+    const p = createProject({ width: 16, height: 16 });
+    runCommand(p, "set_palette", { colors: [{ key: "a", hex: "#d84a3a", name: "vermelho" }, { key: "b", hex: "#3a6ad8", name: "azul" }] });
+    runCommand(p, "draw_shapes", { shapes: [{ type: "rect", x: 2, y: 2, w: 6, h: 6, color: "a", filled: true }, { type: "rect", x: 9, y: 9, w: 5, h: 5, color: "b", filled: true }] });
+    const pr = presentFrame(p, 0, { scale: 8, fundo: "#101010" });
+    const ref = importImage({ width: pr.width, height: pr.height, data: presentedToRGBA(pr) }, { largura: 16, altura: 16, cores: 255 });
+    const same = compareToReference(p, 0, ref);
+    expect(same.iou).toBeCloseTo(1, 5);
+    expect(same.erroCor).toBeLessThan(0.02);
+    expect(same.image.width).toBeGreaterThan(16 * 3);
+    runCommand(p, "draw_shapes", { shapes: [{ type: "rect", x: 9, y: 9, w: 5, h: 5, color: "a", filled: true }] });   // troca o azul por vermelho
+    const diff = compareToReference(p, 0, ref);
+    expect(diff.erroCor).toBeGreaterThan(same.erroCor + 0.05);
+    expect(diff.text).toMatch(/Piores regiões: x8\.\.11 y8\.\.11/);
+    expect(() => compareToReference(createProject({ width: 8, height: 8 }), 0, ref)).toThrow(/importe a referência/);
+  });
+});
