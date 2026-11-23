@@ -28,6 +28,7 @@ import {
   renderImages,
   importImage,
   compareToReference,
+  avisoFundo,
   importIntoProject,
   runCommand,
   type CommandResult,
@@ -87,7 +88,7 @@ const USAGE = `anima — engine de animação pixel art
   anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--max-cores N] [--sem codigo,codigo] [--png saida.png]
                                          defeitos da arte e da animação (--max-cores: limite de cores do estilo, ex. 16 para retrô) (--efeito: brilho, chama, fumaça; --tipo rotacao: moeda girando)
   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
-  anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N]
+  anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N] [--fundo #hex] [--margem N] [--sombra] [--vai-e-volta] [--meta]   (.gif = animação; .png = folha de todos os frames; .png com --frame N = só esse frame; sem --scale a escala é automática)
   anima guide [--completo]               guia do animador (curto; --completo = o guia inteiro)
   anima tools                            lista os comandos e parâmetros (JSON Schema)`;
 
@@ -295,6 +296,8 @@ export async function main(argv: string[]): Promise<number> {
         format, path: out, scale, columns: columns ? Number(columns) : undefined, frame: Number(frame ?? 0), fundo, margem: margem ? Number(margem) : undefined, sombra, vaiEVolta, meta,
       });
       console.log(`Exportado: ${done}`);
+      const av = avisoFundo(store.project, fundo);
+      if (av) console.log(av);
       return 0;
     }
     case "guide": {
@@ -321,14 +324,15 @@ Como isto vira comandos na CLI (sem MCP)
           frame: { type: "integer", description: "--frame N: exporta só este frame como .png (sem isso, .png é a folha de todos)" } } },
       }];
       if (json) { console.log(JSON.stringify(name ? all.filter((t) => t.name === name) : all, null, 1)); return 0; }
-      type Prop = { type?: string; description?: string; default?: unknown; enum?: unknown[]; properties?: Record<string, Prop>; items?: Prop; required?: string[]; anyOf?: Prop[] };
+      type Prop = { type?: string; description?: string; default?: unknown; enum?: unknown[]; properties?: Record<string, Prop>; items?: Prop; required?: string[]; anyOf?: Prop[]; oneOf?: Prop[] };
+      const alts = (x?: Prop) => x?.anyOf ?? x?.oneOf;
       const line = (k: string, v: Prop, req: boolean, indent: string): string[] => {
-        const kind = v.enum ? v.enum.join("|") : v.type === "array" ? `lista de ${v.items?.type === "object" ? "objetos" : v.items?.anyOf ? "formas (uma de várias, veja abaixo)" : v.items?.type ?? "?"}` : v.type ?? (v.anyOf ? "uma de várias formas (veja --json)" : "?");
+        const kind = v.enum ? v.enum.join("|") : v.type === "array" ? `lista de ${v.items?.type === "object" ? "objetos" : alts(v.items) ? "formas (uma de várias, veja abaixo)" : v.items?.type ?? "?"}` : v.type ?? (alts(v) ? "uma de várias formas (veja --json)" : "?");
         const out = [`${indent}${k}${req ? "*" : ""}: ${kind}${v.default !== undefined ? ` (padrão ${JSON.stringify(v.default)})` : ""}${v.description ? ` — ${String(v.description).split("\n")[0].slice(0, 110)}` : ""}`];
         const inner = v.type === "array" ? v.items : v;
         // lista de formas (draw_shapes): uma linha por variante, com os campos de cada uma
-        if (inner?.anyOf?.length) {
-          for (const variant of inner.anyOf) {
+        if (alts(inner)?.length) {
+          for (const variant of alts(inner)!) {
             const props = variant.properties ?? {};
             const kindName = (props.type as unknown as { const?: string } | undefined)?.const ?? ((variant as unknown as { const?: unknown }).const !== undefined ? JSON.stringify((variant as unknown as { const?: unknown }).const) : variant.type === "integer" || variant.type === "number" ? "um número" : variant.type === "array" ? "uma lista" : undefined);
             const rq = new Set(variant.required ?? []);
@@ -357,6 +361,8 @@ Como isto vira comandos na CLI (sem MCP)
       return 0;
     }
   }
+  const mine = cmd ? USAGE.split("\n").filter((l) => l.trim().startsWith(`anima ${cmd} `) || l.trim().startsWith(`anima ${cmd}\t`)) : [];
+  if (mine.length) { console.log(`Uso de "${cmd}" (faltou argumento):\n${mine.join("\n")}\n\n(\`anima help\` mostra todos os comandos; \`anima tools\` os comandos de desenho)`); return 1; }
   console.log(USAGE);
   return cmd && cmd !== "help" && cmd !== "--help" ? 1 : 0;
 }

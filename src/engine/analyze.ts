@@ -888,7 +888,9 @@ function evaluatePrinciples(p: Project, frames: number[], metrics: FrameMetrics[
   else add(8, "Secondary Action (ação secundária)", "atencao", "Só uma camada se move: acrescente piscar, respirar, balançar, faíscas ou uma sombra que reage.");
 
   // 9. Timing
-  if (p.rig?.travel) add(9, "Timing (temporização)", "na", "Marcha com chão que rola numa velocidade fixa: a duração igual é de propósito (variar o tempo faria o chão acelerar e frear contra o pé).");
+  const tinyLoop = Math.max(p.width, p.height) <= 32 && p.frames.length <= 8;
+  if (tinyLoop) add(9, "Timing (temporização)", "na", "Ícone/efeito pequeno em poucos frames: o tempo é uniforme de propósito (a leitura vem do desenho, não do ritmo).");
+  else if (p.rig?.travel) add(9, "Timing (temporização)", "na", "Marcha com chão que rola numa velocidade fixa: a duração igual é de propósito (variar o tempo faria o chão acelerar e frear contra o pé).");
   else if (codes.has("tempo_uniforme")) add(9, "Timing (temporização)", "atencao", "Todos os frames duram o mesmo: segure o apogeu/impacto (2–3×) e acelere o resto.");
   else add(9, "Timing (temporização)", ms.length < 3 ? "na" : "ok", ms.length < 3 ? "" : `Durações variam entre ${Math.min(...durs)} e ${Math.max(...durs)} ms.`);
 
@@ -1083,7 +1085,7 @@ export function formatIssues(issues: Issue[], limit = Infinity): string[] {
 const bb = (b: BBox | null) => (b ? `x${b.x}..${b.x + b.w - 1} y${b.y}..${b.y + b.h - 1} (${b.w}x${b.h})` : "vazia");
 
 /** Relatório completo em texto, para a IA ler. */
-export function formatAnalysis(p: Project, r: AnalysisResult): string {
+export function formatAnalysis(p: Project, r: AnalysisResult, painelCompleto = false): string {
   const lines: string[] = [];
   const first = r.metrics[0];
   if (r.ignoredLayers?.length) lines.push(`Medidas de movimento só das camadas que mudam; ignoradas (estáticas): ${r.ignoredLayers.join(", ")}.`);
@@ -1107,8 +1109,10 @@ export function formatAnalysis(p: Project, r: AnalysisResult): string {
   lines.push(...formatIssues(r.issues));
   if (r.principles?.length) {
     const mark = { ok: "✓", atencao: "!", na: "–" } as const;
-    lines.push("", "Os 12 princípios da animação (✓ aplicado, ! vale melhorar, – não se aplica ou avaliação humana):");
-    for (const q of r.principles) lines.push(`  ${mark[q.estado]} ${String(q.n).padStart(2)}. ${q.nome}${q.nota ? ` — ${q.nota}` : ""}`);
+    const show = painelCompleto ? r.principles : r.principles.filter((q) => q.estado === "atencao");
+    const ok = r.principles.filter((q) => q.estado === "ok").length, na = r.principles.filter((q) => q.estado === "na").length;
+    lines.push("", painelCompleto ? "Os 12 princípios da animação (✓ aplicado, ! vale melhorar, – não se aplica ou avaliação humana):" : `Princípios da animação: ${ok} ✓ aplicados, ${na} – não se aplicam ou são de avaliação humana${show.length ? `; vale melhorar (${show.length}):` : "; nada a melhorar."} (painel_completo mostra todos)`);
+    for (const q of show) lines.push(`  ${mark[q.estado]} ${String(q.n).padStart(2)}. ${q.nome}${q.nota ? ` — ${q.nota}` : ""}`);
   }
   if (r.issues.length) lines.push("", "Os avisos são heurísticas: corrija o que for defeito e ignore o que for intencional.");
   return lines.join("\n");

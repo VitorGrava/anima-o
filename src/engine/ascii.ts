@@ -81,7 +81,7 @@ export function drawRows(
       const y = y0 + dy;
       if (x < 0 || y < 0 || x >= p.width || y >= p.height) return;
       cel[y * p.width + x] = idx;
-      n++;
+      if (idx) n++;
     });
   });
   return n;

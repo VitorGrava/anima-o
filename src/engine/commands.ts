@@ -10,7 +10,7 @@ import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.t
 import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
 import { autoShade, cleanCorners, detailColors, selectiveOutline } from "./polish.ts";
-import { drawBox3d, drawGradient, fillPolygon, scatter } from "./paint.ts";
+import { drawBox3d, drawCurve, drawGradient, fillPolygon, scatter } from "./paint.ts";
 import { BG_LAYER, evaluateBeauty, formatCritique, unionBox } from "./critique.ts";
 import { REFERENCE_TOPICS, bodyProportions, darkOutline, makeRamp, reference } from "./reference.ts";
 import { HUMANOID_BONES, quadrupedBones, walkPoses, boneSegments, capsuleArt, clampAngles, humanoidAngles, humanoidBones, groundedRoot, ellipseArt, renderRigFrame } from "./skeleton.ts";
@@ -1336,6 +1336,13 @@ const shape = z.discriminatedUnion("type", [
     linhas_telhado: colorRef.optional().describe("cor das fileiras de telhas"),
     espaco: z.number().int().min(2).max(12).default(3).describe("distância entre tábuas/telhas"),
   }).describe("CAIXA / CASA EM PERSPECTIVA de um ponto de fuga: frente + lateral que recua para o horizonte + telhado de duas águas, com tábuas e telhas em perspectiva. Coloque o ponto de fuga no mesmo horizonte do resto da cena (caminho, cerca) para a casa não ficar 'de frente' num mundo em perspectiva. Janelas/portas na lateral: use polygon com os pontos calculados na mesma projeção."),
+  z.object({
+    type: z.literal("curve"),
+    points: z.array(z.array(z.number()).length(2)).min(2).max(64).describe("pontos [x, y] por onde a curva passa (spline suave)"),
+    r1: z.number().min(0.5).max(40).describe("raio no início (px)"),
+    r2: z.number().min(0.5).max(40).optional().describe("raio no fim (padrão: igual ao r1)"),
+    color: colorRef,
+  }).describe("CURVA de espessura variável (rabo, tentáculo, corda, cabelo, cobra): passa pelos pontos com raio de r1 a r2. Cor chapada; contorne depois com draw_rows contorno=seletivo ou transform outline mode=seletivo."),
   z.object({ type: z.literal("fill"), x: z.number().int(), y: z.number().int(), color: colorRef }).describe("Balde de tinta a partir de (x, y)"),
 ]);
 
@@ -1442,6 +1449,9 @@ const drawShapes = def({
             drawBox3d(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, prof: sh.prof, xv: sh.xv, yh: sh.yh, rise: sh.rise, frente: ci(sh.frente), lado: ci(sh.lado), telhado: ci(sh.telhado ?? sh.frente), empena: ci(sh.empena ?? sh.frente), linhas: sh.linhas ? ci(sh.linhas) : undefined, linhasTelhado: sh.linhas_telhado ? ci(sh.linhas_telhado) : undefined, espaco: sh.espaco });
             break;
           }
+          case "curve":
+            drawCurve(s, sh.points as [number, number][], sh.r1, sh.r2 ?? sh.r1, c);
+            break;
           case "polygon":
             fillPolygon(s, sh.points as [number, number][], c);
             break;
@@ -1485,6 +1495,8 @@ const transform = def({
     cy: z.number().optional().describe("rotate: pivô y (padrão: centro do canvas)"),
     dx: z.number().int().optional(),
     dy: z.number().int().optional(),
+    dx_lista: z.array(z.number().int()).optional().describe("shift: um deslocamento x POR frame, na ordem de `frames` (rabo/cabeça balançando sem reescrever o frame)"),
+    dy_lista: z.array(z.number().int()).optional().describe("shift: um deslocamento y por frame, na ordem de `frames`"),
     wrap: z.boolean().optional(),
     from: colorRef.optional(),
     to: colorRef.optional(),
@@ -1510,7 +1522,7 @@ const transform = def({
       const s = { width: p.width, height: p.height, data: getCel(p, f, layer.id) };
       switch (i.op) {
         case "shift":
-          draw.shift(s, i.dx ?? 0, i.dy ?? 0, i.wrap ?? false);
+          draw.shift(s, i.dx_lista ? (i.dx_lista[list.indexOf(f)] ?? 0) : (i.dx ?? 0), i.dy_lista ? (i.dy_lista[list.indexOf(f)] ?? 0) : (i.dy ?? 0), i.wrap ?? false);
           break;
         case "flip_horizontal":
           draw.flip(s, "horizontal");
@@ -1972,6 +1984,7 @@ const check = def({
     ignore_codes: z.array(z.string()).optional().describe('Códigos de aviso a silenciar porque são INTENCIONAIS (ex.: "furo" para um vão de propósito, "serrilhado", "banding", "pixel_solto"). Os códigos aparecem no relatório de `check --json`; use com parcimônia.'),
     max_cores: z.number().int().min(2).max(255).optional().describe("Limite de cores do ESTILO pedido (ex.: 16 para visual retrô/16-bit). Sem isso o número de cores não é cobrado: estilos detalhados usam muitas."),
     as_image: z.boolean().default(true).describe("Devolve a imagem com os pixels problemáticos marcados em magenta."),
+    painel_completo: z.boolean().default(false).describe("Lista os 12 princípios inteiros; por padrão só os que valem melhorar (o resto vira uma linha de contagem: poupa tokens a cada check)."),
   }),
   run(p, i) {
     const list = resolveFrames(p, i.frames ?? "all");
@@ -1983,7 +1996,7 @@ const check = def({
     const highlight = r.issues.filter((x) => x.frame === f).flatMap((x) => x.points ?? []);
     return {
       changed: false,
-      text: formatAnalysis(p, r),
+      text: formatAnalysis(p, r, i.painel_completo),
       images: i.as_image && highlight.length ? { frames: [f], scale: autoScale(p), highlight } : undefined,
     };
   },
@@ -2078,7 +2091,7 @@ const byName = new Map(COMMANDS.map((c) => [c.name, c]));
 export function describeProject(p: Project): string {
   return [
     `Projeto "${p.name}": ${p.width}x${p.height} px, ${p.fps} fps, ${p.frames.length} frame(s).`,
-    `Paleta (${p.palette.length}): ${p.palette.map((c) => `${c.key}=${c.hex} ${c.name}`).join(" | ")}`,
+    p.palette.length ? `Paleta (${p.palette.length}): ${p.palette.map((c) => `${c.key}=${c.hex} ${c.name}`).join(" | ")}` : "Paleta vazia: defina com set_palette (cores ou preset: pico8, sweetie16, gameboy) antes de desenhar.",
     `Camadas (baixo→cima): ${p.layers.map((l) => `${l.name}${l.visible ? "" : " (oculta)"}`).join(", ")}`,
     `Durações: ${p.frames.map((f, i) => `${i}:${f.duration ?? Math.round(1000 / p.fps)}ms`).join(" ")}`,
     ...(p.rig ? [`Rig: ${p.rig.bones.length} ossos (${p.rig.bones.map((b) => b.name).join(", ")}), ${p.rig.parts.length} partes de arte, ${p.frames.filter((f) => f.pose).length} frame(s) com pose.`] : []),

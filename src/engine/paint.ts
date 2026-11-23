@@ -186,3 +186,28 @@ export function pontoLateral(b: Box3dSpec, u: number, v: number): [number, numbe
   const yTop = top + (rt[1] - top) * u, yBot = b.y + (rb[1] - b.y) * u;
   return [x, yTop + (yBot - yTop) * v];
 }
+
+/**
+ * Curva com ESPESSURA VARIÁVEL (rabo, tentáculo, corda, cabelo): passa pelos pontos (spline Catmull-Rom suave),
+ * pintando discos de raio interpolado de r1 (início) a r2 (fim). Cor chapada; contorne depois (contorno seletivo).
+ */
+export function drawCurve(s: Surface, pts: [number, number][], r1: number, r2: number, c: number): void {
+  if (pts.length < 2) return;
+  const P = [pts[0], ...pts, pts[pts.length - 1]];
+  const samples: [number, number][] = [];
+  for (let k = 1; k < P.length - 2; k++) {
+    for (let t = 0; t < 1; t += 0.05) {
+      const t2 = t * t, t3 = t2 * t;
+      const f = (a: number, b: number, cc: number, d: number) => 0.5 * (2 * b + (-a + cc) * t + (2 * a - 5 * b + 4 * cc - d) * t2 + (-a + 3 * b - 3 * cc + d) * t3);
+      samples.push([f(P[k - 1][0], P[k][0], P[k + 1][0], P[k + 2][0]), f(P[k - 1][1], P[k][1], P[k + 1][1], P[k + 2][1])]);
+    }
+  }
+  samples.push(pts[pts.length - 1]);
+  samples.forEach(([x, y], i) => {
+    const r = r1 + ((r2 - r1) * i) / Math.max(1, samples.length - 1);
+    for (let yy = Math.floor(y - r); yy <= Math.ceil(y + r); yy++) for (let xx = Math.floor(x - r); xx <= Math.ceil(x + r); xx++) {
+      if (xx < 0 || yy < 0 || xx >= s.width || yy >= s.height) continue;
+      if ((xx + 0.5 - x) ** 2 + (yy + 0.5 - y) ** 2 <= r * r) s.data[yy * s.width + xx] = c;
+    }
+  });
+}

@@ -149,3 +149,52 @@ describe("box3d (caixa/casa em perspectiva)", () => {
     expect(new Set(Array.from(cel(p)).filter((v) => v)).size).toBeGreaterThanOrEqual(4);
   });
 });
+
+describe("curve, offsets por frame e relatórios enxutos", () => {
+  it("curve passa pelos pontos com espessura variável (mais grossa no início)", () => {
+    const p = createProject({ width: 40, height: 20 });
+    pal(p, "a");
+    ok(p, "draw_shapes", { shapes: [{ type: "curve", points: [[3, 14], [14, 4], [26, 12], [36, 5]], r1: 3, r2: 1, color: "a" }] });
+    const c = cel(p), A = p.palette.findIndex((x) => x.key === "a") + 1;
+    expect(c[14 * 40 + 3]).toBe(A);
+    expect(c[5 * 40 + 36]).toBe(A);
+    const thick = (x: number) => { let n = 0; for (let y = 0; y < 20; y++) if (c[y * 40 + x] === A) n++; return n; };
+    expect(thick(4)).toBeGreaterThan(thick(35));          // 3 px de raio no início, 1 px no fim
+  });
+  it("transform shift com dx_lista desloca cada frame de um jeito", () => {
+    const p = createProject({ width: 12, height: 4 });
+    pal(p, "a");
+    ok(p, "draw_shapes", { shapes: [{ type: "pixels", points: [[5, 1]], color: "a" }] });
+    ok(p, "add_frames", { count: 2, copy_from: 0 });
+    ok(p, "transform", { frames: "all", op: "shift", dx_lista: [0, 1, -2] });
+    const at = (f: number) => Array.from(p.frames[f].cels[p.layers[0].id]).findIndex((v) => v) % 12;
+    expect([at(0), at(1), at(2)]).toEqual([5, 6, 3]);
+  });
+  it("draw_rows conta só os pixels pintados (não os transparentes)", () => {
+    const p = createProject({ width: 8, height: 4 });
+    pal(p, "a");
+    const r = ok(p, "draw_rows", { rows: ["..aa..", "..aa.."], preview: false });
+    expect(r.text).toMatch(/^4 pixels escritos/);
+  });
+  it("check mostra só os princípios que valem melhorar (painel_completo mostra todos) e set_palette vazia é explicada", () => {
+    const p = createProject({ width: 16, height: 16 });
+    pal(p, "a");
+    ok(p, "draw_shapes", { shapes: [{ type: "rect", x: 4, y: 4, w: 6, h: 6, color: "a", filled: true }] });
+    ok(p, "add_frames", { count: 4, copy_from: 0 });
+    const curto = runCommand(p, "check", { as_image: false }).text, cheio = runCommand(p, "check", { as_image: false, painel_completo: true }).text;
+    expect(curto).toMatch(/Princípios da animação: \d+ ✓/);
+    expect(cheio).toMatch(/Os 12 princípios/);
+    expect(cheio.length).toBeGreaterThan(curto.length);
+    const vazio = createProject({ width: 8, height: 8 });
+    runCommand(vazio, "remove_colors", { keys: ["0", "1"] });
+    expect(runCommand(vazio, "get_project_info", {}).text).toMatch(/Paleta vazia/);
+  });
+  it("aviso quando o fundo engole o contorno", async () => {
+    const { avisoFundo } = await import("../src/engine/index.ts");
+    const p = createProject({ width: 8, height: 8 });
+    ok(p, "set_palette", { colors: [{ key: "k", hex: "#261a3d", name: "contorno" }, { key: "a", hex: "#d84a3a", name: "a" }] });
+    ok(p, "draw_shapes", { shapes: [{ type: "rect", x: 1, y: 1, w: 4, h: 4, color: "k", filled: true }, { type: "rect", x: 2, y: 2, w: 2, h: 2, color: "a", filled: true }] });
+    expect(avisoFundo(p, "#1e1530")).toMatch(/o contorno vai sumir/);
+    expect(avisoFundo(p, "#e8e0d0")).toBeNull();
+  });
+});

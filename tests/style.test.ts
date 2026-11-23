@@ -252,7 +252,8 @@ describe("os 12 princípios da animação (Alura/Disney)", () => {
     const pr = panel(p);
     expect(pr.map((q) => q.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     expect(analyze(ballAnim([[5, 5], [10, 8]]), [0, 1]).principles).toBeUndefined();
-    expect(runCommand(p, "check", { as_image: false }).text).toMatch(/Os 12 princípios da animação/);
+    expect(runCommand(p, "check", { as_image: false, painel_completo: true }).text).toMatch(/Os 12 princípios da animação/);
+    expect(runCommand(p, "check", { as_image: false }).text).toMatch(/Princípios da animação: \d+ ✓/);
   });
   it("3. staging: figura minúscula é apontada", () => {
     const p = sprite(64, 64, { r: "#d02838" });

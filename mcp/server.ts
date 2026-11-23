@@ -9,7 +9,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { describeProject, jsonSchemaOf, commandTools, renderImages, runCommand, importImage, importIntoProject, compareToReference, type Project } from "../src/engine/index.ts";
+import { describeProject, jsonSchemaOf, commandTools, renderImages, runCommand, importImage, importIntoProject, compareToReference, avisoFundo, type Project } from "../src/engine/index.ts";
 import { SYSTEM_PROMPT } from "../server/prompt.ts";
 import { decodePNG, encodePNG } from "../server/png.ts";
 import { readFile } from "node:fs/promises";
@@ -155,7 +155,7 @@ export function createAnimaServer(store = new ProjectStore()) {
       if (name === "export_file") {
         const i = ExportFile.parse(args ?? {});
         const out = await exportToFile(project, { ...i, vaiEVolta: i.vai_e_volta, meta: i.meta });
-        return reply([{ type: "text", text: `Exportado: ${out}` }]);
+        return reply([{ type: "text", text: `Exportado: ${out}${avisoFundo(project, i.fundo) ? `\n${avisoFundo(project, i.fundo)}` : ""}` }]);
       }
       const r = runCommand(project, name, args ?? {});
       if (r.ok && r.changed) await store.save();

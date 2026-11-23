@@ -69,3 +69,15 @@ export function frameOrder(n: number, vaiEVolta?: boolean): number[] {
   const a = Array.from({ length: n }, (_, i) => i);
   return vaiEVolta && n > 2 ? [...a, ...a.slice(1, -1).reverse()] : a;
 }
+
+/** aviso quando o fundo engole o contorno (contraste de brilho pequeno entre o fundo e as cores mais escuras da figura) */
+export function avisoFundo(p: Project, fundo?: string): string | null {
+  if (!fundo) return null;
+  const lum = (h: string) => { const [r, g, b] = hexToRgb(h); return 0.3 * r + 0.59 * g + 0.11 * b; };
+  const used = new Set<number>();
+  for (let f = 0; f < p.frames.length; f++) for (const v of flattenFrame(p, f)) if (v) used.add(v);
+  if (!used.size) return null;
+  const darkest = Math.min(...[...used].map((k) => lum(p.palette[k - 1].hex)));
+  const bg = lum(fundo);
+  return Math.abs(darkest - bg) < 28 ? `Aviso: o fundo ${fundo} tem brilho quase igual ao da cor mais escura da figura (diferença ${Math.round(Math.abs(darkest - bg))} de 255): o contorno vai sumir. Use um fundo mais claro ou bem mais escuro que o contorno.` : null;
+}
