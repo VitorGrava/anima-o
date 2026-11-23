@@ -248,3 +248,35 @@ describe("terrain, forest, only composto e avisos", () => {
     expect(avisoVazio(p)).toBeNull();
   });
 });
+
+describe("paisagem (atalho de cenário)", () => {
+  it("monta as camadas na ordem certa, usa muitas cores com dithering e tem sol visível; recusa canvas pequeno", () => {
+    const p = createProject({ width: 160, height: 90 });
+    const r = ok(p, "paisagem", { horario: "por-do-sol", preview: false });
+    expect(r.text).toMatch(/Paisagem "por-do-sol" criada/);
+    const nomes = p.layers.map((l) => l.name);
+    expect(nomes.indexOf("ceu")).toBeLessThan(nomes.indexOf("plano1"));
+    expect(nomes.indexOf("plano3")).toBeLessThan(nomes.indexOf("lago"));
+    expect(nomes.indexOf("lago")).toBeLessThan(nomes.indexOf("floresta"));
+    expect(nomes.indexOf("floresta")).toBeLessThan(nomes.indexOf("campo"));
+    const flat = Array.from(p.frames[0].cels[p.layers.find((l) => l.name === "ceu")!.id]);
+    expect(new Set(flat.filter((v) => v)).size).toBeGreaterThan(7);                    // céu em degradê com várias cores
+    const c = runCommand(p, "avaliar", { tipo: "cena" }).text;
+    expect(c).toMatch(/Avaliação de beleza: \d+\/100/);
+    expect(runCommand(createProject({ width: 32, height: 24 }), "paisagem", {}).ok).toBe(false);
+  });
+  it("os quatro horários rodam e a noite tem estrelas e o dia não", () => {
+    for (const horario of ["amanhecer", "dia", "noite"] as const) {
+      const p = createProject({ width: 160, height: 90 });
+      ok(p, "paisagem", { horario, preview: false, planos: 2, lago: false });
+      const est = p.frames[0].cels[p.layers.find((l) => l.name === "estrelas")!.id];
+      expect(est.some((v) => v)).toBe(horario !== "dia");
+    }
+  });
+  it("seeds diferentes mudam o terreno", () => {
+    const a = createProject({ width: 160, height: 90 }), b = createProject({ width: 160, height: 90 });
+    ok(a, "paisagem", { seed: 1, preview: false }); ok(b, "paisagem", { seed: 2, preview: false });
+    const top = (p: Project) => Array.from(p.frames[0].cels[p.layers.find((l) => l.name === "plano1")!.id]);
+    expect(top(a)).not.toEqual(top(b));
+  });
+});

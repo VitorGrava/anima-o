@@ -162,6 +162,7 @@ function proportions(height: number, style: NonNullable<ReferenceOptions["style"
 
 const CENARIO = [
   "Receita de CENÁRIO / PAISAGEM (testada numa cena 320x180 que foi de 79 a 95 no avaliar tipo=cena). Tamanho: cenas inteiras funcionam bem entre 160 e 320 px de largura; 10–12 fps se animar.",
+  "ATALHO: o comando paisagem (horario por-do-sol|amanhecer|dia|noite, planos, lago, floresta, campo, sol, seed) monta TUDO abaixo numa chamada em 160x90 ou 320x180; depois retoque à mão e rode avaliar tipo=cena. Os passos a seguir explicam o que ele faz e como mudar cada parte.",
   "1. Camadas de trás para frente, uma por plano: ceu, estrelas, nuvens, montanhas3 (longe), montanhas2, montanhas1 (perto), lago, reflexo, floresta, campo, construções, detalhes, sombras, personagem, efeitos (fumaça, vaga-lumes), primeiro_plano, vinheta.",
   "2. Céu e água: NUNCA faixas retas. draw_shapes type=gradient com a rampa de cima para baixo e dither bayer4 (suavidade 0.6–0.75, ondas 2). Degradê com dither fraco (< 10%) vira poeira: a engine já arredonda isso. Trama muito visível? Use dither=bayer8 e suavidade 0.9–1 (transição longa e suave); bayer4 com suavidade 0.5 deixa faixas sólidas com transição curta.",
   "3. Sol e brilhos: gradient direction=radial; termine a rampa com a cor \".\" (transparente) para o brilho se DISSOLVER no céu em vez de recortar um disco. Reflexo do sol na água: o mesmo radial + scatter forma=onda nas cores do sol.",

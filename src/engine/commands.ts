@@ -1796,6 +1796,109 @@ const batch = def({
   },
 });
 
+const PAISAGENS: Record<"por-do-sol" | "amanhecer" | "dia" | "noite", { ceu: string[]; sol: string[]; planos: string[]; floresta: string[]; agua: string[]; capim: string[]; flores: string[]; nuvem: string[]; estrelas: boolean }> = {
+  "por-do-sol": { ceu: ["#2b1b4a", "#4a2a6a", "#7a3a82", "#b04a86", "#e0627a", "#f58a5a", "#fdb561", "#ffe08a"], sol: ["#fff6c0", "#ffe08a", "#fdb561"], planos: ["#9b6577", "#704d71", "#423560", "#2f2a50"], floresta: ["#2c4a5c", "#1d3a46", "#14303a"], agua: ["#ffe08a", "#fdb561", "#f58a5a", "#e0627a", "#b04a86", "#7a3a82", "#4a2a6a"], capim: ["#234a32", "#2f6440", "#3f7a46", "#58944c"], flores: ["#ff7aa8", "#fff0a0", "#c0a0ff"], nuvem: ["#6a3a8a", "#c4607e", "#f4905e", "#ffd08a"], estrelas: true },
+  amanhecer: { ceu: ["#1f2a4a", "#3a4a7a", "#6a7aa8", "#a8a0b8", "#f0b8a0", "#ffd0a0", "#ffe8b8", "#fff4d0"], sol: ["#fffbe0", "#fff0b0", "#ffd890"], planos: ["#b8a0b0", "#8a8aa8", "#566888", "#3a4c68"], floresta: ["#3a5a58", "#2a4a4a", "#1f3a3a"], agua: ["#fff4d0", "#ffe8b8", "#f0c8a8", "#c8a8b0", "#8a8aa8", "#566888", "#3a4c68"], capim: ["#2a5a3a", "#3a7a48", "#58985a", "#7ab868"], flores: ["#ffffff", "#ffd0e0", "#fff0a0"], nuvem: ["#7a8ab0", "#c8a8b8", "#ffc8a8", "#fff0d0"], estrelas: true },
+  dia: { ceu: ["#3a78c8", "#4a90d8", "#68a8e0", "#88c0e8", "#a8d4f0", "#c0e0f4", "#d8eefc", "#eaf6ff"], sol: ["#fffde8", "#fff6b0", "#ffe880"], planos: ["#a8c0d8", "#7898b8", "#4a6a90", "#35506e"], floresta: ["#2f6a48", "#25583c", "#1a4430"], agua: ["#eaf6ff", "#c0e0f4", "#88c0e8", "#4a90d8", "#3a78c8", "#2f62a8", "#264e88"], capim: ["#2a6a38", "#3a8a48", "#58a858", "#80c870"], flores: ["#ff7aa8", "#fff0a0", "#ffffff"], nuvem: ["#b8d0e8", "#e0eef8", "#ffffff", "#ffffff"], estrelas: false },
+  noite: { ceu: ["#0a0e24", "#101838", "#1a2450", "#243060", "#2e3a70", "#3a4a80", "#4a5a90", "#5a6aa0"], sol: ["#fffbe0", "#e8ecff", "#b0b8e0"], planos: ["#3a4a78", "#2a3868", "#1e2a54", "#141e40"], floresta: ["#16264a", "#101c3a", "#0a1430"], agua: ["#5a6aa0", "#4a5a90", "#3a4a80", "#2e3a70", "#243060", "#1a2450", "#101838"], capim: ["#102a24", "#18382c", "#20483a", "#2c5a48"], flores: ["#a8b8ff", "#fff0c0", "#d0a0ff"], nuvem: ["#1a2450", "#2e3a70", "#4a5a90", "#7a88b8"], estrelas: true },
+};
+
+const paisagem = def({
+  name: "paisagem",
+  description: [
+    "PAISAGEM COMPLETA numa chamada (o atalho da receita de cenário): céu com degradê em dither, sol/lua com brilho que se dissolve, estrelas e nuvens, 2–4 planos de terreno fractal com perspectiva atmosférica, bosque, lago com reflexo e ondas e campo com capim e flores. Quatro horários: por-do-sol, amanhecer, dia, noite.",
+    "Cria (ou refaz) as camadas ceu, estrelas, nuvens, plano1..N, floresta, lago, reflexo e campo no frame 0 (ordem do fundo para a frente). Depois retoque à mão (casa, personagem, primeiro plano), rode `avaliar tipo=cena` e `reduce_colors`. Não acrescente personagens.",
+  ].join("\n"),
+  schema: z.object({
+    horario: z.enum(["por-do-sol", "amanhecer", "dia", "noite"]).default("por-do-sol"),
+    planos: z.number().int().min(2).max(4).default(3).describe("quantos planos de montanha/colina (do mais longe, claro e rosado, ao mais perto, escuro)"),
+    horizonte: z.number().min(0.3).max(0.75).default(0.55).describe("altura do horizonte como fração do quadro (0.55 = pouco abaixo do meio)"),
+    lago: z.boolean().default(true),
+    floresta: z.boolean().default(true),
+    campo: z.boolean().default(true).describe("capim e flores no primeiro plano"),
+    sol: z.boolean().default(true).describe("sol (ou lua, à noite) com brilho que se dissolve no céu"),
+    seed: z.number().int().default(1).describe("muda terrenos, árvores, flores e nuvens"),
+    preview: previewFlag,
+  }),
+  run(p, i) {
+    const W = p.width, H = p.height;
+    if (W < 48 || H < 32) throw new Error("A paisagem pede um canvas de pelo menos 48x32 (ideal 160x90 ou 320x180).");
+    const P = PAISAGENS[i.horario];
+    const HZ = Math.round(H * i.horizonte), LAGO = i.lago ? Math.max(8, Math.round(H * 0.2)) : 0;
+    const col = (hex: string, nome: string) => ensureColor(p, hex, nome);
+    const names = ["ceu", "estrelas", "nuvens", ...Array.from({ length: i.planos }, (_, k) => `plano${k + 1}`), ...(i.floresta ? ["floresta"] : []), ...(i.lago ? ["lago", "reflexo"] : []), ...(i.campo ? ["campo"] : [])];
+    // ordem de baixo para cima: ceu, estrelas, nuvens, planos (longe→perto), lago, reflexo, floresta, campo
+    const order = ["ceu", "estrelas", "nuvens", ...Array.from({ length: i.planos }, (_, k) => `plano${k + 1}`), ...(i.lago ? ["lago", "reflexo"] : []), ...(i.floresta ? ["floresta"] : []), ...(i.campo ? ["campo"] : [])];
+    void names;
+    const layerOf = (nome: string) => {
+      let l = p.layers.find((x) => x.name === nome);
+      if (!l) { if (p.layers.length >= MAX_LAYERS) throw new Error(`Máximo de ${MAX_LAYERS} camadas.`); l = { id: newId("L"), name: nome, visible: true }; p.layers.push(l); for (const fr of p.frames) fr.cels[l.id] = new Uint8Array(W * H); }
+      getCel(p, 0, l.id).fill(0);
+      return l;
+    };
+    const lay = new Map(order.map((n) => [n, layerOf(n)]));
+    const surf = (n: string) => ({ width: W, height: H, data: getCel(p, 0, lay.get(n)!.id) });
+    // reordena: camadas da paisagem na ordem certa, atrás de qualquer camada que já existisse antes (ex.: personagem)
+    const outras = p.layers.filter((l) => !order.includes(l.name));
+    p.layers = [...order.map((n) => lay.get(n)!), ...outras];
+    const ceu = P.ceu.map((h, k) => col(h, `ceu${k}`));
+    // céu
+    drawGradient(surf("ceu"), { x: 0, y: 0, w: W, h: HZ + 1, direction: "vertical", colors: ceu, dither: "bayer4", suavidade: 0.75, ondas: 2 });
+    const sunX = Math.round(W * (0.45 + 0.2 * ((i.seed * 37) % 10) / 10)), sunR = Math.round(Math.max(14, H * 0.28));
+    if (i.sol) drawGradient(surf("ceu"), { x: sunX - sunR - 4, y: HZ - Math.round(H * 0.1) - sunR - 2, w: sunR * 2 + 8, h: sunR * 2 + 4, direction: "radial", cx: sunX, cy: HZ - Math.round(H * 0.1), r: sunR, colors: [col(P.sol[0], "sol0"), col(P.sol[0], "sol0"), col(P.sol[1], "sol1"), col(P.sol[2], "sol2"), 0], dither: "bayer4", suavidade: 0.8, onlyAt: undefined });
+    if (P.estrelas) {
+      const star = col(i.horario === "noite" ? "#e8ecff" : "#fff0c8", "estrela");
+      scatter(surf("estrelas"), { x: 0, y: 0, w: W, h: Math.round(HZ * (i.horario === "noite" ? 0.85 : 0.5)), colors: [star], densidade: i.horario === "noite" ? 0.014 : 0.008, forma: "pixel", distancia: 5, seed: i.seed * 3 + 1 });
+      scatter(surf("estrelas"), { x: 0, y: 0, w: W, h: Math.round(HZ * 0.45), colors: [star], densidade: 0.0035, forma: "cruz", distancia: 16, seed: i.seed * 3 + 2 });
+    }
+    // nuvens iluminadas por baixo (massa + gradiente vertical limitado à massa)
+    const nuv = P.nuvem.map((h, k) => col(h, `nuvem${k}`));
+    const rnd = (k: number) => { const t = Math.sin((i.seed + 1) * 9301 + k * 49297) * 233280; return t - Math.floor(t); };
+    for (let k = 0; k < Math.max(2, Math.round(W / 90)); k++) {
+      const cw = Math.round(W * (0.14 + rnd(k) * 0.16)), ch = Math.max(5, Math.round(H * (0.05 + rnd(k + 9) * 0.04))), cx0 = Math.round(rnd(k + 3) * (W - cw)), cy0 = Math.round(HZ * (0.12 + rnd(k + 5) * 0.4));
+      const sN = surf("nuvens");
+      for (let b = 0; b < 5; b++) draw.ellipse(sN, cx0 + Math.round(rnd(k * 7 + b) * cw * 0.5), cy0 + Math.round(rnd(k * 5 + b) * ch * 0.4), Math.round(cw * (0.35 + rnd(k + b) * 0.3)), Math.round(ch * (0.55 + rnd(b + 2) * 0.4)), nuv[1], true);
+      draw.ellipse(sN, cx0, cy0 + Math.round(ch * 0.35), cw, Math.round(ch * 0.5), nuv[1], true);
+      drawGradient(sN, { x: cx0 - 2, y: cy0 - 2, w: cw + cw, h: ch + 6, direction: "vertical", colors: nuv, dither: "bayer4", suavidade: 0.6, only: nuv[1] });
+    }
+    // planos de terreno: longe (claro, névoa) → perto (escuro)
+    for (let k = 0; k < i.planos; k++) {
+      const f = k / Math.max(1, i.planos - 1);
+      drawTerrain(surf(`plano${k + 1}`), { x: 0, w: W, topo: Math.round(HZ - H * (0.2 - 0.14 * f)), amp: Math.round(H * (0.19 - 0.11 * f)), rugosidade: 0.55, seed: i.seed * 11 + k * 5 + 3, ate: HZ, color: col(P.planos[Math.min(P.planos.length - 1, Math.round(f * (P.planos.length - 1)))], `plano${k + 1}`) });
+    }
+    // lago: reflexo do céu, brilho do sol, ondas
+    if (i.lago) {
+      const agua = P.agua.map((h, k) => col(h, `agua${k}`));
+      const sL = surf("lago");
+      drawGradient(sL, { x: 0, y: HZ, w: W, h: LAGO, direction: "vertical", colors: agua, dither: "bayer4", suavidade: 0.6 });
+      if (i.sol) drawGradient(sL, { x: sunX - sunR, y: HZ, w: sunR * 2, h: LAGO, direction: "radial", cx: sunX, cy: HZ, r: Math.round(LAGO * 1.1), colors: [col(P.sol[0], "sol0"), col(P.sol[1], "sol1"), 0], dither: "bayer4", suavidade: 0.8 });
+      scatter(sL, { x: 0, y: HZ + 2, w: W, h: LAGO - 3, colors: [agua[1], agua[2]], densidade: 0.045, forma: "onda", distancia: 3, seed: i.seed + 20 });
+      if (i.sol) scatter(sL, { x: sunX - sunR, y: HZ + 2, w: sunR * 2, h: LAGO - 3, colors: [col(P.sol[0], "sol0"), col(P.sol[1], "sol1")], densidade: 0.09, forma: "onda", distancia: 2, seed: i.seed + 31 });
+    }
+    // bosque (duas linhas: perto e longe), sobre a margem
+    if (i.floresta) {
+      const fc = P.floresta.map((h, k) => col(h, `floresta${k}`));
+      drawForest(surf("floresta"), { x: Math.round(W * 0.5), w: Math.round(W * 0.5), base: HZ + 2, alturaMin: Math.round(H * 0.1), alturaMax: Math.round(H * 0.22), larguraMin: 5, larguraMax: 9, folga: 0.3, seed: i.seed * 7 + 1, colors: [fc[0], fc[1]], tipo: "pinheiro" });
+      drawForest(surf("floresta"), { x: Math.round(W * 0.46), w: Math.round(W * 0.54), base: HZ + 4, alturaMin: Math.round(H * 0.18), alturaMax: Math.round(H * 0.34), larguraMin: 7, larguraMax: 12, folga: 0.25, seed: i.seed * 7 + 2, colors: [fc[1], fc[2]], tipo: "mista" });
+    }
+    // reflexo do bosque e dos planos mais próximos
+    if (i.lago) {
+      const fonte = [`plano${i.planos}`, ...(i.floresta ? ["floresta"] : [])];
+      const r = runCommand(p, "transform", { frames: 0, layer: "reflexo", op: "reflect", fonte, y: HZ + 1, alto: Math.min(LAGO - 2, Math.round(H * 0.16)), onda: 1.4, mistura: 0.55, dissolver: 0.15, agua: p.palette[col(P.agua[3], "agua3") - 1].key, preview: false });
+      if (!r.ok) throw new Error(r.text);
+    }
+    // campo: capim em degradê, tufos e flores
+    if (i.campo) {
+      const cap = P.capim.map((h, k) => col(h, `capim${k}`)), fl = P.flores.map((h, k) => col(h, `flor${k}`));
+      const y0 = HZ + LAGO, sC = surf("campo");
+      drawGradient(sC, { x: 0, y: y0, w: W, h: H - y0, direction: "vertical", colors: [cap[0], cap[1], cap[2], cap[3]], dither: "bayer4", suavidade: 0.6, ondas: 2 });
+      scatter(sC, { x: 0, y: y0 + 2, w: W, h: H - y0 - 2, colors: [cap[3], cap[2]], densidade: 0.07, forma: "tufo", distancia: 3, seed: i.seed + 40, ponta: cap[3] });
+      scatter(sC, { x: 0, y: y0 + 3, w: W, h: H - y0 - 3, colors: fl, densidade: 0.008, forma: "cruz", distancia: 7, seed: i.seed + 50 });
+    }
+    return result(p, `Paisagem "${i.horario}" criada em ${order.length} camadas (${W}x${H}, horizonte y=${HZ}${i.lago ? `, lago até y=${HZ + LAGO}` : ""}). Retoque à mão por cima, rode avaliar tipo=cena e reduce_colors.`, [0], i.preview);
+  },
+});
+
 const avaliar = def({
   name: "avaliar",
   description: [
@@ -2138,6 +2241,7 @@ export const COMMANDS = [
   transform,
   polish,
   batch,
+  paisagem,
   avaliar,
   inspecionar,
   reduceColors,

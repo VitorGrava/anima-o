@@ -1,0 +1,2 @@
+[{"name":"set_palette","input":{"colors":[{"key":"a","hex":"#a89f8c","name":"pedra"},{"key":"b","hex":"#6f6a63","name":"pedra-sombra"},{"key":"c","hex":"#b4483c","name":"telha"},{"key":"d","hex":"#5a2a2a","name":"telha-linha"},{"key":"e","hex":"#3a3536","name":"junta"},{"key":"g","hex":"#6d8a4a","name":"grama"}]}},
+{"name":"draw_shapes","input":{"shapes":[{"type":"rect","x":0,"y":0,"w":96,"h":96,"color":"g","filled":true},{"type":"box3d","x":16,"y":46,"w":38,"h":30,"prof":20,"xv":88,"yh":10,"rise":20,"frente":"a","lado":"b","telhado":"c","linhas_telhado":"d","espaco":3}]}}]
