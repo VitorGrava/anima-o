@@ -185,6 +185,7 @@ const PROCESSO = [
   "5. Faça o tamanho pequeno primeiro e só depois o grande (mesmo desenho, mais detalhe: costuras, rachaduras, fivelas, juntas). Em 16–32 px nada de gerador automático de volumes (blob/capsule dão contorno grosso): desenhe pixel a pixel.",
   "6. Antes de entregar: avaliar (nota e achados), check, e a imagem em tamanho real e ampliada. Diga o que ainda está pior que a referência; não diga 'está bom' sem comparar.",
   "Dicas de ferramenta (aprendidas no baú 32x32): a ÚLTIMA camada criada fica POR CIMA (cadeado/detalhe por último, fundo com position bottom); itens que se movem (tampa, braço) em camada própria e cada pose desenhada por script; para volumes orgânicos médios use transform shade forma=volume (bloco de luz e sombra) em vez de só o rebordo; set_frame_timing duration_ms=auto ajusta slow in/out; frames de pose segurada: aumente a duração em vez de duplicar, ou varie um brilho/partícula.",
+  "Personagem em várias camadas (mago: corpo, capa, cajado, cristal): NÃO use contorno seletivo por camada (abre furos e frestas quando uma camada atrasa); desenhe sem contorno e rode `polish` (ou transform outline seletivo) no fim: o contorno é feito sobre a figura inteira, frame a frame, numa camada `contorno`.",
   "Erros comuns que derrubam a nota: pose frontal simétrica e dura; cabeça-caixa; tronco em bloco sem vazios; membros grossos como tubos; cor saturada demais e vários acentos brigando; espada/arma colada ao corpo sem contraste; contorno preto grosso e uniforme.",
 ].join("\n");
 

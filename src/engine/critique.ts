@@ -151,7 +151,7 @@ function frameFindings(p: Project, f: number, scene: boolean): Omit<Finding, "fr
     }
   }
   const hueD = (a: number, b: number) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
-  const lit = big.filter((c) => c.lum >= 70);
+  const lit = big.filter((c) => c.lum >= 70 && !/ch[aã]o|ground|shadow/i.test(p.palette[c.idx - 1].name));   // sombra projetada no chão é chapada de propósito
   const flat = lit.filter((c) => !info.some((o) => o !== c && o.share >= 0.006 && o.share <= 0.5 * c.share && hueD(o.h, c.h) < 18 && Math.abs(o.lum - c.lum) >= 8 && Math.abs(o.lum - c.lum) <= 45 && (adj.get(c.idx < o.idx ? `${c.idx}:${o.idx}` : `${o.idx}:${c.idx}`) ?? 0) >= 3));
   if (!scene && area >= 150 && lit.length >= 2 && flat.length >= Math.ceil(lit.length / 2)) {
     add("cor", "aviso", "arte_chapada", `${flat.length} de ${lit.length} região(ões) grande(s) está(ão) chapada(s) (${flat.slice(0, 4).map((c) => p.palette[c.idx - 1].name).join(", ")}): uma cor só, sem luz nem sombra, o que lê como "adesivo" e não como volume.`, "transform op shade (ou `polish`): 3 tons com mudança de matiz");
