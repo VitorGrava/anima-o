@@ -4,7 +4,7 @@ const W=32,H=32,N=10;
 const pal=[["o","#34223a","contorno"],["q","#c0634a","madeira-luz"],["r","#a04c3e","madeira"],["R","#74302e","madeira-sombra"],
 ["g","#e8c880","ouro"],["G","#c89860","ouro-sombra"],["w","#e6f0f2","ouro-brilho"],
 ["S","#b8c4cc","aco-luz"],["s","#7a8a9a","aco"],["d","#4a4a64","aco-sombra"],
-["n","#121234","interior"],["y","#ffe066","moeda"],["Y","#d8a020","moeda-sombra"],["z","#fff8cc","brilho"],["k","#6a5670","sombra-chao"],["b","#7a4418","ouro-contorno"]];
+["n","#121234","interior"],["y","#ffe066","moeda"],["Y","#d8a020","moeda-sombra"],["z","#fff8cc","brilho"],["k","#6a5670","sombra-chao"],["b","#7a4418","ouro-contorno"],["W","#262658","parede"]];
 const grid=()=>Array.from({length:H},()=>Array(W).fill("."));
 const stamp=(g,rows,x,y)=>rows.forEach((r,j)=>[...r].forEach((c,i)=>{if(c!=="."&&g[y+j]&&x+i>=0&&x+i<W)g[y+j][x+i]=c;}));
 const chk=(rows,w,n)=>rows.forEach((r,i)=>{if([...r].length!==w)throw new Error(`${n} ${i}: ${[...r].length} ${r}`)});
@@ -36,7 +36,7 @@ const LY=10;                    // topo da tampa fechada
 const BY=LY+8;                  // topo do corpo
 const X=4;
 // fases: [subida, altura da tampa, estado]
-const ph=[[0,8],[-1,8],[2,8],[5,7],[8,5],[7,5],[6,5],[6,5],[6,5],[6,5]];
+const ph=[[0,8],[-1,8],[2,8],[4,7],[6,6],[8,5],[7,5],[6,5],[6,5],[6,5]];
 const sample=(rows,h)=>Array.from({length:h},(_,k)=>rows[Math.min(rows.length-1,Math.round(k*(rows.length-1)/(h-1||1)))]);
 const coins=(t)=>{
   const rows=[".yyyYyyyYyyyyYyyyyyyy.",".yYyyyyYyyyyyyyyYyyyy."];
@@ -51,19 +51,20 @@ function frame(t){
   if(open){
     const gap=Math.max(rise,0);
     const edge=(r)=>"og"+r+"go";
-    for(let k=0;k<gap;k++) stamp(L.interior,["oG"+"n".repeat(20)+"Go"],X,BY-gap+k);
-    if(gap>=1) stamp(L.interior,["o"+"G"+"n".repeat(20)+"G"+"o"],X,BY-1);
+    for(let k=0;k<gap;k++) stamp(L.interior,["o"+(k<2?"n":"W").repeat(22)+"o"],X,BY-gap+k);
+    
     if(t>=4){
       const heap=[[18],[15],[10],[4]];
-      heap.forEach(([w],k)=>{ let r=""; for(let i=0;i<w;i++) r+=(i===0||i===w-1)?"b":(k===0&&i%4===2)?"Y":"y"; stamp(L.interior,[r],X+2+((20-w)>>1),BY-2-k); });
-      stamp(L.interior,["b".repeat(4)],X+2+8,BY-6);
-      if(t>=6){const k=t-6; {const cx=X+[8,12,16,19][k]; stamp(L.interior,["y","zzz","y"].map((r,j)=>Array(32).fill(".").map((_,i)=>(j===1?Math.abs(i-cx)<=1:i===cx)?(r[0]):".").join("")),0,BY-4);}
-        stamp(L.interior,[Array(32).fill(".").map((_,i)=>i===X+[10,12,14,13][k]?"y":".").join("")],0,BY-6-[1,3,2,0][k]);}
+      stamp(L.interior,["b".repeat(20)],X+2,BY-2);
+      heap.forEach(([w],k)=>{ let r=""; for(let i=0;i<w;i++) r+=(i===0||i===w-1)?"b":(k===0&&i%4===2)?"Y":"y"; stamp(L.interior,[r],X+2+((20-w)>>1),BY-3-k); });
+      stamp(L.interior,["b".repeat(4)],X+2+8,BY-7);
+      if(t>=6){const k=t-6; {const cx=X+[8,12,16,19][k]; stamp(L.interior,["y","zzz","y"].map((r,j)=>Array(32).fill(".").map((_,i)=>(j===1?Math.abs(i-cx)<=1:i===cx)?(r[0]):".").join("")),0,BY-5);}
+        stamp(L.interior,[Array(32).fill(".").map((_,i)=>i===X+[10,12,14,13][k]?"y":".").join("")],0,BY-7-[1,3,2,0][k]);}
     }
   }
   stamp(L.corpo,body,X,BY);
   if(t>=3){ stamp(L.corpo,["o"+"g".repeat(22)+"o"],X,BY-1); stamp(L.corpo,["oSSo","osdo"],X+10,BY-1); }
-  const src=lid;
+  const src=(t>=3)?lid.map((r,i)=>i===1?EAR+"o"+"qqqqq"+STR+"qqqqq"+"o"+EAR:r):lid;
   const rows=sample(src,h);
   const ly=BY-h-(open?Math.max(0,rise-(8-h)):0)+(open?0:0);
   const topY=BY-h-rise;
