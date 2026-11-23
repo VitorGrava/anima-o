@@ -198,3 +198,53 @@ describe("curve, offsets por frame e relatórios enxutos", () => {
     expect(avisoFundo(p, "#e8e0d0")).toBeNull();
   });
 });
+
+describe("terrain, forest, only composto e avisos", () => {
+  it("terrain desenha uma crista preenchida até a linha pedida; forest planta árvores variadas na base", () => {
+    const p = createProject({ width: 80, height: 50 });
+    pal(p, "abc");
+    ok(p, "draw_shapes", { shapes: [{ type: "terrain", topo: 20, amp: 14, seed: 3, ate: 40, color: "a" }, { type: "forest", base: 44, altura_min: 8, altura_max: 18, cores: ["b", "c"], seed: 5 }] });
+    const c = cel(p), A = p.palette.findIndex((x) => x.key === "a") + 1;
+    let x0 = 0, filled = 0;
+    for (let x = 0; x < 80; x++) { let top = -1; for (let y = 0; y < 50; y++) if (c[y * 80 + x] === A) { top = y; break; } if (top >= 0) { filled++; x0 = Math.max(x0, 40 - top); } }
+    expect(filled).toBeGreaterThan(70);                     // a crista cobre quase toda a largura
+    expect(new Set(Array.from(c).filter((v) => v)).size).toBe(3);
+    const treeTops = new Set<number>();
+    const B = p.palette.findIndex((x) => x.key === "b") + 1, C = B + 1;
+    for (let x = 0; x < 80; x++) for (let y = 0; y < 50; y++) if (c[y * 80 + x] === B || c[y * 80 + x] === C) { treeTops.add(y); break; }
+    expect(treeTops.size).toBeGreaterThan(3);               // alturas diferentes (não é carimbo)
+  });
+  it("only enxerga cores de OUTRAS camadas e scatter/gradient avisam quando não desenham nada", () => {
+    const p = createProject({ width: 40, height: 40 });
+    pal(p, "abc");
+    ok(p, "add_layer", { name: "campo" }); ok(p, "add_layer", { name: "flores" });
+    ok(p, "draw_shapes", { layer: "campo", shapes: [{ type: "rect", x: 0, y: 20, w: 40, h: 20, color: "a", filled: true }] });
+    const bom = ok(p, "draw_shapes", { layer: "flores", shapes: [{ type: "scatter", x: 0, y: 0, w: 40, h: 40, colors: ["b"], densidade: 0.2, only: "a", seed: 2 }] });
+    expect(bom.text).not.toMatch(/ATENÇÃO/);
+    const fl = p.frames[0].cels[p.layers[2].id];
+    expect(fl.some((v, i) => v && Math.floor(i / 40) >= 20)).toBe(true);
+    expect(fl.some((v, i) => v && Math.floor(i / 40) < 20)).toBe(false);   // só caiu sobre o campo, que está em outra camada
+    const ruim = ok(p, "draw_shapes", { layer: "flores", shapes: [{ type: "scatter", x: 0, y: 0, w: 40, h: 10, colors: ["b"], densidade: 0.2, only: "a", seed: 3 }] });
+    expect(ruim.text).toMatch(/ATENÇÃO: scatter .* não desenhou nenhum elemento/);
+  });
+  it("haze com faixa e perfil pico some nas bordas; reflect dissolver deixa a água; reduce_colors explica", () => {
+    const p = createProject({ width: 20, height: 20 });
+    ok(p, "set_palette", { colors: [{ key: "a", hex: "#203040", name: "monte" }, { key: "b", hex: "#ffe0c0", name: "ar" }] });
+    ok(p, "draw_shapes", { shapes: [{ type: "rect", x: 0, y: 0, w: 20, h: 20, color: "a", filled: true }] });
+    ok(p, "transform", { frames: 0, op: "haze", color: "b", quantidade: 0.8, y_de: 4, y_ate: 16, perfil: "pico" });
+    const c = cel(p), lum = (i: number) => { const h = p.palette[c[i] - 1].hex; return parseInt(h.slice(1, 3), 16); };
+    const row = (y: number) => { let t = 0; for (let x = 0; x < 20; x++) t += lum(y * 20 + x); return t / 20; };
+    expect(row(10)).toBeGreaterThan(row(5) + 10);            // meio da faixa mais enevoado que a borda
+    expect(row(2)).toBeCloseTo(0x20, 0);                      // fora da faixa: intacto
+    const r = ok(p, "reduce_colors", { cores: 50 });
+    expect(r.text).toMatch(/já está dentro do limite/);
+  });
+  it("export de projeto vazio avisa", async () => {
+    const { avisoVazio } = await import("../src/engine/index.ts");
+    expect(avisoVazio(createProject({ width: 8, height: 8 }))).toMatch(/nenhum pixel visível/);
+    const p = createProject({ width: 8, height: 8 });
+    pal(p, "a");
+    ok(p, "draw_shapes", { shapes: [{ type: "pixels", points: [[1, 1]], color: "a" }] });
+    expect(avisoVazio(p)).toBeNull();
+  });
+});

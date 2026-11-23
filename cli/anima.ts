@@ -29,6 +29,7 @@ import {
   importImage,
   compareToReference,
   avisoFundo,
+  avisoVazio,
   importIntoProject,
   runCommand,
   type CommandResult,
@@ -130,7 +131,13 @@ export async function main(argv: string[]): Promise<number> {
       const [file, size = "32x32", fps = "8"] = args;
       if (!file) break;
       const [w, h] = size.toLowerCase().split("x").map(Number);
+      let aviso = "";
+      try {
+        const antes = JSON.parse(await readFile(file, "utf8")) as { frames?: unknown[]; layers?: unknown[]; width?: number; height?: number };
+        aviso = `Aviso: já existia "${file}" (${antes.width}x${antes.height}, ${antes.frames?.length ?? "?"} frame(s), ${antes.layers?.length ?? "?"} camada(s)) e foi SOBRESCRITO. Se foi sem querer, recupere do git.\n`;
+      } catch { /* arquivo novo */ }
       await store.open(file, { width: w, height: h || w, fps: Number(fps) }, true);
+      if (aviso) console.log(aviso.trimEnd());
       if (vazio) runCommand(store.project, "remove_colors", { keys: ["0", "1"] });
       if (camada) runCommand(store.project, "update_layer", { layer: store.project.layers[0].name, rename: camada });
       if (vazio || camada) await store.save();
@@ -296,7 +303,7 @@ export async function main(argv: string[]): Promise<number> {
         format, path: out, scale, columns: columns ? Number(columns) : undefined, frame: Number(frame ?? 0), fundo, margem: margem ? Number(margem) : undefined, sombra, vaiEVolta, meta,
       });
       console.log(`Exportado: ${done}`);
-      const av = avisoFundo(store.project, fundo);
+      const av = avisoVazio(store.project) ?? avisoFundo(store.project, fundo);
       if (av) console.log(av);
       return 0;
     }

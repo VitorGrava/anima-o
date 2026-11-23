@@ -1,2 +1,6 @@
 [{"name":"add_frames","input":{"count":7}},
-{"name":"rig_create","input":{"template":"humanoide","height":52,"style":"estilizado","weapon_length":16,"ground":60,"x":30}}]
+{"name":"add_layer","input":{"name":"chao","position":"bottom"}},
+{"name":"rig_create","input":{"template":"humanoide","height":50,"style":"estilizado","weapon_length":17,"ground":58,"x":30,
+ "materials":{"skin":"#d9a37e","hair":"#7a2a2a","top":"#a8322e","bottom":"#4a5468","boots":"#5a3a28","metal":"#aab6c8","gold":"#d9a93a"}}},
+{"name":"rig_walk","input":{"mode":"no_lugar","cycles":1,"frames":8,"scroll_layer":"chao"}},
+{"name":"rig_bake","input":{"outline":"auto","preview":false}}]

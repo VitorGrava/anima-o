@@ -81,3 +81,9 @@ export function avisoFundo(p: Project, fundo?: string): string | null {
   const bg = lum(fundo);
   return Math.abs(darkest - bg) < 28 ? `Aviso: o fundo ${fundo} tem brilho quase igual ao da cor mais escura da figura (diferença ${Math.round(Math.abs(darkest - bg))} de 255): o contorno vai sumir. Use um fundo mais claro ou bem mais escuro que o contorno.` : null;
 }
+
+/** aviso quando não há nenhum pixel visível (exportar projeto vazio gera imagem em branco sem erro) */
+export function avisoVazio(p: Project): string | null {
+  for (let f = 0; f < p.frames.length; f++) if (flattenFrame(p, f).some((v) => v)) return null;
+  return "Aviso: o projeto não tem nenhum pixel visível; a imagem exportada está em branco. Um comando anterior pode ter falhado (confira o caminho dos arquivos e as mensagens de erro).";
+}

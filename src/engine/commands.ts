@@ -10,7 +10,7 @@ import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.t
 import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
 import { autoShade, cleanCorners, detailColors, selectiveOutline } from "./polish.ts";
-import { drawBox3d, drawCurve, drawGradient, fillPolygon, scatter } from "./paint.ts";
+import { drawBox3d, drawCurve, drawForest, drawGradient, drawTerrain, fillPolygon, scatter } from "./paint.ts";
 import { BG_LAYER, evaluateBeauty, formatCritique, unionBox } from "./critique.ts";
 import { REFERENCE_TOPICS, bodyProportions, darkOutline, makeRamp, reference } from "./reference.ts";
 import { HUMANOID_BONES, quadrupedBones, walkPoses, boneSegments, capsuleArt, clampAngles, humanoidAngles, humanoidBones, groundedRoot, ellipseArt, renderRigFrame } from "./skeleton.ts";
@@ -1343,6 +1343,27 @@ const shape = z.discriminatedUnion("type", [
     r2: z.number().min(0.5).max(40).optional().describe("raio no fim (padrão: igual ao r1)"),
     color: colorRef,
   }).describe("CURVA de espessura variável (rabo, tentáculo, corda, cabelo, cobra): passa pelos pontos com raio de r1 a r2. Cor chapada; contorne depois com draw_rows contorno=seletivo ou transform outline mode=seletivo."),
+  z.object({
+    type: z.literal("terrain"),
+    x: z.number().int().default(0), w: z.number().int().min(2).optional().describe("largura (padrão: o canvas inteiro)"),
+    topo: z.number().int().describe("altura média da crista (y)"),
+    amp: z.number().min(0).max(120).default(20).describe("variação da crista em px (montanha alta = 40+, colina suave = 8)"),
+    rugosidade: z.number().min(0.2).max(0.9).default(0.55).describe("0.4 = suave, 0.7 = áspero"),
+    seed: z.number().int().default(1),
+    ate: z.number().int().describe("preenche da crista até esta linha y (o chão do plano)"),
+    color: colorRef,
+  }).describe("CRISTA DE TERRENO fractal (montanhas, colinas, dunas) já preenchida. Um por plano, com seeds e cores diferentes; depois use transform haze por plano."),
+  z.object({
+    type: z.literal("forest"),
+    x: z.number().int().default(0), w: z.number().int().min(2).optional().describe("largura (padrão: o canvas inteiro)"),
+    base: z.number().int().describe("linha y onde as árvores se assentam"),
+    altura_min: z.number().int().min(3), altura_max: z.number().int().min(3),
+    largura_min: z.number().int().min(2).default(5), largura_max: z.number().int().min(2).default(9),
+    folga: z.number().min(0).max(0.8).default(0.25).describe("sobreposição entre árvores vizinhas (0 = lado a lado, 0.5 = bem juntas)"),
+    seed: z.number().int().default(1),
+    cores: z.array(colorRef).min(1).max(6).describe("tons sorteados por árvore (variação evita o efeito de carimbo)"),
+    tipo: z.enum(["pinheiro", "redonda", "mista"]).default("pinheiro"),
+  }).describe("BOSQUE: muitas árvores de alturas, larguras e tons variados numa linha de base (pinheiros em camadas ou copas redondas). Duas chamadas com bases e cores diferentes dão profundidade."),
   z.object({ type: z.literal("fill"), x: z.number().int(), y: z.number().int(), color: colorRef }).describe("Balde de tinta a partir de (x, y)"),
 ]);
 
@@ -1418,10 +1439,12 @@ const drawShapes = def({
   run(p, i) {
     const layer = findLayer(p, i.layer);
     const list = resolveFrames(p, i.frames);
+    const avisos: string[] = [];
     for (const f of list) {
       const s = { width: p.width, height: p.height, data: getCel(p, f, layer.id) };
+      const onlyComposto = (cor: string) => { const flat = flattenFrame(p, f), idx = colorIndex(p, cor); return (x: number, y: number) => flat[y * p.width + x] === idx; };
       for (const sh of i.shapes) {
-        const c = sh.type === "blob" || sh.type === "capsule" || sh.type === "gradient" || sh.type === "scatter" || sh.type === "box3d" ? 0 : colorIndex(p, sh.color);
+        const c = sh.type === "blob" || sh.type === "capsule" || sh.type === "gradient" || sh.type === "scatter" || sh.type === "box3d" || sh.type === "terrain" || sh.type === "forest" ? 0 : colorIndex(p, sh.color);
         switch (sh.type) {
           case "pixels":
             for (const pt of sh.points) { const [x, y] = Array.isArray(pt) ? pt : [pt.x, pt.y]; draw.setPixel(s, x!, y!, c); }
@@ -1449,6 +1472,12 @@ const drawShapes = def({
             drawBox3d(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, prof: sh.prof, xv: sh.xv, yh: sh.yh, rise: sh.rise, frente: ci(sh.frente), lado: ci(sh.lado), telhado: ci(sh.telhado ?? sh.frente), empena: ci(sh.empena ?? sh.frente), linhas: sh.linhas ? ci(sh.linhas) : undefined, linhasTelhado: sh.linhas_telhado ? ci(sh.linhas_telhado) : undefined, espaco: sh.espaco });
             break;
           }
+          case "terrain":
+            drawTerrain(s, { x: sh.x, w: sh.w ?? p.width - sh.x, topo: sh.topo, amp: sh.amp, rugosidade: sh.rugosidade, seed: sh.seed, ate: sh.ate, color: colorIndex(p, sh.color) });
+            break;
+          case "forest":
+            if (!drawForest(s, { x: sh.x, w: sh.w ?? p.width - sh.x, base: sh.base, alturaMin: sh.altura_min, alturaMax: Math.max(sh.altura_min, sh.altura_max), larguraMin: sh.largura_min, larguraMax: Math.max(sh.largura_min, sh.largura_max), folga: sh.folga, seed: sh.seed, colors: sh.cores.map((k) => colorIndex(p, k)), tipo: sh.tipo })) avisos.push("forest não desenhou nenhuma árvore (largura 0?)");
+            break;
           case "curve":
             drawCurve(s, sh.points as [number, number][], sh.r1, sh.r2 ?? sh.r1, c);
             break;
@@ -1456,16 +1485,16 @@ const drawShapes = def({
             fillPolygon(s, sh.points as [number, number][], c);
             break;
           case "gradient":
-            drawGradient(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, direction: sh.direction, colors: sh.colors.map((k) => colorIndex(p, k)), dither: sh.dither, suavidade: sh.suavidade, ondas: sh.ondas, only: sh.only ? colorIndex(p, sh.only) : 0, cx: sh.cx, cy: sh.cy, r: sh.r });
+            if (drawGradient(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, direction: sh.direction, colors: sh.colors.map((k) => colorIndex(p, k)), dither: sh.dither, suavidade: sh.suavidade, ondas: sh.ondas, only: sh.only ? colorIndex(p, sh.only) : 0, onlyAt: sh.only ? onlyComposto(sh.only) : undefined, cx: sh.cx, cy: sh.cy, r: sh.r }) === 0) avisos.push(`gradient em (${sh.x},${sh.y}) ${sh.w}x${sh.h} não pintou nada${sh.only ? `: a cor only=${sh.only} não está em nenhuma camada visível nessa área` : ""}.`);
             break;
           case "scatter":
-            scatter(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, colors: sh.colors.map((k) => colorIndex(p, k)), densidade: sh.densidade, forma: sh.forma, distancia: sh.distancia, seed: sh.seed + (sh.variar_por_frame ? f * 7919 : 0), only: sh.only ? colorIndex(p, sh.only) : 0, ponta: sh.ponta ? colorIndex(p, sh.ponta) : undefined, blocked: sh.evitar?.length ? ((cels) => (x: number, y: number) => cels.some((c) => c[y * p.width + x] !== 0))(sh.evitar.map((n) => getCel(p, f, findLayer(p, n).id))) : undefined });
+            if (scatter(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, colors: sh.colors.map((k) => colorIndex(p, k)), densidade: sh.densidade, forma: sh.forma, distancia: sh.distancia, seed: sh.seed + (sh.variar_por_frame ? f * 7919 : 0), only: sh.only ? colorIndex(p, sh.only) : 0, onlyAt: sh.only ? onlyComposto(sh.only) : undefined, ponta: sh.ponta ? colorIndex(p, sh.ponta) : undefined, blocked: sh.evitar?.length ? ((cels) => (x: number, y: number) => cels.some((c) => c[y * p.width + x] !== 0))(sh.evitar.map((n) => getCel(p, f, findLayer(p, n).id))) : undefined }) === 0) avisos.push(`scatter em (${sh.x},${sh.y}) ${sh.w}x${sh.h} não desenhou nenhum elemento${sh.only ? `: a cor only=${sh.only} não foi achada em nenhuma camada visível nessa área (confira a cor e se o plano já foi desenhado antes)` : sh.evitar ? ": evitar bloqueou a área toda" : " (densidade baixa demais?)"}.`);
             break;
         }
       }
     }
     const thick = Math.max(p.width, p.height) <= 48 && i.shapes.some((sh) => sh.type === "blob" || sh.type === "capsule") ? "\nAviso: blob/capsule geram contorno grosso e volumes inchados em canvas pequeno (≤ 48 px). Para sprites assim desenhe com draw_rows (pixel a pixel, contorno=seletivo) e use blob/capsule só em rascunho." : "";
-    return result(p, `${i.shapes.length} forma(s) desenhada(s) em "${layer.name}", ${fmtList(list)}.${thick}`, list, i.preview);
+    return result(p, `${i.shapes.length} forma(s) desenhada(s) em "${layer.name}", ${fmtList(list)}.${thick}${avisos.length ? `\nATENÇÃO: ${[...new Set(avisos)].slice(0, 4).join(" ")}` : ""}`, list, i.preview);
   },
 });
 
@@ -1478,7 +1507,7 @@ const transform = def({
     "- replace_color: troca a cor `from` por `to`",
     "- outline: contorna automaticamente a silhueta com `color`; com mode=\"seletivo\" (sel-out) cada trecho usa um tom escuro do material vizinho, mais claro no lado da luz, em vez de um halo uniforme",
     "- shade: SOMBREAMENTO AUTOMÁTICO de arte chapada: cada região de cor única ganha o tom claro na borda de cima/esquerda e o tom de sombra na de baixo/direita (rampa com mudança de matiz, cores novas criadas na paleta). Desenhe chapado, aplique shade e depois retoque só os detalhes",
-    "- reflect: REFLEXO NA ÁGUA: espelha as camadas `fonte` em torno da linha `y` para dentro de `alto` px abaixo, com ondulação horizontal, cor misturada à `agua` e esmaecendo por dithering com a distância; desenha na camada indicada (ponha-a acima da água)",
+    "- reflect: REFLEXO NA ÁGUA: espelha as camadas `fonte` em torno da linha `y` para dentro de `alto` px abaixo, com ondulação horizontal, cor misturada à `agua` e esmaecendo por dithering com a distância; desenha na camada indicada (ponha-a ACIMA da água e ABAIXO dos brilhos do sol; ela é opaca onde reflete: use `dissolver` 0.2–0.4 para deixar a água aparecer)",
     "- haze: PERSPECTIVA ATMOSFÉRICA: mistura todas as cores da camada com a cor `color` (a cor do ar/horizonte) na `quantidade` dada: o que está longe fica mais claro, menos contrastado e mais perto da cor do céu. Aplique em cada plano com força crescente com a distância (montanhas do fundo 0.4, do meio 0.2, perto 0.05)",
     "- clean: limpa quinas em L do contorno `color` (pixel perfect): tira o pixel de ponta que engrossa a linha",
     "- rotate: gira `angle` graus (positivo = horário) em torno do pivô (cx, cy). Ótimo para braços, armas e objetos girando. Gire sempre a partir de uma cópia limpa (copy_layer_content) em vez de girar várias vezes o mesmo frame, para não acumular distorção.",
@@ -1504,6 +1533,10 @@ const transform = def({
     diagonal: z.boolean().optional().describe("outline: incluir diagonais"),
     mode: z.enum(["uniforme", "seletivo"]).optional().describe('outline: "seletivo" (sel-out) usa um tom escuro do material vizinho, mais claro no lado da luz, e não precisa de `color`'),
     luz: z.enum(["cima-esquerda", "cima", "cima-direita", "esquerda", "direita"]).optional().describe("shade: de onde vem a luz (padrão cima-esquerda; mantenha a MESMA em toda a arte)"),
+    y_de: z.number().int().optional().describe("haze: primeira linha (y) afetada; omitido = o quadro todo"),
+    y_ate: z.number().int().optional().describe("haze: última linha (y) afetada"),
+    perfil: z.enum(["uniforme", "pico", "subindo", "descendo"]).optional().describe("haze com faixa: como a força varia de y_de a y_ate. pico = névoa suave que some nas bordas (faixa de neblina sobre o lago); subindo/descendo = rampa. A transição usa dithering, então não vira faixa dura"),
+    dissolver: z.number().min(0).max(0.9).optional().describe("reflect: fração do reflexo que se dissolve por dithering para deixar a água aparecer (0 = opaco; 0.3 = reflexo translúcido)"),
     quantidade: z.number().min(0).max(1).optional().describe("haze: força da névoa (0.1 = sutil, 0.4 = longe, 0.6 = quase some no céu)"),
     fonte: z.array(z.string()).max(12).optional().describe("reflect: camadas a refletir (ex.: montanhas, floresta)"),
     y: z.number().int().optional().describe("reflect: linha do espelho (a margem da água): o que está acima dela aparece invertido abaixo"),
@@ -1551,12 +1584,23 @@ const transform = def({
         case "haze": {
           if (i.color === undefined || i.quantidade === undefined) throw new Error("haze precisa de `color` (cor da névoa) e `quantidade` (0..1).");
           const fog = p.palette[colorIndex(p, i.color) - 1].hex;
-          const cache = new Map<number, number>();
+          const cache = new Map<string, number>();
+          const y0 = i.y_de ?? 0, y1 = i.y_ate ?? p.height - 1, LV = 4;
+          const M4 = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+          const perfil = i.perfil ?? "uniforme";
           for (let k = 0; k < s.data.length; k++) {
             const c = s.data[k];
             if (!c) continue;
-            let m = cache.get(c);
-            if (!m) { m = ensureColor(p, mix(p.palette[c - 1].hex, fog, i.quantidade), `${p.palette[c - 1].name.replace(/-nevoa\d+$/, "")}-nevoa${Math.round(i.quantidade * 100)}`); cache.set(c, m); }
+            const x = k % p.width, y = (k - x) / p.width;
+            if (y < y0 || y > y1) continue;
+            const t = y1 > y0 ? (y - y0) / (y1 - y0) : 0.5;
+            const fator = perfil === "pico" ? 1 - Math.abs(2 * t - 1) : perfil === "subindo" ? t : perfil === "descendo" ? 1 - t : 1;
+            const exato = fator * LV, base = Math.floor(exato), frac = exato - base;
+            const lvl = perfil === "uniforme" ? LV : Math.min(LV, base + (frac > (M4[y % 4][x % 4] + 0.5) / 16 ? 1 : 0));
+            if (lvl <= 0) continue;
+            const key = `${c}:${lvl}`;
+            let m = cache.get(key);
+            if (!m) { const q = Math.round(i.quantidade * (lvl / LV) * 100); m = ensureColor(p, mix(p.palette[c - 1].hex, fog, i.quantidade * (lvl / LV)), `${p.palette[c - 1].name.replace(/-nevoa\d+$/, "")}-nevoa${q}`); cache.set(key, m); }
             s.data[k] = m;
           }
           break;
@@ -1578,6 +1622,7 @@ const transform = def({
             for (let x = 0; x < p.width; x++) {
               const c = src[sy * p.width + (x - shift + p.width) % p.width];
               if (!c) continue;
+              if (i.dissolver && (M4[y % 4][x % 4] + 0.5) / 16 < i.dissolver) continue;                // reflexo translúcido: deixa a água aparecer
               if (fade > 0.7 && (M4[y % 4][x % 4] + 0.5) / 16 < (fade - 0.7) / 0.3) continue;   // só o final do reflexo se dissolve (dithering); antes é sólido
               const lvl = Math.min(2, Math.floor(fade * 3));
               const key = `${c}:${lvl}`;
@@ -1655,7 +1700,8 @@ const reduceColors = def({
     for (let k = 1; k <= n; k++) if (!alive.has(k)) remap[k] = usage[k] > 0 || target.has(k) ? remap[root(k)] || 0 : 0;
     for (const f of p.frames) for (const cel of Object.values(f.cels)) for (let k = 0; k < cel.length; k++) if (cel[k]) cel[k] = remap[cel[k]];
     p.palette = kept;
-    return { changed: true, text: `Paleta reduzida de ${before} (em uso) para ${kept.length} cores.` };
+    const semUso = n - before;
+    return { changed: true, text: before <= i.cores ? `A paleta já está dentro do limite: ${before} cor(es) em uso (limite ${i.cores}); removi ${semUso} entrada(s) sem uso. Total agora ${kept.length}.` : `Paleta reduzida de ${before} (em uso) para ${kept.length} cores (removi também ${semUso} entrada(s) sem uso).` };
   },
 });
 

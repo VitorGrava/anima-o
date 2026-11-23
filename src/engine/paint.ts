@@ -26,6 +26,8 @@ export interface GradientSpec {
   cx?: number; cy?: number; r?: number;    // radial
   /** só pinta onde já há esta cor (0 = em qualquer lugar); ótimo para texturar um plano sem vazar */
   only?: number;
+  /** como `only`, mas decidido pela imagem COMPOSTA de todas as camadas (a cor pode estar em outra camada) */
+  onlyAt?: (x: number, y: number) => boolean;
   /** ondulação da borda dos passos (px): quebra as faixas retas */
   ondas?: number;
 }
@@ -34,16 +36,17 @@ export interface GradientSpec {
  * Degradê com transição por dithering. Cada passo da rampa tem uma zona sólida e uma zona de transição
  * dithered; o dither fraco (< 10%) ou quase total (> 90%) é arredondado para não gerar "poeira" de pixels soltos.
  */
-export function drawGradient(s: Surface, g: GradientSpec): void {
+export function drawGradient(s: Surface, g: GradientSpec): number {
   const n = g.colors.length;
-  if (n < 2) return;
+  if (n < 2) return 0;
+  let painted = 0;
   const M = g.dither === "nenhum" ? null : bayer(g.dither === "bayer2" ? 2 : g.dither === "bayer8" ? 8 : 4);
   const size = M ? M.length : 1;
   const cx = g.cx ?? g.x + g.w / 2, cy = g.cy ?? g.y + g.h / 2, r = g.r ?? Math.max(g.w, g.h) / 2;
   const suav = Math.max(0.1, Math.min(1, g.suavidade));
   for (let y = g.y; y < g.y + g.h; y++) for (let x = g.x; x < g.x + g.w; x++) {
     if (x < 0 || y < 0 || x >= s.width || y >= s.height) continue;
-    if (g.only && s.data[y * s.width + x] !== g.only) continue;
+    if (g.onlyAt ? !g.onlyAt(x, y) : g.only && s.data[y * s.width + x] !== g.only) continue;
     let t = g.direction === "vertical" ? (y - g.y + 0.5) / g.h : g.direction === "horizontal" ? (x - g.x + 0.5) / g.w : Math.hypot(x + 0.5 - cx, y + 0.5 - cy) / r;
     if (g.ondas) t += Math.sin(x * 0.45 + y * 0.2) * (g.ondas / (g.direction === "horizontal" ? g.w : g.direction === "radial" ? r : g.h)) * 0.5;
     if (g.direction === "radial" && t > 1) continue;                    // radial pinta só dentro do raio
@@ -53,8 +56,9 @@ export function drawGradient(s: Surface, g: GradientSpec): void {
     if (q < 0.1) q = 0; else if (q > 0.9) q = 1;
     const th = M ? (M[y % size][x % size] + 0.5) / (size * size) : 0.5;
     const c = q > th ? g.colors[i + 1] : g.colors[i];
-    if (c) s.data[y * s.width + x] = c;                                  // cor "." (transparente) deixa o que já estava: o degradê se dissolve no fundo
+    if (c) { s.data[y * s.width + x] = c; painted++; }                                  // cor "." (transparente) deixa o que já estava: o degradê se dissolve no fundo
   }
+  return painted;
 }
 
 /** Polígono preenchido (regra par-ímpar por linha de varredura). `points` em pixels inteiros. */
@@ -85,6 +89,7 @@ export interface ScatterSpec {
   distancia: number;                        // distância mínima (Chebyshev) entre elementos: evita aglomerar
   seed: number;
   only?: number;                            // só onde já há esta cor (0 = qualquer lugar)
+  onlyAt?: (x: number, y: number) => boolean;   // como only, pela imagem composta de todas as camadas
   /** cor da ponta do tufo/traço (opcional) */
   ponta?: number;
   /** (x,y) bloqueado: não pinta (ex.: onde outra camada já tem arte) */
@@ -104,7 +109,7 @@ export function scatter(s: Surface, sp: ScatterSpec): number {
   const tries = Math.round(area * Math.min(1, sp.densidade) * 1.6);
   const put = (x: number, y: number, c: number) => {
     if (x < 0 || y < 0 || x >= s.width || y >= s.height) return;
-    if (sp.only && s.data[y * s.width + x] !== sp.only && c !== 0) return;
+    if (sp.onlyAt ? !sp.onlyAt(x, y) : sp.only && s.data[y * s.width + x] !== sp.only && c !== 0) return;
     if (sp.blocked?.(x, y)) return;
     s.data[y * s.width + x] = c;
   };
@@ -114,7 +119,7 @@ export function scatter(s: Surface, sp: ScatterSpec): number {
   for (let t = 0; t < tries && n < area * Math.min(1, sp.densidade); t++) {
     const x = sp.x + Math.floor(rnd() * sp.w), y = sp.y + Math.floor(rnd() * sp.h);
     if (x < 0 || y < 0 || x >= s.width || y >= s.height) continue;
-    if (sp.only && s.data[y * s.width + x] !== sp.only) continue;
+    if (sp.onlyAt ? !sp.onlyAt(x, y) : sp.only && s.data[y * s.width + x] !== sp.only) continue;
     if (sp.blocked?.(x, y)) continue;
     if (sp.distancia > 1) {
       let ok = true;
@@ -210,4 +215,47 @@ export function drawCurve(s: Surface, pts: [number, number][], r1: number, r2: n
       if ((xx + 0.5 - x) ** 2 + (yy + 0.5 - y) ** 2 <= r * r) s.data[yy * s.width + xx] = c;
     }
   });
+}
+
+function mulberry(seed: number) { let a = seed | 0; return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+export interface TerrainSpec { x: number; w: number; topo: number; amp: number; rugosidade: number; seed: number; ate: number; color: number }
+
+/** Crista de terreno fractal (deslocamento do ponto médio) preenchida até a linha `ate`: montanhas, colinas, dunas. */
+export function drawTerrain(s: Surface, t: TerrainSpec): void {
+  const N = 64, off = new Array(N + 1).fill(0), rnd = mulberry(t.seed);
+  const mid = (a: number, b: number, d: number) => { if (b - a < 2) return; const m = (a + b) >> 1; off[m] = (off[a] + off[b]) / 2 + (rnd() - 0.5) * d; mid(a, m, d * t.rugosidade); mid(m, b, d * t.rugosidade); };
+  mid(0, N, t.amp);
+  const pts: [number, number][] = off.map((o: number, i: number) => [Math.round(t.x + (i * t.w) / N), Math.round(t.topo + o)]);
+  fillPolygon(s, [...pts, [t.x + t.w, t.ate], [t.x, t.ate]], t.color);
+}
+
+export interface ForestSpec { x: number; w: number; base: number; alturaMin: number; alturaMax: number; larguraMin: number; larguraMax: number; folga: number; seed: number; colors: number[]; tipo: "pinheiro" | "redonda" | "mista" }
+
+/** Bosque: árvores de alturas, larguras e tons variados, assentadas numa linha de base (varia o suficiente para não parecer carimbo). */
+export function drawForest(s: Surface, f: ForestSpec): number {
+  const rnd = mulberry(f.seed);
+  let x = f.x, n = 0;
+  while (x < f.x + f.w) {
+    const h = Math.round(f.alturaMin + rnd() * (f.alturaMax - f.alturaMin)), w = Math.round(f.larguraMin + rnd() * (f.larguraMax - f.larguraMin));
+    const c = f.colors[Math.floor(rnd() * f.colors.length)], redonda = f.tipo === "redonda" || (f.tipo === "mista" && rnd() < 0.35);
+    if (redonda) {
+      const ch = Math.round(h * 0.7), tw = Math.max(1, Math.round(w * 0.2));
+      for (let yy = f.base - h; yy < f.base; yy++) for (let xx = x + Math.floor(w / 2) - Math.floor(tw / 2); xx < x + Math.floor(w / 2) - Math.floor(tw / 2) + tw; xx++) if (xx >= 0 && yy >= 0 && xx < s.width && yy < s.height && yy > f.base - h + ch - 1) s.data[yy * s.width + xx] = c;
+      for (let yy = f.base - h; yy < f.base - h + ch; yy++) for (let xx = x; xx < x + w; xx++) {
+        const nx = (xx + 0.5 - (x + w / 2)) / (w / 2), ny = (yy + 0.5 - (f.base - h + ch / 2)) / (ch / 2);
+        if (nx * nx + ny * ny <= 1 && xx >= 0 && yy >= 0 && xx < s.width && yy < s.height) s.data[yy * s.width + xx] = c;
+      }
+    } else {
+      const tiers = Math.max(2, Math.round(h / 7));
+      for (let k = 0; k < tiers; k++) {
+        const y1 = f.base - Math.round((h * k) / tiers) * 0, top = f.base - h + Math.round((h * k) / (tiers + 0.6)), bot = f.base - h + Math.round((h * (k + 1.6)) / (tiers + 0.6)), half = Math.max(1, Math.round((w / 2) * (0.45 + (0.55 * (k + 1)) / tiers)));
+        void y1;
+        fillPolygon(s, [[x + Math.floor(w / 2), top], [x + Math.floor(w / 2) + half, Math.min(f.base, bot)], [x + Math.floor(w / 2) - half, Math.min(f.base, bot)]], c);
+      }
+    }
+    n++;
+    x += Math.max(2, Math.round(w * (1 - f.folga) + rnd() * 2));
+  }
+  return n;
 }
