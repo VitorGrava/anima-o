@@ -15,7 +15,7 @@
  *   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N] [--fundo #hex] [--margem N] [--sombra] [--vai-e-volta] [--meta]   (sem --scale a escala é automática; --meta grava <saida>.json com posição e duração de cada frame da folha)
   anima compare <projeto> <ref.png> [--frame N] [--png saida.png] [--fundo auto|nenhum|#hex]   (compara o desenho com uma referência na mesma grade: silhueta, erro de cor, painel lado a lado)
   anima critico <projeto> [--frame N] [--ref referencia.png]   (exporta a imagem e imprime o pedido pronto para um agente INDEPENDENTE criticar; é o passo 4 do reference processo)
-  anima import <projeto> <imagem.png> [--largura N|--altura N|--grade auto|N] [--cores N] [--fundo auto|nenhum|#hex] [--camada nome] [--manter-canvas]   (reduz uma imagem à grade de pixel e à paleta)
+  anima import <projeto> <imagem.png> [--largura N|--altura N|--grade auto|N] [--cores N] [--fundo auto|nenhum|#hex] [--tol-fundo N] [--modo auto|dominante|media] [--contraste K] [--saturacao K] [--dither] [--contorno] [--camada nome] [--manter-canvas]   (reduz uma imagem/foto à grade de pixel e à paleta; --contorno cria o contorno seletivo)
  *   anima guide                            imprime o guia do animador (fluxo e princípios): leia antes de começar
  *   anima tools                            lista os comandos com seus parâmetros (JSON Schema)
  */
@@ -287,17 +287,20 @@ export async function main(argv: string[]): Promise<number> {
       const [file, img] = args.filter((a) => !a.startsWith("--"));
       const largura = flag(args, "largura"), altura = flag(args, "altura"), cores = flag(args, "cores"), grade = flag(args, "grade"), fundo = flag(args, "fundo"), camada = flag(args, "camada");
       const manter = boolFlag(args, "manter-canvas") || boolFlag(args, "manter_canvas");
+      const modo = flag(args, "modo") as "auto" | "dominante" | "media" | undefined, contraste = flag(args, "contraste"), saturacao = flag(args, "saturacao"), tolFundo = flag(args, "tol-fundo");
+      const dither = boolFlag(args, "dither"), contorno = boolFlag(args, "contorno");
       if (!file || !img) break;
       await store.open(file, { width: 32, height: 32 });
       const dec = decodePNG(await readFile(img));
-      const r = importImage(dec, { largura: largura ? Number(largura) : undefined, altura: altura ? Number(altura) : undefined, cores: cores ? Number(cores) : undefined, grade: grade && grade !== "auto" ? Number(grade) : "auto", fundo });
+      const r = importImage(dec, { largura: largura ? Number(largura) : undefined, altura: altura ? Number(altura) : undefined, cores: cores ? Number(cores) : undefined, grade: grade && grade !== "auto" ? Number(grade) : "auto", fundo, modo, contraste: contraste ? Number(contraste) : undefined, saturacao: saturacao ? Number(saturacao) : undefined, tolFundo: tolFundo ? Number(tolFundo) : undefined, dither });
       if (!manter && (r.width !== store.project.width || r.height !== store.project.height)) {
         const rr = runCommand(store.project, "set_canvas", { width: r.width, height: r.height });
         if (!rr.ok) throw new Error(rr.text);
       }
       const out = importIntoProject(store.project, r, { camada });
+      if (contorno) { const oc = runCommand(store.project, "transform", { frames: 0, layer: out.camada, op: "outline", mode: "seletivo", preview: false }); if (!oc.ok) throw new Error(oc.text); }
       await store.save();
-      console.log(`Importado: ${r.width}x${r.height} px (pixel da origem ${r.cell || "reamostrado"}x), ${r.palette.length} cor(es) (${out.adicionadas} nova(s)), fundo ${r.fundo ?? "nenhum"} → camada "${out.camada}" de ${store.path}`);
+      console.log(`Importado: ${r.width}x${r.height} px (pixel da origem ${r.cell || "reamostrado"}x, modo ${r.modo}), ${r.palette.length} cor(es) (${out.adicionadas} nova(s)), fundo ${r.fundo ?? "nenhum"} → camada "${out.camada}" de ${store.path}`);
       return 0;
     }
     case "export": {

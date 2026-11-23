@@ -1,0 +1,173 @@
+"""Abelha 32x32 — partes desenhadas à mão (ASCII), compostas por frame."""
+import json, sys
+from lib_abelha import Canvas, part, commands
+
+W = H = 32
+
+# --- cabeça (x7..23, y3..16) ----------------------------------------------
+HEAD = part("""
+ 3|.....hhhhhhh.....
+ 4|...hhHHHhhhhhh...
+ 5|..hHHHhhhhhkhhh..
+ 6|.hHHhhhhhkhhhhhh.
+ 7|hHHhhhhhkhhhhhhhh
+ 8|hHpkkkppppkkkhhhh
+ 9|hHPPpppppppppppkh
+10|hHpoooopppoooopkh
+11|hHpboowpppboowpkh
+12|hHpiiiwpppiiiwpkh
+13|hhrrppmbbbmprrpkh
+14|hhkppppmmmpppqkhh
+15|hhhhkqpppppqkhhhh
+16|.hhk...qqq...khh.
+""")
+EYES_CLOSED = part("""
+10|hHpppppppppppppkh
+11|hHpoooopppoooopkh
+12|hHpppppppppppppkh
+""")
+
+ANT_UP = part("""
+1|.nn.........nn.
+2|n..n.......n..n
+3|....n.....n....
+""")  # x8..22
+ANT_DOWN = part("""
+1|...............
+2|nnnn.......nnnn
+3|....n.....n....
+""")
+
+VEST = part("""
+16|..Ccd...dcv..
+17|.CCcdpPpdxcv.
+18|.Cccdpppdccv.
+19|.Cccdpppdccv.
+20|..vcd...dcv..
+""")  # x9..21
+
+ABD = part("""
+19|....ppppp....
+20|..Pppppppppq.
+21|.Ppppppppppqq
+22|.Llllllllllll
+23|Ppppppppppppq
+24|.Llllllllllk.
+25|..qpppppppq..
+26|....qqqqq....
+""")  # x8..20 -> deslocado
+
+LEGS = part("""
+26|.pq...pq.
+27|.pq...pq.
+28|.pq...pq.
+29|.pq...pq.
+30|ppq...pqq
+""")  # x11..19
+
+# braço que acena (x0..10, y10..19): três poses do antebraço girando no cotovelo
+ARM_A = part("""
+10|P.P........
+11|PpPp.......
+12|.ppPq......
+13|..ppq......
+14|...pq......
+15|....pq.....
+16|....pq.....
+17|.....pq.pp.
+18|.....qqpqq.
+""")
+ARM_B = part("""
+10|..P.P......
+11|..PpPp.....
+12|..pppq.....
+13|...ppq.....
+14|...pq......
+15|....pq.....
+16|....pq.....
+17|....pq..pp.
+18|.....qqpqq.
+""")
+ARM_C = part("""
+10|....P.P....
+11|...pPpP....
+12|...pppq....
+13|...ppq.....
+14|....pq.....
+15|....pq.....
+16|....pq.....
+17|....pq..pp.
+18|.....qqpqq.
+""")
+ARM_HIP = part("""
+17|pq...
+18|.pq..
+19|..pq.
+20|..pq.
+21|.pq..
+22|pq...
+""")  # x21..25
+
+WING_UP = part("""
+ 9|.......aA.
+10|.....aAAa.
+11|....aAaas.
+12|...aAaass.
+13|..aaaass..
+14|.aaass....
+15|asss......
+""")  # lado direito, x20..29
+WING_MID = part("""
+12|......aAAa.
+13|...aaAAaas.
+14|.aaAaaasss.
+15|aaaasss....
+16|.ass.......
+""")
+WING_DOWN = part("""
+14|...aaa....
+15|.aaAaaa...
+16|aaAaass...
+17|.aasss....
+""")
+
+
+def at(rows, x, y0, dy=0):
+    """rows com prefixo de y já removido: devolve (rows, x, y)"""
+    return rows, x, y0 + dy
+
+
+def frame(f):
+    wave = ["A", "B", "C", "B", "A", "B", "C", "B"][f]
+    wing = ["up", "mid", "down", "mid", "up", "mid", "down", "mid"][f]
+    bob = [0, 0, 0, 1, 1, 1, 1, 0][f]          # respiração: tronco e cabeça descem 1 px
+    antb = [0, 0, 0, 0, 1, 1, 1, 1][f]          # antena atrasada 1 frame (follow-through)
+    blink = f == 5
+
+    wings = Canvas(W, H)
+    wr = {"up": WING_UP, "mid": WING_MID, "down": WING_DOWN}[wing]
+    wy = {"up": 9, "mid": 12, "down": 14}[wing] + bob
+    wings.put(wr, 21, wy)
+    wings.put(wr, 1, wy, flip=True)
+
+    c = Canvas(W, H)
+    c.put(ABD, 9, 19)
+    c.put(LEGS, 11, 26)
+    c.put(VEST, 9, 16 + bob)
+    c.put(ARM_HIP, 21, 17 + bob)
+    arm = {"A": ARM_A, "B": ARM_B, "C": ARM_C}[wave]
+    c.put(arm, 0, 10 + bob)
+    c.put(ANT_DOWN if f in (4, 7) else ANT_UP, 8, 1 + bob)
+    c.put(HEAD, 7, 3 + bob)
+    if blink:
+        c.put(EYES_CLOSED, 7, 10 + bob)
+    return wings.rows(), c.rows()
+
+
+if __name__ == "__main__":
+    wings, body = zip(*[frame(f) for f in range(8)])
+    durs = [140, 100, 140, 100, 140, 100, 140, 100]
+    cmds = commands(W, H, [("asas", list(wings)), ("corpo", list(body))], durs)
+    json.dump(cmds, open(sys.argv[1], "w"), ensure_ascii=False)
+    for r in body[0]:
+        print(r)

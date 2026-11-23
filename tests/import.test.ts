@@ -74,7 +74,7 @@ describe("anima import (CLI)", () => {
     const img = upscale(tiny(), 10);
     writeFileSync(path.join(dir, "ref.png"), encodePNG(img.width, img.height, img.data));
     const out = execSync(`node bin/anima.mjs import ${path.join(dir, "p.anima.json")} ${path.join(dir, "ref.png")} --cores 8`, { cwd: path.resolve(__dirname, ".."), encoding: "utf8" });
-    expect(out).toMatch(/Importado: 8x8 px \(pixel da origem 10x\)/);
+    expect(out).toMatch(/Importado: 8x8 px \(pixel da origem 10x, modo dominante\)/);
     const saved = JSON.parse(readFileSync(path.join(dir, "p.anima.json"), "utf8"));
     expect(saved.width).toBe(8);
   });
@@ -97,5 +97,47 @@ describe("compareToReference", () => {
     expect(diff.erroCor).toBeGreaterThan(same.erroCor + 0.05);
     expect(diff.text).toMatch(/Piores regiões: x8\.\.11 y8\.\.11/);
     expect(() => compareToReference(createProject({ width: 8, height: 8 }), 0, ref)).toThrow(/importe a referência/);
+  });
+});
+
+describe("importImage para fotos: média, fundo por borda, contraste, dither", () => {
+  /** "foto": fundo cinza com leve degradê, círculo vermelho com um miolo branco (olho) no meio */
+  const foto = () => {
+    const W = 64, H = 64, data = new Uint8ClampedArray(W * H * 4);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const o = (y * W + x) * 4, g = 120 + Math.round((x / W) * 14);
+      let c = [g, g, g];
+      const dx = x - 32, dy = y - 32, r = Math.hypot(dx, dy);
+      if (r < 20) c = [200, 40 + Math.round(r * 2), 40];
+      if (r < 5) c = [250, 250, 250];
+      data.set([c[0], c[1], c[2], 255], o);
+    }
+    return { width: W, height: H, data };
+  };
+  it("modo auto usa média em foto (cor intermediária na borda do círculo) e dominante em pixel art", () => {
+    const r = importImage(foto(), { largura: 16, altura: 16, cores: 12, fundo: "auto" });
+    expect(r.modo).toBe("media");
+    const px = importImage(upscale(tiny(), 6));
+    expect(px.modo).toBe("dominante");
+  });
+  it("o fundo é o que toca a borda (degradê com tolerância); o branco do olho no meio NÃO vira fundo", () => {
+    const r = importImage(foto(), { largura: 16, altura: 16, cores: 12, fundo: "auto", tolFundo: 60 });
+    expect(r.fundo).not.toBeNull();
+    expect(r.indices[0]).toBe(0);                                   // canto = fundo
+    expect(r.indices[8 * 16 + 8]).not.toBe(0);                      // centro (olho branco) continua figura
+    const brancos = r.palette.filter((h) => parseInt(h.slice(1, 3), 16) > 230);
+    expect(brancos.length).toBeGreaterThan(0);
+  });
+  it("contraste e saturação mudam as cores; dither usa mais de um tom na mesma região lisa", () => {
+    const base = importImage(foto(), { largura: 16, altura: 16, cores: 12 });
+    const vivo = importImage(foto(), { largura: 16, altura: 16, cores: 12, saturacao: 2, contraste: 1.3 });
+    const chan = (h: string, i: number) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16);
+    const spread = (pal: string[]) => Math.max(...pal.map((h) => chan(h, 0))) - Math.min(...pal.map((h) => chan(h, 1)));
+    expect(spread(vivo.palette)).toBeGreaterThanOrEqual(spread(base.palette));
+    const grad = { width: 32, height: 32, data: new Uint8ClampedArray(32 * 32 * 4).map((_, i) => (i % 4 === 3 ? 255 : Math.round((Math.floor(i / 4) % 32) * 8))) };
+    const seco = importImage(grad, { largura: 32, altura: 32, cores: 3, fundo: "nenhum" });
+    const dit = importImage(grad, { largura: 32, altura: 32, cores: 3, fundo: "nenhum", dither: true });
+    const transicoes = (r: typeof seco) => { let n = 0; for (let y = 0; y < 32; y++) for (let x = 1; x < 32; x++) if (r.indices[y * 32 + x] !== r.indices[y * 32 + x - 1]) n++; return n; };
+    expect(transicoes(dit)).toBeGreaterThan(transicoes(seco) * 2);   // o dither quebra a faixa em padrão fino
   });
 });

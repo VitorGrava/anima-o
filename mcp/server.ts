@@ -55,6 +55,12 @@ const ImportImage = z.object({
   fundo: z.string().default("auto").describe('"auto" (cor dos 4 cantos vira transparente), "nenhum" ou "#rrggbb"'),
   camada: z.string().optional().describe("Camada onde gravar (padrão: a de cima)"),
   ajustar_canvas: z.boolean().default(true).describe("Redimensiona o canvas para o tamanho importado"),
+  modo: z.enum(["auto", "dominante", "media"]).default("auto").describe("Como resumir cada célula: dominante (arte pixelada) ou media (foto)"),
+  tol_fundo: z.number().int().min(0).max(200).optional().describe("Tolerância do fundo ligado à borda (padrão 28; aumente se o fundo tem degradê ou ruído)"),
+  contraste: z.number().min(0.5).max(2.5).optional().describe("> 1 realça o contraste (foto sem graça)"),
+  saturacao: z.number().min(0).max(3).optional().describe("> 1 satura as cores"),
+  dither: z.boolean().optional().describe("Dithering ordenado Bayer na quantização (simula degradês com poucas cores)"),
+  contorno: z.boolean().default(false).describe("Cria o contorno seletivo (cor escura do material) em volta da figura importada"),
 });
 
 const CompareImage = z.object({
@@ -137,9 +143,10 @@ export function createAnimaServer(store = new ProjectStore()) {
       if (name === "import_image") {
         const i = ImportImage.parse(args ?? {});
         const dec = decodePNG(await readFile(path.resolve(process.cwd(), i.path)));
-        const r = importImage(dec, { largura: i.largura, altura: i.altura, grade: i.grade ?? "auto", cores: i.cores, fundo: i.fundo });
+        const r = importImage(dec, { largura: i.largura, altura: i.altura, grade: i.grade ?? "auto", cores: i.cores, fundo: i.fundo, modo: i.modo, tolFundo: i.tol_fundo, contraste: i.contraste, saturacao: i.saturacao, dither: i.dither });
         if (i.ajustar_canvas && (r.width !== project.width || r.height !== project.height)) { const rr = runCommand(project, "set_canvas", { width: r.width, height: r.height }); if (!rr.ok) throw new Error(rr.text); }
         const out = importIntoProject(project, r, { camada: i.camada });
+        if (i.contorno) { const oc = runCommand(project, "transform", { frames: 0, layer: out.camada, op: "outline", mode: "seletivo", preview: false }); if (!oc.ok) throw new Error(oc.text); }
         await store.save();
         const shown = runCommand(project, "view", { as_text: false });
         const content: Content[] = [{ type: "text", text: `Importado: ${r.width}x${r.height} px (pixel da origem ${r.cell || "reamostrado"}x), ${r.palette.length} cor(es) (${out.adicionadas} nova(s)), fundo ${r.fundo ?? "nenhum"} → camada "${out.camada}".` }];

@@ -42,8 +42,18 @@ export interface ImportOptions {
   fundo?: "auto" | "nenhum" | string;
   /** alfa abaixo disso vira transparente (padrão 128) */
   limiarAlfa?: number;
+  /** como resumir cada célula: "dominante" (arte pixelada: cor mais frequente), "media" (foto: média das cores) ou "auto" (dominante se a origem já era pixel art ampliada) */
+  modo?: "auto" | "dominante" | "media";
+  /** tolerância (distância RGB) do fundo ligado à borda da imagem; padrão 28 (aumente para fundos com degradê/ruído) */
+  tolFundo?: number;
+  /** 1 = igual; > 1 realça o contraste (foto sem graça fica com mais volume) */
+  contraste?: number;
+  /** 1 = igual; > 1 satura (cores vivas em poucos pixels) */
+  saturacao?: number;
+  /** dithering ordenado (Bayer 4x4) na quantização: simula degradês com poucas cores */
+  dither?: boolean;
 }
-export interface ImportResult { width: number; height: number; indices: Uint8Array; palette: string[]; cell: number; fundo: string | null }
+export interface ImportResult { width: number; height: number; indices: Uint8Array; palette: string[]; cell: number; fundo: string | null; modo: "dominante" | "media" }
 
 const hex = (r: number, g: number, b: number) => `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 
@@ -61,23 +71,43 @@ export function importImage(img: RGBAImage, o: ImportOptions = {}): ImportResult
   if (o.fundo && o.fundo !== "auto" && o.fundo !== "nenhum") { const h = o.fundo.replace("#", ""); bg = [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; }
   else if (o.fundo !== "nenhum") {
     const c = [px(0, 0), px(W - 1, 0), px(0, H - 1), px(W - 1, H - 1)];
-    if (c.every((p) => p[3] >= limiar && Math.abs(p[0] - c[0][0]) + Math.abs(p[1] - c[0][1]) + Math.abs(p[2] - c[0][2]) < 12)) bg = [c[0][0], c[0][1], c[0][2]];
+    if (c.every((p) => p[3] >= limiar && Math.abs(p[0] - c[0][0]) + Math.abs(p[1] - c[0][1]) + Math.abs(p[2] - c[0][2]) < Math.max(12, o.tolFundo ?? 28))) bg = [c[0][0], c[0][1], c[0][2]];
   }
-  const isBg = (p: number[]) => p[3] < limiar || (bg !== null && Math.abs(p[0] - bg[0]) + Math.abs(p[1] - bg[1]) + Math.abs(p[2] - bg[2]) < 18);
+  // fundo = pixels ligados à BORDA da imagem com cor parecida com a do fundo (não pega o branco dos olhos no meio da figura)
+  const tol = o.tolFundo ?? 28;
+  const bgMask = new Uint8Array(W * H);
+  if (bg) {
+    const near = (i: number) => d[i + 3] < limiar || Math.abs(d[i] - bg![0]) + Math.abs(d[i + 1] - bg![1]) + Math.abs(d[i + 2] - bg![2]) <= tol;
+    const stack: number[] = [];
+    const push = (x: number, y: number) => { const k = y * W + x; if (!bgMask[k] && near(k * 4)) { bgMask[k] = 1; stack.push(k); } };
+    for (let x = 0; x < W; x++) { push(x, 0); push(x, H - 1); }
+    for (let y = 0; y < H; y++) { push(0, y); push(W - 1, y); }
+    while (stack.length) { const k = stack.pop()!; const x = k % W, y = (k - x) / W; if (x > 0) push(x - 1, y); if (x < W - 1) push(x + 1, y); if (y > 0) push(x, y - 1); if (y < H - 1) push(x, y + 1); }
+  }
+  const isBgAt = (x: number, y: number) => { const i = (y * W + x) * 4; return d[i + 3] < limiar || bgMask[y * W + x] === 1; };
+  const modo: "dominante" | "media" = o.modo === "dominante" || o.modo === "media" ? o.modo : cell > 1 ? "dominante" : "media";
+  const kc = o.contraste ?? 1, ks = o.saturacao ?? 1;
+  const tone = (c: [number, number, number]): [number, number, number] => {
+    if (kc === 1 && ks === 1) return c;
+    const lum = 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+    return c.map((v) => Math.max(0, Math.min(255, Math.round(((lum + (v - lum) * ks) - 128) * kc + 128)))) as [number, number, number];
+  };
   // amostra: cor mais frequente de cada célula (quantizada em 5 bits só para agrupar)
   const cells: ([number, number, number] | null)[] = new Array(tw * th).fill(null);
   for (let cy = 0; cy < th; cy++) for (let cx = 0; cx < tw; cx++) {
     const x0 = Math.floor((cx * W) / tw), x1 = Math.max(x0 + 1, Math.floor(((cx + 1) * W) / tw)), y0 = Math.floor((cy * H) / th), y1 = Math.max(y0 + 1, Math.floor(((cy + 1) * H) / th));
-    const cnt = new Map<number, { n: number; r: number; g: number; b: number }>(); let transp = 0, tot = 0;
+    const cnt = new Map<number, { n: number; r: number; g: number; b: number }>(); let transp = 0, tot = 0, sr = 0, sg = 0, sb = 0, sn = 0;
     for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
       const p = px(x, y); tot++;
-      if (isBg(p)) { transp++; continue; }
+      if (isBgAt(x, y)) { transp++; continue; }
+      sr += p[0]; sg += p[1]; sb += p[2]; sn++;
       const k = ((p[0] >> 3) << 10) | ((p[1] >> 3) << 5) | (p[2] >> 3);
       const e = cnt.get(k) ?? { n: 0, r: 0, g: 0, b: 0 }; e.n++; e.r += p[0]; e.g += p[1]; e.b += p[2]; cnt.set(k, e);
     }
     if (!cnt.size || transp * 2 > tot) continue;
+    if (modo === "media") { cells[cy * tw + cx] = tone([Math.round(sr / sn), Math.round(sg / sn), Math.round(sb / sn)]); continue; }
     const top = [...cnt.values()].sort((a, b) => b.n - a.n)[0];
-    cells[cy * tw + cx] = [Math.round(top.r / top.n), Math.round(top.g / top.n), Math.round(top.b / top.n)];
+    cells[cy * tw + cx] = tone([Math.round(top.r / top.n), Math.round(top.g / top.n), Math.round(top.b / top.n)]);
   }
   // quantização: median cut sobre as cores distintas ponderadas pelo uso
   const hist = new Map<number, { rgb: [number, number, number]; n: number }>();
@@ -96,8 +126,12 @@ export function importImage(img: RGBAImage, o: ImportOptions = {}): ImportResult
   const palette: [number, number, number][] = boxes.map((bx) => { const t = bx.reduce((s, e) => s + e.n, 0) || 1; return [0, 1, 2].map((ch) => Math.round(bx.reduce((s, e) => s + e.rgb[ch] * e.n, 0) / t)) as [number, number, number]; });
   const nearest = (c: [number, number, number]) => { let bi = 0, bd = Infinity; palette.forEach((p, i) => { const dd = (p[0] - c[0]) ** 2 + (p[1] - c[1]) ** 2 + (p[2] - c[2]) ** 2; if (dd < bd) { bd = dd; bi = i; } }); return bi; };
   const indices = new Uint8Array(tw * th);
-  cells.forEach((c, i) => { indices[i] = c ? nearest(c) + 1 : 0; });
-  return { width: tw, height: th, indices, palette: palette.map((p) => hex(p[0], p[1], p[2])), cell: cell || 0, fundo: bg ? hex(bg[0], bg[1], bg[2]) : null };
+  const B4 = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+  cells.forEach((c, i) => {
+    if (!c) { indices[i] = 0; return; }
+    if (o.dither) { const t = ((B4[Math.floor(i / tw) % 4][(i % tw) % 4] + 0.5) / 16 - 0.5) * 36; indices[i] = nearest([c[0] + t, c[1] + t, c[2] + t] as [number, number, number]) + 1; } else indices[i] = nearest(c) + 1;
+  });
+  return { width: tw, height: th, indices, palette: palette.map((p) => hex(p[0], p[1], p[2])), cell: cell || 0, fundo: bg ? hex(bg[0], bg[1], bg[2]) : null, modo };
 }
 
 import { KEY_CHARS, TRANSPARENT_KEY, getCel, normalizeHex, type Project } from "./project.ts";
