@@ -618,7 +618,11 @@ function checkSequence(p: Project, metrics: FrameMetrics[], loop: boolean, issue
       const consecutive = metrics.slice(1).map((m, k) => diff(metrics[k].frame, m.frame));
       const avg = consecutive.reduce((x, y) => x + y, 0) / Math.max(1, consecutive.length);
       // só incomoda se a emenda muda bem mais que um passo normal entre frames
-      if (d > 0 && a.frame !== b.frame && avg > 0 && d > avg * 1.6) {
+      const n2 = metrics.length;
+      const settles = n2 >= 6 && diff(metrics[n2 - 2].frame, metrics[n2 - 1].frame) <= avg * 0.35;   // termina numa pose de repouso: animação de UMA passada (abrir, atacar), não ciclo
+      if (settles && d > avg * 1.6) {
+        issues.push({ severity: "info", code: "uma_passada", frame: b.frame, message: "O fim da animação assenta numa pose diferente do começo: tratado como animação de UMA passada (abrir, atacar). Se for ciclo (loop), faça o último frame voltar ao primeiro." });
+      } else if (d > 0 && a.frame !== b.frame && avg > 0 && d > avg * 1.6) {
         issues.push({
           severity: "aviso",
           code: "emenda_loop",
