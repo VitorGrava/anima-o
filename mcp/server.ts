@@ -22,7 +22,7 @@ Como usar estas ferramentas (MCP)
 - O trabalho acontece em um arquivo de projeto .anima.json. Comece com open_project (abre ou cria). Se você não abrir nenhum, o padrão é ./animacao.anima.json no diretório atual.
 - Cada comando que muda o projeto salva o arquivo na hora. O usuário pode acompanhar ao vivo no navegador com: anima view <arquivo>.
 - Os comandos de desenho (draw_rows, draw_shapes, transform, copy_layer_content) já devolvem o frame editado como grade de texto + imagem + avisos automáticos: leia o retorno e corrija antes de seguir. view faz zoom (region, grid), diff entre frames (compare) e onion skin; check mede e aponta defeitos em todos os frames; reference traz proporções de anatomia e técnicas de pixel art.
-- Para gerar arquivos (GIF, spritesheet PNG, PNG de um frame ou JSON), use export_file. Só exporte quando o usuário pedir ou ao terminar uma animação.
+- Para gerar arquivos (GIF, spritesheet PNG, PNG de um frame ou JSON), use export_file. Exporte quando o usuário pedir ou quando o pedido for um arquivo/entrega (GIF, spritesheet); fora disso, não.
 - Ao terminar, diga ao usuário onde estão o projeto e os arquivos exportados.`;
 
 const OpenProject = z.object({

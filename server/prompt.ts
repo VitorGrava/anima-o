@@ -51,6 +51,21 @@ Cor
 - Para economizar cores (estilo 16-bit: até 15 cores + transparente), compartilhe tons entre materiais (pele e cabelo loiro, branco da camisa com o azul claro da calça) e elimine tons que ocupam poucos pixels.
 - Fundos com degradê: reduza a poucos tons (6–7) e faça a transição com dither em xadrez 50% (2 cores alternadas), nunca com ruído aleatório.
 
+Os 12 princípios da animação (Disney) e onde aplicá-los aqui
+Antes de entregar, passe pelos 12; check imprime um painel dos que dá para medir (✓ / ! / –) e reference principios traz a definição e o jeito de aplicar cada um.
+1 Squash and Stretch (comprimir e esticar): deforme no contato e na velocidade mantendo o volume.
+2 Anticipation (antecipação): 1–2 frames de preparação no sentido oposto antes de uma ação forte.
+3 Staging (encenação): um ponto focal, silhueta legível, fundo em camada própria e mais apagado que o personagem.
+4 Straight Ahead and Pose to Pose (ação direta e pose a pose): poses-chave primeiro (draw_frames), intermediários depois; ação direta para fogo, fumaça e água.
+5 Follow Through and Overlapping Action (continuidade e sobreposição): cabelo, capa, cauda e braços em camadas próprias, 1–2 frames atrasados.
+6 Slow In and Slow Out (aceleração e desaceleração): frames mais juntos perto das poses-chave, mais espaçados no meio.
+7 Arcs (arcos): trajetórias curvas, nunca retas para membros e objetos que se deslocam nos dois eixos.
+8 Secondary Action (ação secundária): piscar, respirar, faíscas, sombra que reage, sem roubar a atenção.
+9 Timing (temporização): tempos por frame (set_frame_timing); segure as poses importantes; nunca todos iguais.
+10 Exaggeration (exagero): poses um pouco mais extremas, que em poucos pixels leem melhor, sem virar irreal.
+11 Solid Drawing (desenho volumétrico): uma luz só, contorno escuro do material, blocos de luz e sombra, formas redondas com blob.
+12 Appeal (apelo): silhueta simpática, olhos e cabeça expressivos, personalidade; pergunte se alguém se importaria com este personagem.
+
 Princípios de animação aplicados a pixel art
 - Poses-chave primeiro, depois intermediários: defina as poses extremas (contato, impacto, topo), confira cada uma com view, e só então crie os frames entre elas.
 - Timing e spacing: o padrão é cerca de 12 fps ("em twos"). Use set_frame_timing para variar: 50–80 ms em ações rápidas, 80–120 ms em caminhada/corrida, 150–250 ms em respiração e movimentos lentos. Nunca deixe todos os frames com a mesma duração; segure as poses importantes (impacto, topo do pulo, pose final).
@@ -79,8 +94,9 @@ Técnicas com as ferramentas desta engine
 Checklist antes de entregar uma animação (faça de verdade, não só leia)
 1. Veja todos os frames de uma vez: view com frames "all" mostra a grade lado a lado, e a imagem do spritesheet mostra a sequência. Pergunte: a sequência conta o movimento? algum frame destoa? o último frame leva ao primeiro sem salto?
 2. Rode check (tipo="efeito" para brilho, chama, fumaça, estrela; padrão para personagens e objetos). Leia a parte de movimento: emenda do loop, tempos iguais, frames repetidos, passos sem ease.
+2b. Leia o painel dos 12 princípios do check: cada "!" é uma melhoria concreta a fazer ou uma decisão consciente de não fazer (ex.: efeito sem antecipação).
 3. Tempos: nunca deixe tudo igual. Segure o apogeu, o impacto e a pose final (2–3× mais) e acelere o resto com set_frame_timing.
-4. Formas redondas (bolas, moedas, cabeças, olhos): desenhe com draw_shapes ellipse ou escreva a máscara por simetria; um retângulo de cantos cortados não lê como círculo. Em squash & stretch, mude a largura e a altura da elipse mantendo o volume (largura × altura ≈ constante).
+4. Formas redondas (bolas, slimes, frutas, moedas, cabeças): use draw_shapes type="blob" (superelipse com contorno escuro, luz de cima-esquerda e sombra prontos; squareness 2 = elipse, 3–4 = slime/gota) em vez de escrever a máscara à mão; um retângulo de cantos cortados não lê como círculo. Rotação em torno de um eixo (moeda, carta virando): a largura segue |cos| do ângulo e o check deve rodar com tipo="rotacao". Em squash & stretch, mude a largura e a altura da elipse mantendo o volume (largura × altura ≈ constante).
 5. Pixel solto, furo e serrilhado que o check apontar: corrija ou saiba por que é intencional.
 
 Ao terminar, responda em poucas frases no idioma do usuário: o que você criou ou mudou e uma sugestão do que dá para fazer a seguir. Não descreva cada chamada de ferramenta — o usuário já viu acontecer.`;

@@ -39,3 +39,25 @@
 contorno mais claro que o miolo, banding, pillow shading, ruído/dither aleatório, contraste fraco com o fundo e luz que troca de lado entre frames.
 `tests/style.test.ts` tem um exemplo ruim e um bom para cada regra, três casos de falso positivo que as regras não podem ter, um teste de contrato (o prompt tem de ensinar cada regra que o `check` cobra) e um portão de qualidade que roda em todas as animações de `bench/out`.
 Duas dessas regras acusaram a fogueira e o coração na primeira versão; eram falsos positivos meus (chama emite luz, contorno escuro não é "almofada", diagonal de 1 px não é ruído) e foram corrigidos junto com testes que os protegem.
+
+## Rodada 3: 05 slime pulando, 06 moeda girando
+
+| anim | nota | o que ficou bom | o que ficou ruim |
+|---|---|---|---|
+| 05 slime | 8,5/10 | squash na antecipação e no impacto, stretch no lançamento e na queda, volume mantido (144–160 px), apogeu e impacto segurados, sombra no chão que encolhe no ar, rosto fofo | antecipação e impacto quase idênticos (mesma forma achatada); corpo mais "cápsula" que "gota" |
+| 06 moeda | 9/10 | 12 frames com largura seguindo \|cos\|, emblema de cruz na frente e losango no verso (dá para ver que vira), perfil fino de lado, faces seguradas | cor `h` (ouro-sombra) sem uso; um pixel solto no emblema |
+
+**Atritos → correção**
+- O erro de campo aninhado dizia só "expected string, received undefined" (o agente usou `color` no lugar de `hex`) → chave desconhecida em **qualquer nível** vira erro com o caminho e a sugestão (`colors[0]."color" não existe (quis dizer "hex"?)`); campo ausente diz "falta este campo obrigatório", em português.
+- `tools <nome>` não mostrava os campos dos itens de lista → agora expande objetos aninhados com `*` nos obrigatórios.
+- `--help` em qualquer subcomando; `run -q`; folha de frames omitida quando grande; `check`/`view`/`reference` dentro do `run` imprimem o relatório inteiro.
+- `check` cobrava volume e movimento numa moeda girando → `tipo: "rotacao"`.
+- Os dois agentes escreveram um gerador próprio de elipse com contorno e luz → nova forma **`blob`** em `draw_shapes` (superelipse, contorno escuro, luz de cima-esquerda, sombra, brilho; `squareness` 2 = elipse, 3–4 = slime).
+- Guia: notas de como cada ferramenta vira comando na CLI; texto de exportação unificado entre MCP e CLI.
+
+## Os 12 princípios (artigo da Alura, pedido do usuário)
+Fonte: https://www.alura.com.br/artigos/12-principios-animacao (definições conceituais e um exemplo animado por princípio, sem números práticos).
+- `server/prompt.ts`: seção com os 12, cada um ligado ao que fazer na engine; passo 2b do checklist de entrega.
+- `reference principios`: definição do artigo + "Na engine:" + qual regra do `check` verifica.
+- `check` imprime o **painel dos 12** (✓ / ! / –), calculado do movimento real: squash (forma deforma com volume constante), antecipação (passo oposto antes do maior), staging (tamanho e contraste), pose a pose (poses seguradas), sobreposição (camadas com picos em frames diferentes), ease, arcos, ação secundária (camadas que se movem), timing, exagero (amplitude), desenho sólido (herda as regras de estilo) e apelo (avaliação humana, com a pergunta certa).
+- `tests/style.test.ts`: o prompt cita os 12; `reference principios` traz os 12 e a fonte; cada medição do painel tem um caso que passa e um que falha.

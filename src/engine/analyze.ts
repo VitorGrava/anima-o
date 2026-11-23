@@ -35,8 +35,19 @@ export interface FrameMetrics {
   layers: { name: string; bbox: BBox | null; area: number }[];
 }
 
+/** Um dos 12 princípios da animação, avaliado no movimento real da animação. */
+export interface PrincipleStatus {
+  n: number;
+  nome: string;
+  /** ok = aplicado; atencao = vale melhorar; na = não se aplica / avaliação humana */
+  estado: "ok" | "atencao" | "na";
+  nota: string;
+}
+
 export interface AnalysisResult {
   issues: Issue[];
+  /** Painel dos 12 princípios (só com 3+ frames). */
+  principles?: PrincipleStatus[];
   metrics: FrameMetrics[];
   /** Camadas estáticas (chão, fundo) deixadas de fora das medidas de movimento. */
   ignoredLayers?: string[];
@@ -48,7 +59,7 @@ export interface AnalyzeOptions {
   /** Inclui a transição último → primeiro frame. */
   loop?: boolean;
   /** "efeito" (brilho, chama, fumaça...) muda de tamanho de propósito: não cobra volume, base nem largura. */
-  tipo?: "personagem" | "efeito";
+  tipo?: "personagem" | "efeito" | "rotacao";
   /** ids de camadas a deixar fora das medidas (efeitos, fundo). */
   ignoreLayers?: string[];
   /** pixels da figura (sem o fundo estático), para as regras de estilo; padrão: o frame inteiro. */
@@ -519,7 +530,7 @@ export function frameMetrics(p: Project, frame: number, only?: Set<string>): Fra
   return { frame, bbox: bboxOf(mask, p.width, p.height), area, cx: area ? sx / area : 0, cy: area ? sy / area : 0, layers };
 }
 
-function checkSequence(p: Project, metrics: FrameMetrics[], loop: boolean, issues: Issue[], tipo: "personagem" | "efeito" = "personagem") {
+function checkSequence(p: Project, metrics: FrameMetrics[], loop: boolean, issues: Issue[], tipo: "personagem" | "efeito" | "rotacao" = "personagem") {
   const pairs: [number, number][] = [];
   for (let k = 0; k + 1 < metrics.length; k++) pairs.push([k, k + 1]);
   if (loop && metrics.length > 1 && metrics[0].frame === 0 && metrics[metrics.length - 1].frame === p.frames.length - 1) {
@@ -584,7 +595,7 @@ function checkSequence(p: Project, metrics: FrameMetrics[], loop: boolean, issue
  * emenda do loop com salto, durações todas iguais, frames repetidos sem segurar a pose,
  * movimento quase nulo e passos de tamanho constante (sem ease).
  */
-function checkMotion(p: Project, metrics: FrameMetrics[], loop: boolean, issues: Issue[], tipo: "personagem" | "efeito" = "personagem") {
+function checkMotion(p: Project, metrics: FrameMetrics[], loop: boolean, issues: Issue[], tipo: "personagem" | "efeito" | "rotacao" = "personagem") {
   const ms = metrics.filter((m) => m.area > 0);
   if (ms.length < 3) return;
   const dur = (m: FrameMetrics) => p.frames[m.frame].duration ?? Math.round(1000 / p.fps);
@@ -650,6 +661,116 @@ function checkMotion(p: Project, metrics: FrameMetrics[], loop: boolean, issues:
       });
     }
   }
+}
+
+// ---------- os 12 princípios da animação ----------
+
+/**
+ * Avalia, com o movimento real (centro de massa, caixa e tempos por frame e por camada), cada um dos
+ * 12 princípios. Não substitui o olho do animador: o que não dá para medir (encenação, desenho sólido,
+ * apelo) vem marcado como avaliação humana, com a pergunta certa para fazer.
+ */
+function evaluatePrinciples(p: Project, frames: number[], metrics: FrameMetrics[], issues: Issue[], opts: AnalyzeOptions, moving: Set<string>): PrincipleStatus[] {
+  const tipo = opts.tipo ?? "personagem";
+  const codes = new Set(issues.map((i) => i.code));
+  const ms = metrics.filter((m) => m.area > 0);
+  const out: PrincipleStatus[] = [];
+  const add = (n: number, nome: string, estado: PrincipleStatus["estado"], nota: string) => out.push({ n, nome, estado, nota });
+  const steps = ms.slice(1).map((m, i) => ({ dx: m.cx - ms[i].cx, dy: m.cy - ms[i].cy, len: Math.hypot(m.cx - ms[i].cx, m.cy - ms[i].cy) }));
+  const maxStep = Math.max(0, ...steps.map((q) => q.len));
+  const canvas = Math.max(p.width, p.height);
+  const dur = (f: number) => p.frames[f].duration ?? Math.round(1000 / p.fps);
+
+  // 1. Squash and Stretch: a caixa muda de proporção e a área se mantém
+  const ws = ms.map((m) => m.bbox?.w ?? 0), hs = ms.map((m) => m.bbox?.h ?? 0);
+  const range = (a: number[]) => (Math.max(...a) - Math.min(...a)) / Math.max(1, Math.max(...a));
+  if (tipo !== "personagem") add(1, "Squash and Stretch (comprimir e esticar)", "na", "Em efeitos e rotações o tamanho muda por outro motivo.");
+  else if (codes.has("volume_pulou")) add(1, "Squash and Stretch (comprimir e esticar)", "atencao", "A forma deforma, mas o volume (área) não se mantém: se esticar na vertical, afine na horizontal.");
+  else if (Math.max(range(ws), range(hs)) >= 0.15) add(1, "Squash and Stretch (comprimir e esticar)", "ok", "A forma achata e estica e o volume se mantém.");
+  else add(1, "Squash and Stretch (comprimir e esticar)", "atencao", "A silhueta não deforma: se há impacto ou salto, amasse no contato e estique na velocidade.");
+
+  // 2. Antecipação: um passo no sentido contrário antes do passo maior
+  if (maxStep < 1.5 || steps.length < 3) add(2, "Anticipation (antecipação)", "na", "Sem ação forte o bastante para pedir antecipação.");
+  else {
+    const k = steps.findIndex((q) => q.len === maxStep);
+    const before = steps.slice(0, k).some((q) => q.len >= 0.4 && q.dx * steps[k].dx + q.dy * steps[k].dy < 0);
+    const squashBefore = k > 0 && (ws[k] > ws[0] * 1.1 || hs[k] < hs[0] * 0.9);
+    if (before || squashBefore) add(2, "Anticipation (antecipação)", "ok", "Há um movimento ou agachamento no sentido oposto antes da ação principal.");
+    else add(2, "Anticipation (antecipação)", "atencao", `A ação mais forte (${maxStep.toFixed(1)} px, frames ${ms[k].frame}→${ms[k + 1].frame}) começa sem preparação: recue/agache 1–2 frames antes.`);
+  }
+
+  // 3. Staging: a figura é legível (tamanho razoável no quadro e contraste com o fundo)
+  const fracs = ms.map((m) => (m.bbox ? (m.bbox.w * m.bbox.h) / (p.width * p.height) : 0));
+  const frac = fracs.length ? Math.max(...fracs) : 0;
+  if (codes.has("contraste_fraco")) add(3, "Staging (encenação)", "atencao", "A figura quase não se separa do fundo: aumente o contraste (fundo mais apagado).");
+  else if (frac < 0.06) add(3, "Staging (encenação)", "atencao", "A figura ocupa muito pouco do quadro: aproxime ou aumente, para a ação ser o ponto focal.");
+  else add(3, "Staging (encenação)", "ok", "A figura tem tamanho e contraste para ser o foco (confira você: a pose se lê só pela silhueta? use view check=silhueta).");
+
+  // 4. Pose a pose × ação direta: decisão do animador; o que dá para medir é se há poses seguradas
+  const durs = ms.map((m) => dur(m.frame));
+  const sortedD = [...durs].sort((a, b) => a - b);
+  const medD = sortedD[Math.floor(sortedD.length / 2)] || 1;
+  if (Math.max(...durs) >= Math.min(...durs) * 1.8 || durs.some((d) => d >= medD * 1.5)) add(4, "Straight Ahead and Pose to Pose (ação direta e pose a pose)", "ok", "Há poses-chave seguradas (duração maior) entre intermediários mais rápidos: bom sinal de pose a pose.");
+  else add(4, "Straight Ahead and Pose to Pose (ação direta e pose a pose)", "atencao", "Nenhuma pose é segurada: defina as poses-chave (extremos), segure-as e preencha os intermediários.");
+
+  // 5. Follow through e overlapping: partes diferentes se movem com atraso
+  const layerIds = [...moving];
+  const series = layerIds.map((id) => frames.map((f) => {
+    const cel = p.frames[f].cels[id];
+    let n = 0, cx = 0, cy = 0;
+    if (cel) for (let i = 0; i < cel.length; i++) if (cel[i]) { n++; cx += i % p.width; cy += Math.floor(i / p.width); }
+    return n ? { x: cx / n, y: cy / n } : null;
+  }));
+  const argmaxStep = (sr: ({ x: number; y: number } | null)[]) => {
+    let best = -1, k = -1;
+    for (let i = 1; i < sr.length; i++) { const a = sr[i - 1], b = sr[i]; if (a && b) { const d = Math.hypot(b.x - a.x, b.y - a.y); if (d > best) { best = d; k = i; } } }
+    return best > 0.3 ? k : -1;
+  };
+  const peaks = series.map(argmaxStep).filter((k) => k >= 0);
+  if (tipo !== "personagem" || ms.length < 3) add(5, "Follow Through and Overlapping Action (continuidade e sobreposição)", "na", "Vale para personagens com partes soltas (cabelo, capa, cauda, braços).");
+  else if (peaks.length >= 2 && new Set(peaks).size > 1) add(5, "Follow Through and Overlapping Action (continuidade e sobreposição)", "ok", "As camadas se movem em tempos diferentes (uma parte chega depois da outra).");
+  else add(5, "Follow Through and Overlapping Action (continuidade e sobreposição)", "atencao", "Tudo se move junto, como um bloco: separe cabelo, capa, cauda e braços em camadas e atrase-os 1–2 frames em relação ao corpo.");
+
+  // 6. Slow in / slow out
+  if (maxStep < 1) add(6, "Slow In and Slow Out (aceleração e desaceleração)", "na", "Movimento pequeno demais para medir o ease.");
+  else if (codes.has("sem_ease")) add(6, "Slow In and Slow Out (aceleração e desaceleração)", "atencao", "Os passos têm tamanho igual: aproxime os frames perto das poses-chave e afaste no meio.");
+  else add(6, "Slow In and Slow Out (aceleração e desaceleração)", "ok", "O espaçamento entre frames varia (aceleração e desaceleração).");
+
+  // 7. Arcos: o caminho do centro não é uma reta quando há deslocamento nos dois eixos
+  const totalX = steps.reduce((a, q) => a + Math.abs(q.dx), 0), totalY = steps.reduce((a, q) => a + Math.abs(q.dy), 0);
+  if (Math.min(totalX, totalY) < 0.15 * Math.max(totalX, totalY, 0.001) || maxStep < 1.5) add(7, "Arcs (movimento em arco)", "na", "O movimento é quase todo em um eixo (ex.: quique vertical); arcos valem para trajetórias e membros.");
+  else {
+    const a = ms[0], b = ms[ms.length - 1];
+    const len = Math.hypot(b.cx - a.cx, b.cy - a.cy);
+    let dev = 0;
+    for (const m of ms) dev = Math.max(dev, len > 0.5 ? Math.abs((b.cx - a.cx) * (a.cy - m.cy) - (a.cx - m.cx) * (b.cy - a.cy)) / len : Math.hypot(m.cx - a.cx, m.cy - a.cy));
+    const path = steps.reduce((q, w) => q + w.len, 0);
+    if (dev / Math.max(path, 1) >= 0.1) add(7, "Arcs (movimento em arco)", "ok", "O caminho do centro é curvo (não uma reta).");
+    else add(7, "Arcs (movimento em arco)", "atencao", "O caminho do centro é quase reto: calcule as posições ao longo de uma curva.");
+  }
+
+  // 8. Ação secundária: mais de uma camada se movendo
+  if (tipo === "rotacao") add(8, "Secondary Action (ação secundária)", "na", "Uma rotação simples não pede ação secundária.");
+  else if (layerIds.length >= 2) add(8, "Secondary Action (ação secundária)", "ok", `${layerIds.length} camadas se movem (além da ação principal há movimento secundário).`);
+  else add(8, "Secondary Action (ação secundária)", "atencao", "Só uma camada se move: acrescente piscar, respirar, balançar, faíscas ou uma sombra que reage.");
+
+  // 9. Timing
+  if (codes.has("tempo_uniforme")) add(9, "Timing (temporização)", "atencao", "Todos os frames duram o mesmo: segure o apogeu/impacto (2–3×) e acelere o resto.");
+  else add(9, "Timing (temporização)", ms.length < 3 ? "na" : "ok", ms.length < 3 ? "" : `Durações variam entre ${Math.min(...durs)} e ${Math.max(...durs)} ms.`);
+
+  // 10. Exagero
+  const ampl = Math.max(maxStep, range(ws) * p.width * 0.5, range(hs) * p.height * 0.5) / canvas;
+  if (ampl < 0.05) add(10, "Exaggeration (exagero)", "atencao", "As poses são quase iguais: amplie o movimento e a deformação (poses um pouco mais extremas leem melhor em poucos pixels).");
+  else add(10, "Exaggeration (exagero)", "ok", "A amplitude é visível no quadro (cuide para não virar irreal).");
+
+  // 11. Desenho sólido: volume, luz e contorno consistentes
+  const solidBad = ["pillow_shading", "contorno_claro", "luz_inconsistente", "ruido", "banding"].filter((c) => codes.has(c));
+  if (solidBad.length) add(11, "Solid Drawing (desenho volumétrico)", "atencao", `Volume mal construído (${solidBad.join(", ")}): uma luz só, contorno escuro, blocos grandes de luz e sombra.`);
+  else add(11, "Solid Drawing (desenho volumétrico)", "ok", "Sem pillow shading, banding, ruído, contorno claro nem luz trocando de lado.");
+
+  // 12. Apelo: não é medível
+  add(12, "Appeal (apelo)", "na", "Avaliação humana: a silhueta é simpática? os olhos/rosto têm personalidade? as proporções são atraentes (cabeça e olhos grandes = fofura)?");
+  return out;
 }
 
 // ---------- API ----------
@@ -737,11 +858,13 @@ export function analyze(p: Project, frames: number[], opts: AnalyzeOptions = {})
   for (const f of frames) issues.push(...analyzeFrame(p, f, { ...opts, figure: frames.length > 1 ? flattenLayers(p, f, moving) : undefined }));
   if (frames.length > 1) checkContrastAndLight(p, frames, moving, issues);
   checkPalette(p, frames, issues);
+  let principles: PrincipleStatus[] | undefined;
   if (frames.length > 1) {
     checkSequence(p, metrics, opts.loop ?? true, issues, opts.tipo ?? "personagem");
     if (frames.length === p.frames.length || frames.length > 2) checkMotion(p, metrics, opts.loop ?? true, issues, opts.tipo ?? "personagem");
   }
-  return { issues, metrics, ignoredLayers: frames.length > 1 ? ignored : [] };
+  if (frames.length >= 3) principles = evaluatePrinciples(p, frames, metrics, issues, opts, moving);
+  return { issues, metrics, principles, ignoredLayers: frames.length > 1 ? ignored : [] };
 }
 
 const ICON: Record<Severity, string> = { erro: "ERRO", aviso: "AVISO", info: "info" };
@@ -777,6 +900,11 @@ export function formatAnalysis(p: Project, r: AnalysisResult): string {
   for (const i of r.issues) counts[i.severity]++;
   lines.push("", r.issues.length ? `Problemas: ${counts.erro} erro(s), ${counts.aviso} aviso(s), ${counts.info} info.` : "Nenhum problema encontrado nas checagens automáticas.");
   lines.push(...formatIssues(r.issues));
+  if (r.principles?.length) {
+    const mark = { ok: "✓", atencao: "!", na: "–" } as const;
+    lines.push("", "Os 12 princípios da animação (✓ aplicado, ! vale melhorar, – não se aplica ou avaliação humana):");
+    for (const q of r.principles) lines.push(`  ${mark[q.estado]} ${String(q.n).padStart(2)}. ${q.nome}${q.nota ? ` — ${q.nota}` : ""}`);
+  }
   if (r.issues.length) lines.push("", "Os avisos são heurísticas: corrija o que for defeito e ignore o que for intencional.");
   return lines.join("\n");
 }

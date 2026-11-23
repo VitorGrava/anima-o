@@ -6,6 +6,7 @@
 import { normalizeHex } from "./project.ts";
 
 export const REFERENCE_TOPICS = [
+  "principios",
   "proporcoes",
   "articulacoes",
   "rosto_mao",
@@ -121,6 +122,35 @@ function proportions(height: number, style: NonNullable<ReferenceOptions["style"
 // ---------- tópicos de texto ----------
 
 const TEXT: Record<Exclude<ReferenceTopic, "proporcoes" | "rampa" | "paletas">, string> = {
+  principios: `Os 12 princípios da animação (Disney: Frank Thomas, Ollie Johnston e John Lounsbery, anos 1930) e como aplicá-los nesta engine.
+Definições a partir do artigo "Os 12 princípios da animação" (Alura): https://www.alura.com.br/artigos/12-principios-animacao
+O comando check imprime um painel (✓ / ! / –) dos que dá para medir; os outros pedem o seu olho.
+
+1. SQUASH AND STRETCH (comprimir e esticar): deformar temporariamente o objeto durante o movimento, dando peso e elasticidade (saltos, impactos).
+   Na engine: mude a largura e a altura do blob/elipse mantendo o volume (largura × altura ≈ constante); amasse no contato, estique na velocidade. check: volume_pulou.
+2. ANTICIPATION (antecipação): preparar o espectador para a ação seguinte; o personagem se prepara antes de agir (bolinha achatada antes do salto).
+   Na engine: 1–2 frames de recuo/agachamento no sentido oposto antes da ação, com a pose segurada (set_frame_timing). check: antecipação no painel.
+3. STAGING (encenação): disposição clara dos elementos para o público entender a ação; posição, enquadramento, composição e cor dirigem a atenção ao ponto focal.
+   Na engine: fundo em camada separada, menos saturado e com menos contraste que o personagem; um ponto focal só; a pose deve ler só pela silhueta (view check="silhueta"). check: contraste_fraco e tamanho da figura.
+4. STRAIGHT AHEAD ACTION AND POSE TO POSE (ação direta e pose a pose): direta = quadro a quadro em ordem (espontâneo, mas inconsistente); pose a pose = poses-chave primeiro e transições depois (mais controle de ritmo e qualidade, pode ficar rígido).
+   Na engine: para ciclos e ações combinadas, use pose a pose: desenhe os extremos com draw_frames, confira com view frames="all", depois os intermediários. Use ação direta para fogo, fumaça e água (formas orgânicas imprevisíveis), variando a ponta e mantendo a base.
+5. FOLLOW THROUGH AND OVERLAPPING ACTION (continuidade e sobreposição): partes continuam se movendo depois que o corpo para (cabelo, antena); partes diferentes se movem em tempos distintos (braços um pouco depois das pernas). Dão inércia, peso e massa.
+   Na engine: cabelo, capa, cauda, braços e acessórios em camadas próprias, atrasados 1–2 frames em relação ao corpo. check: camadas com picos de movimento em frames diferentes.
+6. SLOW IN AND SLOW OUT (aceleração e desaceleração): o movimento começa e termina gradualmente, em vez de ter velocidade constante.
+   Na engine: mais frames perto das poses-chave e menos no meio (spacing), e frames seguros com set_frame_timing. check: sem_ease.
+7. ARCS (movimento em arco): o movimento segue trajetórias curvas (braços, pernas, objetos), mais orgânico e fluido; deve ser intencional.
+   Na engine: calcule as posições ao longo de uma curva (parábola num salto, arco do braço com transform rotate em torno da articulação). check: arco no painel (quando há deslocamento nos dois eixos).
+8. SECONDARY ACTION (ação secundária): ações extras (gestos, expressões, partes que não fazem o movimento principal) dão vida e emoção (a sobrancelha que dobra junto com a bolinha).
+   Na engine: piscar, respirar, olhos que seguem o objeto, faíscas, sombra que reage, em camadas separadas. check: mais de uma camada se movendo.
+9. TIMING (temporização): duração e velocidade de cada movimento definem ritmo, fluidez, emoção e urgência; dominar o timing é fundamental.
+   Na engine: 50–80 ms em ações rápidas, 80–120 em caminhada, 150–250 em respiração; nunca todos iguais. check: tempo_uniforme.
+10. EXAGGERATION (exagero): amplificar movimentos, formas e características para dar estilo e atratividade, sem tornar irreal.
+   Na engine: poses um pouco mais extremas que o real (em poucos pixels o sutil não lê), deformação e amplitude visíveis. check: amplitude no painel.
+11. SOLID DRAWING (desenho volumétrico): desenhos sólidos e tridimensionais, com formas, volumes, proporções e perspectiva coerentes (peso e profundidade).
+   Na engine: uma fonte de luz só, contorno escuro do próprio material, blocos grandes de luz e sombra (sem pillow shading, banding nem ruído); formas redondas com draw_shapes blob; medidas de anatomia com reference proporcoes. check: pillow_shading, contorno_claro, luz_inconsistente, ruido, banding.
+12. APPEAL (apelo): a animação deve ser agradável de ver; designs cativantes, expressões, movimentos elegantes e personalidade (a bolinha de olhos grandes que extrapolam o corpo).
+   Na engine: silhueta simpática, cabeça e olhos maiores (estilizado/chibi), 1 px de brilho no olho, paleta coesa. Avaliação humana: pergunte "eu me importaria com este personagem?".`,
+
   articulacoes: `Articulações e amplitude (para girar segmentos com transform rotate):
 - Cada articulação tem um pivô fixo; o segmento gira em torno dele e o segmento seguinte acompanha. Comprimentos NÃO mudam durante a animação (coxa e canela sempre do mesmo tamanho).
 - Ombro: braço vai de ~50° para trás a 180° para frente (e abre para o lado). Em caminhada, balança ±20–30°.
@@ -218,6 +248,7 @@ Depois repete espelhado (outro lado) = 8 frames para o ciclo completo (2 passos)
 - Um personagem + o cenário no mesmo canvas deve usar a MESMA densidade de pixel.`,
 
   estudo: `Onde estudar (fontes de referência reconhecidas na comunidade de pixel art):
+- Alura — "Os 12 princípios da animação" (https://www.alura.com.br/artigos/12-principios-animacao): definições e um exemplo animado de cada princípio.
 - Pedro Medeiros (saint11): tutoriais curtos de animação e pixel art (cartilhas sobre ciclos, impacto, efeitos).
 - Derek Yu — "Pixel Art Tutorial": fundamentos de contorno, sombreamento e cor.
 - Slynyrd — "Pixelblog": série longa sobre paleta, sombreamento, animação e cenários.

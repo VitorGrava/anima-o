@@ -75,11 +75,11 @@ const USAGE = `anima — engine de animação pixel art
   anima view [projeto.anima.json]        abre o app no navegador acompanhando o arquivo ao vivo
   anima new <projeto> [LxA] [fps]        cria um projeto vazio
   anima run <projeto> <comandos.json|-> [--png prévia.png] [--continuar]
-                                         aplica comandos [{"name": "...", "input": {...}}]; o último mostra a prévia
+                                         aplica comandos [{"name": "...", "input": {...}}] EM CIMA do projeto existente (para recomeçar, rode "new", que sobrescreve); o último mostra a prévia; -q/--quiet não mostra a folha de frames
   anima show <projeto> [frame|all] [--png saida.png] [--check cinza|luz_sombra|silhueta]
              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--scale N]
   anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--png saida.png]
-                                         defeitos da arte e da animação (--efeito: brilho, chama, fumaça)
+                                         defeitos da arte e da animação (--efeito: brilho, chama, fumaça; --tipo rotacao: moeda girando)
   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N]
   anima guide                            guia do animador: fluxo de trabalho e princípios de pixel art e animação
@@ -88,6 +88,11 @@ const USAGE = `anima — engine de animação pixel art
 export async function main(argv: string[]): Promise<number> {
   const args = [...argv];
   const cmd = args.shift();
+  if (cmd && cmd !== "help" && (args.includes("--help") || args.includes("-h"))) {
+    console.log(USAGE);
+    if (cmd === "reference") console.log(`\nTópicos de reference: ${REFERENCE_TOPICS.join(", ")}`);
+    return 0;
+  }
   const store = new ProjectStore();
 
   switch (cmd) {
@@ -119,6 +124,7 @@ export async function main(argv: string[]): Promise<number> {
     case "run": {
       const png = flag(args, "png");
       const keepGoing = boolFlag(args, "continuar");
+      const quiet = boolFlag(args, "quiet") || boolFlag(args, "q");
       rejectUnknownFlags(args, "run");
       const [file, src] = args;
       if (!file || !src) break;
@@ -129,8 +135,9 @@ export async function main(argv: string[]): Promise<number> {
       for (const [n, c] of cmds.entries()) {
         const r = runCommand(store.project, c.name, c.input ?? {});
         const last = n === cmds.length - 1;
-        // o último comando mostra tudo (prévia, avisos); os outros, só a primeira linha
-        console.log(`${r.ok ? "ok " : "ERRO"} #${n} ${c.name}: ${last ? r.text : r.text.split("\n")[0]}`);
+        // o último comando e os de leitura (check, view, reference...) mostram tudo; os outros, só a primeira linha
+        const reads = ["check", "view", "reference", "get_project_info"].includes(c.name);
+        console.log(`${r.ok ? "ok " : "ERRO"} #${n} ${c.name}: ${last || reads || !r.ok ? r.text : r.text.split("\n")[0]}`);
         if (!r.ok) {
           fails++;
           if (!keepGoing) {
@@ -143,7 +150,10 @@ export async function main(argv: string[]): Promise<number> {
       await store.save();
       console.log(`\n${describeProject(store.project)}`);
       const sheet = runCommand(store.project, "view", { frames: "all", as_image: false });
-      if (sheet.ok && store.project.frames.length > 1) console.log(`\n${sheet.text}`);
+      if (!quiet && sheet.ok && store.project.frames.length > 1) {
+        if (sheet.text.length <= 3500) console.log(`\n${sheet.text}`);
+        else console.log(`\n(folha de frames omitida por ser grande: use \`anima show <projeto> all\` ou \`export <projeto> sheet.png\`)`);
+      }
       return fails ? 1 : 0;
     }
     case "show": {
@@ -188,7 +198,7 @@ export async function main(argv: string[]): Promise<number> {
       const [file] = args;
       if (!file) break;
       await store.open(file);
-      const r = runCommand(store.project, "check", { symmetric, tipo: efeito || tipoFlag === "efeito" ? "efeito" : "personagem", ignore_layers: ignorar ? ignorar.split(",") : undefined });
+      const r = runCommand(store.project, "check", { symmetric, tipo: efeito ? "efeito" : tipoFlag === "efeito" || tipoFlag === "rotacao" ? tipoFlag : "personagem", ignore_layers: ignorar ? ignorar.split(",") : undefined });
       console.log(r.text);
       if (png) await saveImages(store.project, r, png);
       return r.ok ? 0 : 1;
@@ -228,7 +238,13 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "guide": {
-      console.log(SYSTEM_PROMPT);
+      console.log(`${SYSTEM_PROMPT}
+
+Como isto vira comandos na CLI (sem MCP)
+- Cada ferramenta acima é um comando do arquivo JSON de "anima run": [{"name": "draw_rows", "input": {...}}]. "anima tools <nome>" mostra os parâmetros (inclusive os de listas aninhadas); chaves que não existem dão erro com sugestão.
+- "anima new <projeto> LxA fps [--vazio]" cria (e sobrescreve) o projeto; "run" aplica comandos em cima dele e para no primeiro erro.
+- Conferência: "anima show <projeto> all [--png folha.png]" (todos os frames), "anima check <projeto> [--efeito|--tipo rotacao] [--ignorar camada]".
+- Entrega: "anima export <projeto> saida.gif --scale 8" e "anima export <projeto> folha.png --scale 6 --columns N" (é o "export_file" do MCP).`);
       return 0;
     }
     case "tools": {
@@ -240,10 +256,21 @@ export async function main(argv: string[]): Promise<number> {
         inputSchema: { type: "object", properties: { scale: { type: "integer" }, columns: { type: "integer" }, frame: { type: "integer" } } },
       }];
       if (json) { console.log(JSON.stringify(name ? all.filter((t) => t.name === name) : all, null, 1)); return 0; }
+      type Prop = { type?: string; description?: string; default?: unknown; enum?: unknown[]; properties?: Record<string, Prop>; items?: Prop; required?: string[]; anyOf?: Prop[] };
+      const line = (k: string, v: Prop, req: boolean, indent: string): string[] => {
+        const kind = v.enum ? v.enum.join("|") : v.type === "array" ? `lista de ${v.items?.type === "object" ? "objetos" : v.items?.type ?? "?"}` : v.type ?? (v.anyOf ? "uma de várias formas (veja --json)" : "?");
+        const out = [`${indent}${k}${req ? "*" : ""}: ${kind}${v.default !== undefined ? ` (padrão ${JSON.stringify(v.default)})` : ""}${v.description ? ` — ${String(v.description).split("\n")[0].slice(0, 110)}` : ""}`];
+        const inner = v.type === "array" ? v.items : v;
+        if (inner?.properties) {
+          const r = new Set(inner.required ?? []);
+          for (const [kk, vv] of Object.entries(inner.properties)) out.push(...line(kk, vv, r.has(kk), indent + "    "));
+        }
+        return out;
+      };
       const describe = (t: (typeof all)[number]) => {
-        const props = ((t.inputSchema as { properties?: Record<string, { type?: string; description?: string; default?: unknown; enum?: unknown[] }> }).properties) ?? {};
+        const props = ((t.inputSchema as { properties?: Record<string, Prop> }).properties) ?? {};
         const req = new Set(((t.inputSchema as { required?: string[] }).required) ?? []);
-        return Object.entries(props).map(([k, v]) => `    ${k}${req.has(k) ? "*" : ""}: ${v.enum ? v.enum.join("|") : v.type ?? "?"}${v.default !== undefined ? ` (padrão ${JSON.stringify(v.default)})` : ""}${v.description ? ` — ${String(v.description).split("\n")[0].slice(0, 110)}` : ""}`).join("\n");
+        return Object.entries(props).flatMap(([k, v]) => line(k, v, req.has(k), "    ")).join("\n");
       };
       if (name) {
         const t = all.find((x) => x.name === name);

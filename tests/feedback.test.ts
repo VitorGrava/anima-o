@@ -335,7 +335,7 @@ describe("ferramentas que os agentes pediram", () => {
     const r = runCommand(p, "draw_rows", { frame: 2, rows: ["rr"] });
     expect(r.ok).toBe(false);
     expect(r.text).toMatch(/desconhecida/);
-    expect(r.text).toMatch(/"frame" \(quis dizer "frames"\?\)/);
+    expect(r.text).toMatch(/"frame" não existe \(quis dizer "frames"\?\)/);
     expect(frameToRowsSafe(p)).toBe("........");        // nada foi desenhado
     expect(runCommand(p, "update_layer", { layer: "Base", name: "x" }).text).toMatch(/quis dizer "rename"/);
   });

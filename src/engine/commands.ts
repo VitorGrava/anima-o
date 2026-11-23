@@ -447,8 +447,49 @@ const shape = z.discriminatedUnion("type", [
     color: colorRef,
     filled: z.boolean().default(true),
   }).describe("Elipse inscrita na caixa (x, y, w, h)"),
+  z.object({
+    type: z.literal("blob"),
+    x: z.number().int(),
+    y: z.number().int(),
+    w: z.number().int().min(3),
+    h: z.number().int().min(3),
+    outline: colorRef.describe("contorno de 1 px (um tom escuro do material, não preto puro)"),
+    base: colorRef,
+    light: colorRef.describe("lado voltado para a luz (cima-esquerda)"),
+    shadow: colorRef.describe("lado oposto e embaixo"),
+    highlight: colorRef.optional().describe("brilho de 1–2 px perto do canto da luz (opcional)"),
+    squareness: z.number().min(2).max(6).default(2.4).describe("2 = elipse; 3–4 = bloco arredondado (slime, gota); 6 = quase retângulo"),
+  }).describe("Forma orgânica pronta: superelipse com contorno, luz de cima-esquerda e sombra embaixo/direita, sem pillow shading. Use para bolas, slimes, frutas, cabeças, pedras."),
   z.object({ type: z.literal("fill"), x: z.number().int(), y: z.number().int(), color: colorRef }).describe("Balde de tinta a partir de (x, y)"),
 ]);
+
+interface BlobSpec { x: number; y: number; w: number; h: number; outline: string; base: string; light: string; shadow: string; highlight?: string; squareness: number }
+
+/** Superelipse com contorno de 1 px e sombreamento direcional (luz de cima-esquerda): luz no quadrante da luz, sombra no oposto. */
+function drawBlob(s: { width: number; height: number; data: Uint8Array }, b: BlobSpec, idx: (ref: string) => number): void {
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2, rx = b.w / 2, ry = b.h / 2;
+  const inside = (x: number, y: number) => (Math.abs((x + 0.5 - cx) / rx)) ** b.squareness + (Math.abs((y + 0.5 - cy) / ry)) ** b.squareness <= 1;
+  const set = (x: number, y: number, ref: string) => { if (x >= 0 && y >= 0 && x < s.width && y < s.height) s.data[y * s.width + x] = idx(ref); };
+  const mask = new Set<number>();
+  for (let y = b.y; y < b.y + b.h; y++) for (let x = b.x; x < b.x + b.w; x++) if (inside(x, y)) mask.add(y * 10000 + x);
+  const has = (x: number, y: number) => mask.has(y * 10000 + x);
+  for (const k of mask) {
+    const y = Math.floor(k / 10000), x = k % 10000;
+    const edge = !has(x - 1, y) || !has(x + 1, y) || !has(x, y - 1) || !has(x, y + 1);
+    if (edge) { set(x, y, b.outline); continue; }
+    const nx = (x + 0.5 - cx) / rx, ny = (y + 0.5 - cy) / ry;
+    const len = Math.hypot(nx, ny) || 1;
+    const facing = (-nx * 0.55 - ny * 0.65) / len;            // 1 = de frente para a luz, -1 = de costas
+    const dist = Math.min(...[[-1, 0], [1, 0], [0, -1], [0, 1]].map(([dx, dy]) => { let d = 1; while (has(x + dx * d, y + dy * d) && d < 30) d++; return d; }));
+    const dir = facing > 0.5 && dist <= 3 ? b.light : facing < -0.2 && dist <= 4 ? b.shadow : facing < -0.55 ? b.shadow : facing > 0.7 ? b.light : b.base;
+    set(x, y, dir);
+  }
+  if (b.highlight) {
+    const hx = Math.round(cx - rx * 0.42), hy = Math.round(cy - ry * 0.46);
+    if (has(hx, hy)) set(hx, hy, b.highlight);
+    if (has(hx + 1, hy) && b.w >= 8) set(hx + 1, hy, b.highlight);
+  }
+}
 
 const drawShapes = def({
   name: "draw_shapes",
@@ -466,7 +507,7 @@ const drawShapes = def({
     for (const f of list) {
       const s = { width: p.width, height: p.height, data: getCel(p, f, layer.id) };
       for (const sh of i.shapes) {
-        const c = colorIndex(p, sh.color);
+        const c = sh.type === "blob" ? 0 : colorIndex(p, sh.color);
         switch (sh.type) {
           case "pixels":
             for (const [x, y] of sh.points) draw.setPixel(s, x!, y!, c);
@@ -479,6 +520,9 @@ const drawShapes = def({
             break;
           case "ellipse":
             draw.ellipse(s, sh.x, sh.y, sh.w, sh.h, c, sh.filled);
+            break;
+          case "blob":
+            drawBlob(s, sh, (ref) => colorIndex(p, ref));
             break;
           case "fill":
             draw.floodFill(s, sh.x, sh.y, c);
@@ -691,9 +735,9 @@ const check = def({
     symmetric: z.boolean().default(false).describe("true: o sprite deveria ser simétrico (de frente/costas); aponta pixels sem par no lado oposto."),
     loop: z.boolean().default(true).describe("Confere também a transição do último para o primeiro frame."),
     tipo: z
-      .enum(["personagem", "efeito"])
+      .enum(["personagem", "efeito", "rotacao"])
       .default("personagem")
-      .describe('"efeito" (brilho, chama, fumaça, estrela...) muda de tamanho de propósito: não cobra volume, base nem largura. "personagem": cobra.'),
+      .describe('"efeito" (brilho, chama, fumaça, estrela...) muda de tamanho de propósito e emite luz: não cobra volume, base, largura, contorno nem pillow. "rotacao" (moeda girando, objeto virando): a largura muda sozinha e o centro fica parado: não cobra volume, base, largura nem movimento. "personagem": cobra tudo.'),
     ignore_layers: z.array(z.string()).optional().describe("Camadas a deixar fora das medidas (ex.: faíscas e efeitos que se mexem de propósito, ou o fundo)."),
     as_image: z.boolean().default(true).describe("Devolve a imagem com os pixels problemáticos marcados em magenta."),
   }),
@@ -808,15 +852,50 @@ function editDistance(a: string, b: string): number {
  * e o comando roda "com sucesso" no lugar errado. Aqui isso vira erro, com a sugestão da chave certa.
  */
 function unknownKeys(schema: z.ZodType, input: unknown): string | null {
-  if (!(schema instanceof z.ZodObject) || !input || typeof input !== "object" || Array.isArray(input)) return null;
-  const valid = Object.keys(schema.shape);
-  const bad = Object.keys(input as object).filter((k) => !valid.includes(k));
-  if (!bad.length) return null;
-  const hint = (k: string) => {
-    const best = valid.map((v) => ({ v, d: editDistance(k.toLowerCase(), v.toLowerCase()) })).sort((a, b) => a.d - b.d)[0];
-    return best && best.d <= Math.max(2, Math.floor(k.length / 3)) ? ` (quis dizer "${best.v}"?)` : "";
+  const found: string[] = [];
+  const unwrap = (sc: z.ZodType): z.ZodType => {
+    let cur: z.ZodType = sc;
+    for (let k = 0; k < 6; k++) {
+      const def = (cur as unknown as { def?: { innerType?: z.ZodType } }).def;
+      if (cur instanceof z.ZodOptional || cur instanceof z.ZodDefault || cur instanceof z.ZodNullable) cur = def!.innerType!;
+      else break;
+    }
+    return cur;
   };
-  return `chave(s) desconhecida(s): ${bad.map((k) => `"${k}"${hint(k)}`).join(", ")}. Chaves válidas: ${valid.join(", ")}.`;
+  const walk = (sc: z.ZodType, value: unknown, where: string) => {
+    const t = unwrap(sc);
+    if (t instanceof z.ZodObject && value && typeof value === "object" && !Array.isArray(value)) {
+      const valid = Object.keys(t.shape);
+      const given = Object.keys(value as object);
+      const optional = (sc: z.ZodType) => sc instanceof z.ZodOptional || sc instanceof z.ZodDefault;
+      const missing = valid.filter((v) => !given.includes(v) && !optional(t.shape[v] as z.ZodType));
+      const strange = given.filter((k) => !valid.includes(k));
+      for (const k of given) {
+        if (!valid.includes(k)) {
+          const best = valid.map((v) => ({ v, d: editDistance(k.toLowerCase(), v.toLowerCase()) })).sort((x, y) => x.d - y.d)[0];
+          // uma chave estranha + uma obrigatória faltando = quase certamente a mesma coisa (ex.: "color" no lugar de "hex")
+          const guess = best && best.d <= Math.max(2, Math.floor(k.length / 3)) ? best.v : strange.length === 1 && missing.length === 1 ? missing[0] : null;
+          const hint = guess ? ` (quis dizer "${guess}"?)` : "";
+          found.push(`${where ? `${where}.` : ""}"${k}" não existe${hint}. Chaves válidas${where ? ` de ${where}` : ""}: ${valid.join(", ")}.`);
+        } else walk(t.shape[k] as z.ZodType, (value as Record<string, unknown>)[k], where ? `${where}.${k}` : k);
+      }
+    } else if (t instanceof z.ZodArray && Array.isArray(value)) {
+      const el = (t as unknown as { element: z.ZodType }).element;
+      value.slice(0, 50).forEach((v, idx) => walk(el, v, `${where}[${idx}]`));
+    }
+  };
+  walk(schema, input, "");
+  return found.length ? `chave(s) desconhecida(s): ${found.slice(0, 4).join(" ")}` : null;
+}
+
+/** Erros de validação do Zod em português, com o caminho do campo e o que fazer. */
+function describeIssues(name: string, error: z.ZodError): string {
+  const lines = error.issues.slice(0, 5).map((i) => {
+    const where = i.path.length ? i.path.map((q, k) => (typeof q === "number" ? `[${q}]` : k ? `.${String(q)}` : String(q))).join("") : "(entrada)";
+    const missing = i.code === "invalid_type" && /received undefined/.test(i.message);
+    return `- ${where}: ${missing ? "falta este campo obrigatório" : i.message}`;
+  });
+  return `Entrada inválida para ${name}:\n${lines.join("\n")}\nVeja os parâmetros com: anima tools ${name}`;
 }
 
 /** Valida e executa um comando. Erros viram texto amigável — nunca exceções. */
@@ -827,7 +906,7 @@ export function runCommand(p: Project, name: string, input: unknown): CommandRes
   if (unknown) return { ok: false, changed: false, text: `Entrada inválida para ${name}: ${unknown}` };
   const parsed = cmd.schema.safeParse(input ?? {});
   if (!parsed.success) {
-    return { ok: false, changed: false, text: `Entrada inválida para ${name}: ${z.prettifyError(parsed.error)}` };
+    return { ok: false, changed: false, text: describeIssues(name, parsed.error) };
   }
   // Executa numa cópia: se o comando falhar no meio, o projeto fica intacto.
   const work = cloneProject(p);

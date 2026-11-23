@@ -10,7 +10,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SYSTEM_PROMPT } from "../server/prompt.ts";
-import { analyze, analyzeFrame, createProject, fromJSON, runCommand, type Project } from "../src/engine/index.ts";
+import { analyze, analyzeFrame, createProject, frameToRows, fromJSON, runCommand, type Project } from "../src/engine/index.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -215,4 +215,143 @@ describe("portão de qualidade: animações geradas pelos agentes (bench/out)", 
       expect(found, "pillow shading").not.toContain("pillow_shading");
     });
   }
+});
+
+describe("os 12 princípios da animação (Alura/Disney)", () => {
+  const NOMES = [
+    /squash and stretch/i, /anticipation/i, /staging/i, /pose to pose/i, /follow through/i, /slow in and slow out/i,
+    /arcs/i, /secondary action/i, /timing/i, /exaggeration/i, /solid drawing/i, /appeal/i,
+  ];
+  it("o prompt cita os 12 princípios pelo nome", () => {
+    for (const re of NOMES) expect(SYSTEM_PROMPT, String(re)).toMatch(re);
+  });
+  it("reference principios traz os 12, a fonte e como aplicar na engine", () => {
+    const r = runCommand(createProject(), "reference", { topic: "principios" });
+    expect(r.ok).toBe(true);
+    for (const re of NOMES) expect(r.text, String(re)).toMatch(re);
+    expect(r.text).toMatch(/alura\.com\.br\/artigos\/12-principios-animacao/);
+    expect((r.text.match(/Na engine:/g) ?? []).length).toBeGreaterThanOrEqual(10);
+  });
+
+  // pequenas animações construídas para provar cada medição
+  const ballAnim = (positions: [number, number][], widths?: number[], durations?: number[]) => {
+    const p = sprite(40, 40, { o: "#3a0a18", r: "#d02838" });
+    runCommand(p, "add_frames", { count: positions.length - 1 });
+    positions.forEach(([x, y], f) => {
+      const w = widths?.[f] ?? 6;
+      runCommand(p, "draw_shapes", { frames: f, shapes: [{ type: "ellipse", x, y, w, h: 6, color: "r" }], preview: false });
+      if (durations) runCommand(p, "set_frame_timing", { frames: f, duration_ms: durations[f] });
+    });
+    return p;
+  };
+  const panel = (p: Project, opts = {}) => analyze(p, p.frames.map((_, i) => i), opts).principles!;
+  const state = (pr: ReturnType<typeof panel>, n: number) => pr.find((q) => q.n === n)!.estado;
+
+  it("o painel tem sempre os 12 princípios numerados e só aparece com 3+ frames", () => {
+    const p = ballAnim([[5, 5], [10, 8], [16, 10], [22, 8]]);
+    const pr = panel(p);
+    expect(pr.map((q) => q.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(analyze(ballAnim([[5, 5], [10, 8]]), [0, 1]).principles).toBeUndefined();
+    expect(runCommand(p, "check", { as_image: false }).text).toMatch(/Os 12 princípios da animação/);
+  });
+  it("3. staging: figura minúscula é apontada", () => {
+    const p = sprite(64, 64, { r: "#d02838" });
+    runCommand(p, "add_frames", { count: 2 });
+    for (let f = 0; f < 3; f++) runCommand(p, "draw_rows", { frames: f, x: 30 + f, y: 30, rows: ["rr", "rr"], preview: false });
+    expect(state(panel(p), 3)).toBe("atencao");
+  });
+  it("6/7. ease e arco: trajetória reta e linear pede melhoria; curva e com aceleração passa", () => {
+    const linear = ballAnim([[2, 2], [8, 8], [14, 14], [20, 20], [26, 26]]);
+    expect(state(panel(linear), 6)).toBe("atencao");
+    expect(state(panel(linear), 7)).toBe("atencao");
+    const arc = ballAnim([[2, 24], [6, 14], [12, 8], [20, 6], [28, 8], [34, 14]], undefined, [60, 60, 90, 120, 90, 60]);
+    expect(state(panel(arc), 7)).toBe("ok");
+    expect(state(panel(arc), 6)).toBe("ok");
+  });
+  it("2. antecipação: recuar antes da ação passa; sair direto é apontado", () => {
+    const direct = ballAnim([[10, 10], [10, 10], [20, 10], [30, 10], [34, 10]]);
+    expect(state(panel(direct), 2)).toBe("atencao");
+    const wind = ballAnim([[14, 10], [12, 10], [22, 10], [32, 10], [36, 10]]);
+    expect(state(panel(wind), 2)).toBe("ok");
+  });
+  it("9/4. timing: tempos iguais são apontados; segurar poses passa", () => {
+    const flat = ballAnim([[2, 24], [6, 14], [12, 8], [20, 6], [28, 8]]);
+    expect(state(panel(flat), 9)).toBe("atencao");
+    const timed = ballAnim([[2, 24], [6, 14], [12, 8], [20, 6], [28, 8]], undefined, [60, 60, 70, 140, 60]);
+    expect(state(panel(timed), 9)).toBe("ok");
+    expect(state(panel(timed), 4)).toBe("ok");
+  });
+  it("8/5. ação secundária e sobreposição: partes que se movem em tempos diferentes passam", () => {
+    const p = sprite(40, 20, { r: "#d02838", b: "#2030c0" });
+    runCommand(p, "add_layer", { name: "cabelo" });
+    runCommand(p, "add_frames", { count: 4 });
+    for (let f = 0; f < 5; f++) {
+      runCommand(p, "draw_rows", { frames: f, layer: "Base", x: 4 + f * 6, y: 8, rows: ["rr", "rr"], preview: false });
+      runCommand(p, "draw_rows", { frames: f, layer: "cabelo", x: 4 + Math.max(0, f - 1) * 6 + 1, y: 6, rows: ["bb"], preview: false });
+    }
+    const pr = panel(p);
+    expect(state(pr, 8)).toBe("ok");
+    expect(state(pr, 5)).toBe("ok");
+    const solo = ballAnim([[2, 2], [8, 8], [14, 14], [20, 20]]);
+    expect(state(panel(solo), 8)).toBe("atencao");
+  });
+  it("10. exagero: poses quase iguais são apontadas", () => {
+    const tiny = ballAnim([[20, 20], [21, 20], [20, 20], [21, 20]]);
+    expect(state(panel(tiny), 10)).toBe("atencao");
+  });
+  it("11. desenho sólido herda as regras de estilo (pillow shading derruba o item)", () => {
+    const p = sprite(24, 24, { a: "#201028", b: "#50285a", c: "#905a98", d: "#e0b0e8" });
+    runCommand(p, "add_frames", { count: 2 });
+    const rows: string[] = [];
+    for (let y = 0; y < 20; y++) { let r = ""; for (let x = 0; x < 20; x++) { const d = 9.6 - Math.hypot(x - 9.5, y - 9.5); r += d < 0 ? "." : d < 1.5 ? "a" : d < 3.5 ? "b" : d < 6 ? "c" : "d"; } rows.push(r); }
+    for (let f = 0; f < 3; f++) draw(p, rows, 2, 2 + f, f);
+    expect(state(panel(p), 11)).toBe("atencao");
+  });
+  it("efeito e rotação marcam squash/antecipação/sobreposição como não aplicáveis", () => {
+    const p = ballAnim([[2, 2], [8, 8], [14, 14], [20, 20]]);
+    expect(state(panel(p, { tipo: "efeito" }), 1)).toBe("na");
+    expect(state(panel(p, { tipo: "rotacao" }), 8)).toBe("na");
+  });
+});
+
+describe("novas ferramentas: erros úteis, blob, rotação e CLI", () => {
+  it("chave desconhecida DENTRO de um item aninhado é apontada com o caminho e a sugestão", () => {
+    const p = createProject();
+    const r = runCommand(p, "set_palette", { colors: [{ key: "a", color: "#fff", name: "x" }] });
+    expect(r.ok).toBe(false);
+    expect(r.text).toMatch(/colors\[0\]\."color" não existe \(quis dizer "hex"\?\)/);
+  });
+  it("campo obrigatório ausente diz qual, em português", () => {
+    const r = runCommand(createProject(), "set_palette", { colors: [{ key: "a", name: "x" }] });
+    expect(r.ok).toBe(false);
+    expect(r.text).toMatch(/colors\[0\]\.hex: falta este campo obrigatório/);
+    expect(r.text).toMatch(/anima tools set_palette/);
+  });
+  it("blob: contorno escuro, luz de cima-esquerda e nada de pillow shading", () => {
+    const p = sprite(32, 32, { o: "#10301c", b: "#4cc060", l: "#a6ec90", s: "#2c8a48", h: "#f0fff0" });
+    const r = runCommand(p, "draw_shapes", { shapes: [{ type: "blob", x: 4, y: 6, w: 24, h: 20, outline: "o", base: "b", light: "l", shadow: "s", highlight: "h", squareness: 3 }], preview: false });
+    expect(r.ok).toBe(true);
+    const rows = frameToRows(p, 0);
+    expect(rows[16][4]).toBe("o");                                 // contorno na borda
+    const lit = rows.slice(8, 14).join("").split("l").length - 1, dark = rows.slice(20, 25).join("").split("s").length - 1;
+    expect(lit).toBeGreaterThan(0);
+    expect(dark).toBeGreaterThan(0);
+    // luz em cima-esquerda, sombra embaixo-direita
+    const count = (k: string, y0: number, y1: number, x0: number, x1: number) =>
+      rows.slice(y0, y1).reduce((n: number, row: string) => n + row.slice(x0, x1).split(k).length - 1, 0);
+    expect(count("l", 6, 16, 0, 16)).toBeGreaterThan(count("l", 16, 26, 16, 32));
+    expect(count("s", 16, 26, 16, 32)).toBeGreaterThan(count("s", 6, 16, 0, 16));
+    const codes = analyzeFrame(p, 0).map((i) => i.code);
+    expect(codes).not.toContain("pillow_shading");
+    expect(codes).not.toContain("contorno_claro");
+  });
+  it("check tipo rotacao não cobra volume nem movimento", () => {
+    const p = sprite(24, 24, { r: "#d02838" });
+    runCommand(p, "add_frames", { count: 3 });
+    [10, 4, 2, 4].forEach((w, f) => runCommand(p, "draw_shapes", { frames: f, shapes: [{ type: "ellipse", x: 12 - w / 2, y: 4, w, h: 16, color: "r" }], preview: false }));
+    const codes = analyze(p, [0, 1, 2, 3], { tipo: "rotacao" }).issues.map((i) => i.code);
+    expect(codes).not.toContain("volume_pulou");
+    expect(codes).not.toContain("quase_estatica");
+    expect(analyze(p, [0, 1, 2, 3]).issues.map((i) => i.code)).toContain("volume_pulou");
+  });
 });
