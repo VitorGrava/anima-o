@@ -797,7 +797,7 @@ const rigPart = def({
   description: [
     "Liga a ARTE de uma parte a um osso (ou troca a arte provisória por uma sua). A arte é desenhada UMA vez, com o osso na pose de REPOUSO (membros pendurados para baixo; tronco, pescoço e cabeça para cima; pé para a frente), e guardada no rig: o bake sempre gira a partir dela, nunca de uma cópia já girada.",
     "`rows`: linhas de texto com chaves da paleta ('.' = transparente), como em draw_rows. `pivot`: a célula da arte onde fica o INÍCIO do osso (a articulação). `layer` e `z`: camada onde a parte é renderizada (várias partes podem dividir uma) e a ordem dentro dela.",
-    "Alternativas rápidas sem desenhar: `capsule` (cápsula com luz ao longo do osso) ou `remove: true`.",
+    "Alternativas rápidas: `from_layer` FATIA arte que você já desenhou numa camada (na pose de repouso): dê `layer`, `region` (retângulo) e `joint` (o pixel do canvas onde fica a articulação) e a engine vira a parte; `capsule` (cápsula com luz ao longo do osso); `remove: true`.",
   ].join("\n"),
   schema: z.object({
     name: z.string().min(1).max(30),
@@ -810,6 +810,16 @@ const rigPart = def({
       .object({ r0: z.number().min(0.5).max(30), r1: z.number().min(0.5).max(30).optional(), base: z.string(), light: z.string().optional(), dark: z.string().optional(), back: z.number().min(0).max(30).optional() })
       .optional()
       .describe("gera uma cápsula ao longo do osso com estas cores (chaves da paleta)"),
+    from_layer: z
+      .object({
+        layer: z.string().describe("camada que já tem a arte do personagem NA POSE DE REPOUSO"),
+        frame: z.number().int().min(0).default(0).describe("frame onde está essa arte"),
+        region: z.object({ x: z.number().int().min(0), y: z.number().int().min(0), w: z.number().int().min(1), h: z.number().int().min(1) }).optional().describe("retângulo a recortar (padrão: tudo o que está desenhado na camada)"),
+        joint: z.object({ x: z.number().int().min(0), y: z.number().int().min(0) }).describe("o pixel do CANVAS onde fica a articulação (o início do osso) nessa arte"),
+        clear_source: z.boolean().default(false).describe("apaga os pixels recortados da camada de origem (para a parte não aparecer duas vezes)"),
+      })
+      .optional()
+      .describe("FATIA a arte que você já desenhou numa camada em uma parte presa ao osso: dá a região e a articulação, em coordenadas do canvas"),
     remove: z.boolean().default(false),
   }),
   run(p, i) {
@@ -826,6 +836,37 @@ const rigPart = def({
     const b = rig.bones.find((x) => x.name === bone);
     if (!b) throw new Error(`O osso "${bone}" não existe. Ossos: ${rig.bones.map((x) => x.name).join(", ")}.`);
     let rows = i.rows, pivot = i.pivot;
+    if (i.from_layer) {
+      const src = i.from_layer;
+      const layer = findLayer(p, src.layer);
+      resolveFrames(p, src.frame);
+      const cel = getCel(p, src.frame, layer.id);
+      let region = src.region;
+      if (!region) {
+        let x0 = p.width, y0 = p.height, x1 = -1, y1 = -1;
+        for (let y = 0; y < p.height; y++) for (let x = 0; x < p.width; x++) if (cel[y * p.width + x]) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+        if (x1 < 0) throw new Error(`A camada "${layer.name}" está vazia no frame ${src.frame}: não há arte para recortar.`);
+        region = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+      }
+      const r = { x: region.x, y: region.y, w: Math.min(region.w, p.width - region.x), h: Math.min(region.h, p.height - region.y) };
+      if (src.joint.x < r.x || src.joint.y < r.y || src.joint.x >= r.x + r.w || src.joint.y >= r.y + r.h) {
+        throw new Error(`A articulação (${src.joint.x}, ${src.joint.y}) está fora da região recortada (x ${r.x}..${r.x + r.w - 1}, y ${r.y}..${r.y + r.h - 1}). Ela precisa estar dentro da arte da parte.`);
+      }
+      rows = [];
+      let n = 0;
+      for (let y = r.y; y < r.y + r.h; y++) {
+        let row = "";
+        for (let x = r.x; x < r.x + r.w; x++) {
+          const v = cel[y * p.width + x];
+          row += v ? p.palette[v - 1].key : TRANSPARENT_KEY;
+          if (v) n++;
+        }
+        rows.push(row);
+      }
+      if (!n) throw new Error(`A região recortada (x ${r.x}..${r.x + r.w - 1}, y ${r.y}..${r.y + r.h - 1}) está vazia na camada "${layer.name}".`);
+      pivot = { x: src.joint.x - r.x, y: src.joint.y - r.y };
+      if (src.clear_source) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) cel[y * p.width + x] = 0;
+    }
     if (i.capsule) {
       const c = i.capsule;
       const art = capsuleArt(rig, b, c.r0, c.r1 ?? c.r0, { base: c.base, light: c.light ?? c.base, dark: c.dark ?? c.base }, c.back ?? 0);

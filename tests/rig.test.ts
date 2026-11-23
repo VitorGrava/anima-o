@@ -338,3 +338,45 @@ describe("a IA é orientada sobre quando usar o rig", () => {
     expect(SYSTEM_PROMPT).toMatch(/repouso/i);
   });
 });
+
+describe("passo 1: arte que já existe numa camada vira parte presa a um osso (from_layer)", () => {
+  const drawn = () => {
+    const p = bare(24, 24);
+    runCommand(p, "set_palette", { colors: [{ key: "r", hex: "#d02838", name: "r" }, { key: "b", hex: "#2030c0", name: "b" }, { key: "k", hex: "#101010", name: "k" }] });
+    ok(p, "add_layer", { name: "desenho" });
+    // um "personagem" desenhado em pé: cabeça (b) em cima, braço (r) pendurado ao lado
+    ok(p, "draw_rows", { layer: "desenho", x: 10, y: 2, rows: ["bbb", "bbb", "kkk"], preview: false });
+    ok(p, "draw_rows", { layer: "desenho", x: 14, y: 6, rows: ["r", "r", "r", "r", "r"], preview: false });
+    ok(p, "rig_create", { template: "vazio", x: 14, ground: 22, bones: [{ name: "braco", parent: null, length: 5, mode: "absolute", rest: 0, sign: 1, min: -180, max: 180 }] });
+    return p;
+  };
+  it("fatia a região e converte a articulação do canvas em pivô da parte", () => {
+    const p = drawn();
+    const r = ok(p, "rig_part", { name: "braco", bone: "braco", from_layer: { layer: "desenho", region: { x: 14, y: 6, w: 1, h: 5 }, joint: { x: 14, y: 6 } } });
+    expect(r.text).toMatch(/arte 1×5/);
+    expect(p.rig!.parts[0].rows).toEqual(["r", "r", "r", "r", "r"]);
+    expect(p.rig!.parts[0].pivot).toEqual({ x: 0, y: 0 });
+  });
+  it("sem region, recorta tudo o que está desenhado na camada", () => {
+    const p = drawn();
+    ok(p, "rig_part", { name: "tudo", bone: "braco", from_layer: { layer: "desenho", joint: { x: 14, y: 6 } } });
+    const part = p.rig!.parts[0];
+    expect(part.rows.length).toBe(9);                               // de y=2 a y=10
+    expect(part.pivot).toEqual({ x: 4, y: 4 });                     // (14,6) menos o canto (10,2)
+  });
+  it("a parte recortada, depois do bake a 0°, cai exatamente onde estava o desenho original", () => {
+    const p = drawn();
+    ok(p, "rig_part", { name: "braco", bone: "braco", from_layer: { layer: "desenho", region: { x: 14, y: 6, w: 1, h: 5 }, joint: { x: 14, y: 6 }, clear_source: true } });
+    expect(frameToRows(p, 0)[8][14]).toBe(".");                    // saiu da camada de origem
+    ok(p, "rig_pose", { items: [{ frame: 0, angles: { braco: 0 }, root: { x: 14.5, y: 6.5 } }] });
+    ok(p, "rig_bake", { frames: 0, preview: false });
+    expect(frameToRows(p, 0).slice(6, 11).map((r) => r[14])).toEqual(["r", "r", "r", "r", "r"]);
+  });
+  it("valida: camada vazia, região vazia, articulação fora da arte", () => {
+    const p = drawn();
+    ok(p, "add_layer", { name: "vazia" });
+    expect(runCommand(p, "rig_part", { name: "x", bone: "braco", from_layer: { layer: "vazia", joint: { x: 1, y: 1 } } }).text).toMatch(/está vazia.*não há arte/);
+    expect(runCommand(p, "rig_part", { name: "x", bone: "braco", from_layer: { layer: "desenho", region: { x: 0, y: 0, w: 3, h: 3 }, joint: { x: 1, y: 1 } } }).text).toMatch(/região recortada.*vazia/);
+    expect(runCommand(p, "rig_part", { name: "x", bone: "braco", from_layer: { layer: "desenho", region: { x: 14, y: 6, w: 1, h: 5 }, joint: { x: 3, y: 3 } } }).text).toMatch(/articulação.*fora da região/);
+  });
+});
