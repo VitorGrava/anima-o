@@ -36,7 +36,7 @@ const LY=10;                    // topo da tampa fechada
 const BY=LY+8;                  // topo do corpo
 const X=4;
 // fases: [subida, altura da tampa, estado]
-const ph=[[0,8],[-1,8],[2,8],[4,7],[7,6],[8,6],[7,6],[6,6],[6,6],[6,6]];
+const ph=[[0,8],[-1,8],[2,8],[5,7],[8,5],[7,5],[6,5],[6,5],[6,5],[6,5]];
 const sample=(rows,h)=>Array.from({length:h},(_,k)=>rows[Math.min(rows.length-1,Math.round(k*(rows.length-1)/(h-1||1)))]);
 const coins=(t)=>{
   const rows=[".yyyYyyyYyyyyYyyyyyyy.",".yYyyyyYyyyyyyyyYyyyy."];
@@ -54,20 +54,21 @@ function frame(t){
     for(let k=0;k<gap;k++) stamp(L.interior,["oG"+"n".repeat(20)+"Go"],X,BY-gap+k);
     if(gap>=1) stamp(L.interior,["o"+"G"+"n".repeat(20)+"G"+"o"],X,BY-1);
     if(t>=4){
-      const heap=[[18],[14],[8]];
-      heap.forEach(([w],k)=>{ let r=""; for(let i=0;i<w;i++) r+=(i===0||i===w-1)?"b":(k===0&&i%4===2)?"Y":"y"; stamp(L.interior,[r],X+2+((20-w)>>1),BY-1-k); });
-      stamp(L.interior,["b".repeat(6)],X+2+7,BY-4);
-      if(t>=6){const k=t-6; {const cx=X+[8,12,16,19][k]; stamp(L.interior,["y","zzz","y"].map((r,j)=>Array(32).fill(".").map((_,i)=>(j===1?Math.abs(i-cx)<=1:i===cx)?(r[0]):".").join("")),0,BY-3);}
-        stamp(L.interior,[Array(32).fill(".").map((_,i)=>i===X+[10,12,14,13][k]?"y":".").join("")],0,BY-4-[1,3,2,0][k]);}
+      const heap=[[18],[15],[10],[4]];
+      heap.forEach(([w],k)=>{ let r=""; for(let i=0;i<w;i++) r+=(i===0||i===w-1)?"b":(k===0&&i%4===2)?"Y":"y"; stamp(L.interior,[r],X+2+((20-w)>>1),BY-2-k); });
+      stamp(L.interior,["b".repeat(4)],X+2+8,BY-6);
+      if(t>=6){const k=t-6; {const cx=X+[8,12,16,19][k]; stamp(L.interior,["y","zzz","y"].map((r,j)=>Array(32).fill(".").map((_,i)=>(j===1?Math.abs(i-cx)<=1:i===cx)?(r[0]):".").join("")),0,BY-4);}
+        stamp(L.interior,[Array(32).fill(".").map((_,i)=>i===X+[10,12,14,13][k]?"y":".").join("")],0,BY-6-[1,3,2,0][k]);}
     }
   }
   stamp(L.corpo,body,X,BY);
+  if(t>=3){ stamp(L.corpo,["o"+"g".repeat(22)+"o"],X,BY-1); stamp(L.corpo,["oSSo","osdo"],X+10,BY-1); }
   const src=lid;
   const rows=sample(src,h);
   const ly=BY-h-(open?Math.max(0,rise-(8-h)):0)+(open?0:0);
   const topY=BY-h-rise;
   stamp(L.tampa,rows,X,topY);
-  stamp(L.cadeado,lock,X+9,topY+h-1);
+  stamp(L.cadeado,t>=3?lock.slice(0,3):lock,X+9,topY+h-1);
   return L;
 }
 const cmds=[{name:"set_palette",input:{colors:pal.map(([key,hex,name])=>({key,hex,name}))}},

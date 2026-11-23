@@ -717,7 +717,9 @@ function checkMotion(p: Project, metrics: FrameMetrics[], loop: boolean, issues:
   if (loop && ms.length > 2) {
     const seam = step(ms[ms.length - 1], ms[0]);
     const ref = Math.max(median, 0.5);
-    if (seam > ref * 2.5 && seam > (articulated ? 3 : 1.5)) {
+    const lastStep = steps.length ? steps[steps.length - 1] : 0;
+    const onePass = ms.length >= 6 && lastStep <= ref * 0.35;       // termina parado: animação de uma passada
+    if (!onePass && seam > ref * 2.5 && seam > (articulated ? 3 : 1.5)) {
       issues.push({
         severity: "aviso",
         code: "emenda_salta",

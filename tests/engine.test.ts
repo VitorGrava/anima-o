@@ -201,3 +201,16 @@ describe("set_frame_timing auto", () => {
     expect(d[2]).toBeLessThan(d[0]);          // o frame do salto grande é o mais rápido
   });
 });
+
+describe("check: animação de uma passada", () => {
+  it("não acusa emenda quando termina numa pose de repouso diferente do começo", () => {
+    const p = createProject({ width: 24, height: 8, fps: 10 });
+    runCommand(p, "set_palette", { colors: [{ key: "r", hex: "#d84a3a", name: "r" }] });
+    runCommand(p, "add_frames", { count: 7 });
+    const xs = [0, 2, 5, 9, 14, 14, 14, 14];
+    xs.forEach((x, f) => runCommand(p, "draw_shapes", { frames: f, shapes: [{ type: "rect", x, y: 2, w: 4, h: 4, color: "r", fill: true }] }));
+    const r = runCommand(p, "check", {});
+    expect(r.text).not.toMatch(/Emenda do loop/);
+    expect(r.text).toMatch(/UMA passada/);
+  });
+});
