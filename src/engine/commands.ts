@@ -1411,6 +1411,7 @@ const transform = def({
     "- outline: contorna automaticamente a silhueta com `color`; com mode=\"seletivo\" (sel-out) cada trecho usa um tom escuro do material vizinho, mais claro no lado da luz, em vez de um halo uniforme",
     "- shade: SOMBREAMENTO AUTOMÁTICO de arte chapada: cada região de cor única ganha o tom claro na borda de cima/esquerda e o tom de sombra na de baixo/direita (rampa com mudança de matiz, cores novas criadas na paleta). Desenhe chapado, aplique shade e depois retoque só os detalhes",
     "- reflect: REFLEXO NA ÁGUA: espelha as camadas `fonte` em torno da linha `y` para dentro de `alto` px abaixo, com ondulação horizontal, cor misturada à `agua` e esmaecendo por dithering com a distância; desenha na camada indicada (ponha-a acima da água)",
+    "- haze: PERSPECTIVA ATMOSFÉRICA: mistura todas as cores da camada com a cor `color` (a cor do ar/horizonte) na `quantidade` dada: o que está longe fica mais claro, menos contrastado e mais perto da cor do céu. Aplique em cada plano com força crescente com a distância (montanhas do fundo 0.4, do meio 0.2, perto 0.05)",
     "- clean: limpa quinas em L do contorno `color` (pixel perfect): tira o pixel de ponta que engrossa a linha",
     "- rotate: gira `angle` graus (positivo = horário) em torno do pivô (cx, cy). Ótimo para braços, armas e objetos girando. Gire sempre a partir de uma cópia limpa (copy_layer_content) em vez de girar várias vezes o mesmo frame, para não acumular distorção.",
     "- center: centraliza o conteúdo da camada no canvas (axis: x, y ou both)",
@@ -1419,7 +1420,7 @@ const transform = def({
   schema: z.object({
     frames: framesSel,
     layer: layerSel,
-    op: z.enum(["shift", "flip_horizontal", "flip_vertical", "replace_color", "outline", "shade", "clean", "reflect", "rotate", "center", "clear"]),
+    op: z.enum(["shift", "flip_horizontal", "flip_vertical", "replace_color", "outline", "shade", "clean", "reflect", "haze", "rotate", "center", "clear"]),
     axis: z.enum(["x", "y", "both"]).optional().describe("center: eixo a centralizar (padrão: both)"),
     angle: z.number().min(-360).max(360).optional().describe("rotate: graus, positivo = horário"),
     cx: z.number().optional().describe("rotate: pivô x (padrão: centro do canvas)"),
@@ -1433,6 +1434,7 @@ const transform = def({
     diagonal: z.boolean().optional().describe("outline: incluir diagonais"),
     mode: z.enum(["uniforme", "seletivo"]).optional().describe('outline: "seletivo" (sel-out) usa um tom escuro do material vizinho, mais claro no lado da luz, e não precisa de `color`'),
     luz: z.enum(["cima-esquerda", "cima", "cima-direita", "esquerda", "direita"]).optional().describe("shade: de onde vem a luz (padrão cima-esquerda; mantenha a MESMA em toda a arte)"),
+    quantidade: z.number().min(0).max(1).optional().describe("haze: força da névoa (0.1 = sutil, 0.4 = longe, 0.6 = quase some no céu)"),
     fonte: z.array(z.string()).max(12).optional().describe("reflect: camadas a refletir (ex.: montanhas, floresta)"),
     y: z.number().int().optional().describe("reflect: linha do espelho (a margem da água): o que está acima dela aparece invertido abaixo"),
     alto: z.number().int().min(1).max(200).optional().describe("reflect: profundidade do reflexo em px"),
@@ -1474,6 +1476,19 @@ const transform = def({
           const skipSet = new Set((i.skip ?? []).map((c) => colorIndex(p, c)));
           const count = autoShade(s.data, p.width, p.height, i.depth ?? 1, (c) => (skipSet.has(c) ? null : shadeTones(p, c)), (c) => skipSet.has(c), i.luz);
           if (!count) throw new Error("shade não mudou nada: a camada está vazia ou só tem contornos escuros/cores em `skip`.");
+          break;
+        }
+        case "haze": {
+          if (i.color === undefined || i.quantidade === undefined) throw new Error("haze precisa de `color` (cor da névoa) e `quantidade` (0..1).");
+          const fog = p.palette[colorIndex(p, i.color) - 1].hex;
+          const cache = new Map<number, number>();
+          for (let k = 0; k < s.data.length; k++) {
+            const c = s.data[k];
+            if (!c) continue;
+            let m = cache.get(c);
+            if (!m) { m = ensureColor(p, mix(p.palette[c - 1].hex, fog, i.quantidade), `${p.palette[c - 1].name.replace(/-nevoa\d+$/, "")}-nevoa${Math.round(i.quantidade * 100)}`); cache.set(c, m); }
+            s.data[k] = m;
+          }
           break;
         }
         case "reflect": {
