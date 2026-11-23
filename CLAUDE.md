@@ -15,7 +15,7 @@ animação e checklist de entrega) e use a CLI pelo terminal:
 node bin/anima.mjs new projeto.anima.json 32x32 12       # já define tamanho e fps (sobrescreve se existir); sem cores (defina a paleta) e com a camada "Base" (--camada <nome> renomeia; --cores-padrao traz as cores 0 e 1)
 node bin/anima.mjs run projeto.anima.json comandos.json   # [{"name": "...", "input": {...}}]
 node bin/anima.mjs show projeto.anima.json 0 --png frame0.png --check silhueta
-node bin/anima.mjs export projeto.anima.json saida.gif --scale 6
+node bin/anima.mjs export projeto.anima.json saida.gif --scale 6                 # sem --scale a escala é automática; --fundo #hex --margem N --sombra --vai-e-volta deixam a saída bonita
 node bin/anima.mjs export projeto.anima.json sheet.png --scale 6 --columns 8   # spritesheet; com --frame N, só um frame
 node bin/anima.mjs show projeto.anima.json all            # todos os frames lado a lado, em texto
 node bin/anima.mjs check projeto.anima.json [--efeito]    # defeitos, movimento e tempos (--efeito: brilho, chama, fumaça)

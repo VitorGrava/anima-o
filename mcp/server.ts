@@ -55,7 +55,11 @@ const ImportImage = z.object({
 const ExportFile = z.object({
   format: z.enum(["gif", "spritesheet_png", "frame_png", "json"]),
   path: z.string().min(1).describe("Arquivo de saída (relativo ao diretório atual), ex. saida/slime.gif"),
-  scale: z.number().int().min(1).max(16).default(4).describe("Ampliação dos pixels"),
+  scale: z.number().int().min(1).max(16).optional().describe("Ampliação dos pixels (omita para escolher sozinho: sprite ~512 px, cena ~960 px)"),
+  fundo: z.string().optional().describe("Fundo sólido #rrggbb (omita para transparente)"),
+  margem: z.number().int().min(0).max(64).optional().describe("Margem em volta, em pixels do canvas"),
+  sombra: z.boolean().optional().describe("Sombra elíptica no chão sob a figura"),
+  vai_e_volta: z.boolean().optional().describe("GIF/folha em ida e volta (0..n-1..1)"),
   columns: z.number().int().min(1).max(128).optional().describe("spritesheet_png: colunas (padrão: todos em uma linha)"),
   frame: z.number().int().min(0).default(0).describe("frame_png: qual frame"),
 });
@@ -114,7 +118,7 @@ export function createAnimaServer(store = new ProjectStore()) {
       }
       if (name === "export_file") {
         const i = ExportFile.parse(args ?? {});
-        const out = await exportToFile(project, i);
+        const out = await exportToFile(project, { ...i, vaiEVolta: i.vai_e_volta });
         return reply([{ type: "text", text: `Exportado: ${out}` }]);
       }
       const r = runCommand(project, name, args ?? {});

@@ -12,7 +12,7 @@
  *              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--bones] [--scale N]
  *   anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--png saida.png]
  *   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
- *   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N]
+ *   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N] [--fundo #hex] [--margem N] [--sombra] [--vai-e-volta]   (sem --scale a escala é automática)
   anima import <projeto> <imagem.png> [--largura N|--altura N|--grade auto|N] [--cores N] [--fundo auto|nenhum|#hex] [--camada nome] [--manter-canvas]   (reduz uma imagem à grade de pixel e à paleta)
  *   anima guide                            imprime o guia do animador (fluxo e princípios): leia antes de começar
  *   anima tools                            lista os comandos com seus parâmetros (JSON Schema)
@@ -262,16 +262,21 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "export": {
-      const scale = Number(flag(args, "scale") ?? 4);
+      const scaleF = flag(args, "scale");
+      const scale = scaleF !== undefined ? Number(scaleF) : undefined;
       const columns = flag(args, "columns");
       const frame = flag(args, "frame");
+      const fundo = flag(args, "fundo");
+      const margem = flag(args, "margem");
+      const sombra = boolFlag(args, "sombra");
+      const vaiEVolta = boolFlag(args, "vai-e-volta") || boolFlag(args, "vai_e_volta");
       rejectUnknownFlags(args, "export");
       const [file, out] = args;
       if (!file || !out) break;
       await store.open(file);
       const format = out.endsWith(".gif") ? "gif" : out.endsWith(".json") ? "json" : frame !== undefined ? "frame_png" : "spritesheet_png";
       const done = await exportToFile(store.project, {
-        format, path: out, scale, columns: columns ? Number(columns) : undefined, frame: Number(frame ?? 0),
+        format, path: out, scale, columns: columns ? Number(columns) : undefined, frame: Number(frame ?? 0), fundo, margem: margem ? Number(margem) : undefined, sombra, vaiEVolta,
       });
       console.log(`Exportado: ${done}`);
       return 0;

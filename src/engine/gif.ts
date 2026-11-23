@@ -1,42 +1,33 @@
 import * as gifenc from "gifenc";
-import { frameDuration, hexToRgb, type Project } from "./project.ts";
-import { flattenFrame } from "./render.ts";
+import { frameDuration, type Project } from "./project.ts";
+import { frameOrder, presentFrame, type PresentOptions } from "./present.ts";
 
 // gifenc é ESM no navegador e CJS no Node; resolve o construtor nos dois casos.
 const mod = gifenc as unknown as { GIFEncoder?: typeof gifenc.GIFEncoder; default?: { GIFEncoder?: typeof gifenc.GIFEncoder } };
 const GIFEncoder = (mod.GIFEncoder ?? mod.default?.GIFEncoder)!;
 
+export interface GifOptions extends PresentOptions {
+  /** ida e volta: 0,1,2,...,n-1,...,1 */
+  vaiEVolta?: boolean;
+}
+
 /**
  * Exporta o projeto como GIF animado em loop. Como a engine já é indexada
  * (índice 0 = transparente), não há quantização: as cores saem exatas.
+ * Opções: escala (omitida = automática), fundo sólido, margem, sombra no chão e ida-e-volta.
  */
-export function exportGIF(p: Project, scale = 1): Uint8Array {
-  const s = Math.max(1, Math.min(16, Math.round(scale)));
-  // GIF exige paleta com tamanho potência de 2 (2..256)
-  const palette: number[][] = [[0, 0, 0], ...p.palette.map((c) => hexToRgb(c.hex))];
-  let size = 2;
-  while (size < palette.length) size *= 2;
-  while (palette.length < size) palette.push([0, 0, 0]);
-
-  const W = p.width * s;
-  const H = p.height * s;
+export function exportGIF(p: Project, scale?: number | GifOptions, opts: GifOptions = {}): Uint8Array {
+  const o: GifOptions = typeof scale === "object" ? scale : { ...opts, scale };
   const gif = GIFEncoder();
-  p.frames.forEach((_, i) => {
-    const flat = flattenFrame(p, i);
-    const index = new Uint8Array(W * H);
-    for (let y = 0; y < H; y++) {
-      const sy = Math.floor(y / s);
-      for (let x = 0; x < W; x++) index[y * W + x] = flat[sy * p.width + Math.floor(x / s)];
-    }
-    gif.writeFrame(index, W, H, {
-      palette,
-      delay: frameDuration(p, i),
-      transparent: true,
-      transparentIndex: 0,
-      dispose: 2,
-      repeat: 0,
-    });
-  });
+  for (const i of frameOrder(p.frames.length, o.vaiEVolta)) {
+    const pr = presentFrame(p, i, o);
+    let size = 2;
+    while (size < pr.palette.length) size *= 2;
+    const palette: number[][] = pr.palette.map((c) => [c[0], c[1], c[2]]);
+    while (palette.length < size) palette.push([0, 0, 0]);
+    const hasAlpha = pr.palette.some((c) => c[3] < 255);
+    gif.writeFrame(pr.index, pr.width, pr.height, { palette, delay: frameDuration(p, i), transparent: hasAlpha, transparentIndex: 0, dispose: 2, repeat: 0 });
+  }
   gif.finish();
   return gif.bytes();
 }
