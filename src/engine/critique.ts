@@ -131,9 +131,11 @@ function frameFindings(p: Project, f: number, scene: boolean): Omit<Finding, "fr
   if (pairs.length >= 2 && pairs.every((d) => d < 3)) {
     add("cor", "info", "sombra_sem_matiz", "As sombras só escurecem a cor base (mesmo matiz). Sombras que esfriam (rumo ao azul/roxo) e luzes que esquentam dão vida e harmonia.", "transform op shade cria a rampa com mudança de matiz");
   }
-  const lums = big.map((c) => c.lum);
-  if (lums.length >= 3 && Math.max(...lums) - Math.min(...lums) < 80) {
-    add("cor", "aviso", "contraste_baixo", "Os valores (claro/escuro) das cores grandes estão muito próximos: a arte fica lavada e a silhueta se perde em tamanho pequeno.", "escureça as sombras/contorno e clareie as luzes; confira com view check=\"cinza\"");
+  // contraste: em cena, percentis 5–95 de TODOS os pixels (as cores grandes mudam de número com a paleta); em personagem, as cores grandes
+  const lums = scene ? [...figure].filter((v) => v).map((v) => lumOf(p.palette[v - 1].hex)).sort((a, b) => a - b) : big.map((c) => c.lum);
+  const spread = scene && lums.length ? lums[Math.floor(lums.length * 0.95)] - lums[Math.floor(lums.length * 0.05)] : lums.length >= 3 ? Math.max(...lums) - Math.min(...lums) : 999;
+  if (spread < (scene ? 90 : 80)) {
+    add("cor", "aviso", "contraste_baixo", "Os valores (claro/escuro) estão muito próximos: a arte fica lavada e a silhueta se perde em tamanho pequeno.", "escureça as sombras/contorno e clareie as luzes; confira com view check=\"cinza\"");
   }
   // arte chapada: região grande sem um tom companheiro (rebordo menor, do mesmo matiz, encostado nela)
   const adj = new Map<string, number>();

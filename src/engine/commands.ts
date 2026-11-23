@@ -1410,6 +1410,7 @@ const transform = def({
     "- replace_color: troca a cor `from` por `to`",
     "- outline: contorna automaticamente a silhueta com `color`; com mode=\"seletivo\" (sel-out) cada trecho usa um tom escuro do material vizinho, mais claro no lado da luz, em vez de um halo uniforme",
     "- shade: SOMBREAMENTO AUTOMÁTICO de arte chapada: cada região de cor única ganha o tom claro na borda de cima/esquerda e o tom de sombra na de baixo/direita (rampa com mudança de matiz, cores novas criadas na paleta). Desenhe chapado, aplique shade e depois retoque só os detalhes",
+    "- reflect: REFLEXO NA ÁGUA: espelha as camadas `fonte` em torno da linha `y` para dentro de `alto` px abaixo, com ondulação horizontal, cor misturada à `agua` e esmaecendo por dithering com a distância; desenha na camada indicada (ponha-a acima da água)",
     "- clean: limpa quinas em L do contorno `color` (pixel perfect): tira o pixel de ponta que engrossa a linha",
     "- rotate: gira `angle` graus (positivo = horário) em torno do pivô (cx, cy). Ótimo para braços, armas e objetos girando. Gire sempre a partir de uma cópia limpa (copy_layer_content) em vez de girar várias vezes o mesmo frame, para não acumular distorção.",
     "- center: centraliza o conteúdo da camada no canvas (axis: x, y ou both)",
@@ -1418,7 +1419,7 @@ const transform = def({
   schema: z.object({
     frames: framesSel,
     layer: layerSel,
-    op: z.enum(["shift", "flip_horizontal", "flip_vertical", "replace_color", "outline", "shade", "clean", "rotate", "center", "clear"]),
+    op: z.enum(["shift", "flip_horizontal", "flip_vertical", "replace_color", "outline", "shade", "clean", "reflect", "rotate", "center", "clear"]),
     axis: z.enum(["x", "y", "both"]).optional().describe("center: eixo a centralizar (padrão: both)"),
     angle: z.number().min(-360).max(360).optional().describe("rotate: graus, positivo = horário"),
     cx: z.number().optional().describe("rotate: pivô x (padrão: centro do canvas)"),
@@ -1432,6 +1433,12 @@ const transform = def({
     diagonal: z.boolean().optional().describe("outline: incluir diagonais"),
     mode: z.enum(["uniforme", "seletivo"]).optional().describe('outline: "seletivo" (sel-out) usa um tom escuro do material vizinho, mais claro no lado da luz, e não precisa de `color`'),
     luz: z.enum(["cima-esquerda", "cima", "cima-direita", "esquerda", "direita"]).optional().describe("shade: de onde vem a luz (padrão cima-esquerda; mantenha a MESMA em toda a arte)"),
+    fonte: z.array(z.string()).max(12).optional().describe("reflect: camadas a refletir (ex.: montanhas, floresta)"),
+    y: z.number().int().optional().describe("reflect: linha do espelho (a margem da água): o que está acima dela aparece invertido abaixo"),
+    alto: z.number().int().min(1).max(200).optional().describe("reflect: profundidade do reflexo em px"),
+    onda: z.number().min(0).max(8).optional().describe("reflect: amplitude das ondulações horizontais em px (padrão 1.5; cresce com a distância)"),
+    mistura: z.number().min(0).max(1).optional().describe("reflect: quanto o reflexo se mistura com a cor da água (padrão 0.45)"),
+    agua: colorRef.optional().describe("reflect: cor da água para a mistura"),
     depth: z.number().int().min(1).max(3).optional().describe("shade: espessura da sombra em pixels (padrão 1; 2 para sprites maiores que 48 px)"),
     skip: z.array(colorRef).optional().describe("shade: cores de DETALHE (olhos, boca, listras): não são sombreadas e contam como parte da região vizinha, sem criar rebordos em volta delas. Contornos escuros já são pulados"),
     preview: previewFlag,
@@ -1467,6 +1474,33 @@ const transform = def({
           const skipSet = new Set((i.skip ?? []).map((c) => colorIndex(p, c)));
           const count = autoShade(s.data, p.width, p.height, i.depth ?? 1, (c) => (skipSet.has(c) ? null : shadeTones(p, c)), (c) => skipSet.has(c), i.luz);
           if (!count) throw new Error("shade não mudou nada: a camada está vazia ou só tem contornos escuros/cores em `skip`.");
+          break;
+        }
+        case "reflect": {
+          if (!i.fonte?.length || i.y === undefined || !i.alto) throw new Error("reflect precisa de `fonte` (camadas), `y` (linha do espelho) e `alto` (profundidade).");
+          const src = new Uint8Array(p.width * p.height);
+          for (const n of i.fonte) { const c = getCel(p, f, findLayer(p, n).id); for (let k = 0; k < c.length; k++) if (c[k]) src[k] = c[k]; }
+          const water = i.agua !== undefined ? colorIndex(p, i.agua) : 0;
+          const wHex = water ? p.palette[water - 1].hex : "#3a2a5a";
+          const amp = i.onda ?? 1.5, mixAmt = i.mistura ?? 0.45;
+          const tone = new Map<string, number>();
+          const M4 = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+          for (let dy = 0; dy < i.alto; dy++) {
+            const y = i.y + dy, sy = i.y - 1 - dy;
+            if (y >= p.height || sy < 0) break;
+            const fade = dy / i.alto;
+            const shift = dy % 4 === 3 ? 0 : Math.round(Math.sin(dy * 1.3) * amp * (0.5 + fade));   // linhas de ondulação em faixas, com trechos retos
+            for (let x = 0; x < p.width; x++) {
+              const c = src[sy * p.width + (x - shift + p.width) % p.width];
+              if (!c) continue;
+              if (fade > 0.7 && (M4[y % 4][x % 4] + 0.5) / 16 < (fade - 0.7) / 0.3) continue;   // só o final do reflexo se dissolve (dithering); antes é sólido
+              const lvl = Math.min(2, Math.floor(fade * 3));
+              const key = `${c}:${lvl}`;
+              let idx = tone.get(key);
+              if (!idx) { idx = ensureColor(p, mix(p.palette[c - 1].hex, wHex, Math.min(0.92, mixAmt + lvl * 0.14)), `reflexo-${p.palette[c - 1].name}${lvl}`); tone.set(key, idx); }
+              s.data[y * p.width + x] = idx;
+            }
+          }
           break;
         }
         case "clean":
