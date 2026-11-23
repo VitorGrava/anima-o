@@ -1278,7 +1278,7 @@ const shape = z.discriminatedUnion("type", [
     colors: z.array(colorRef).min(1).max(8).describe("cores sorteadas (repita uma para pesar)"),
     densidade: z.number().min(0.001).max(1).default(0.08).describe("fração da área coberta"),
     forma: z.enum(["pixel", "traco", "cruz", "tufo", "onda"]).default("pixel").describe("pixel: ponto; traco: 2 px na vertical; cruz: flor/estrela de 5 px; tufo: capim de 2–3 px; onda: risco horizontal de 2–6 px (água, brilho no lago)"),
-    distancia: z.number().int().min(1).max(8).default(2).describe("distância mínima entre elementos (evita aglomerar e dá ritmo de textura)"),
+    distancia: z.number().int().min(1).max(48).default(2).describe("distância mínima entre elementos (evita aglomerar e dá ritmo de textura)"),
     seed: z.number().int().default(1).describe("semente: mesmo valor = mesma textura (reprodutível); use sementes diferentes por plano"),
     only: colorRef.optional().describe("só espalha sobre esta cor (grama só sobre o campo)"),
     ponta: colorRef.optional().describe("cor da ponta do tufo/traço/cruz (ex.: luz)"),
