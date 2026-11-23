@@ -361,10 +361,17 @@ const setTiming = def({
   description: "Define quanto tempo (ms) cada frame fica na tela. Use para segurar poses (antecipação, impacto) ou acelerar trechos.",
   schema: z.object({
     frames: framesSel,
-    duration_ms: z.number().int().min(10).max(10000).nullable().describe("null = volta a usar o fps global"),
+    duration_ms: z
+      .union([z.number().int().min(10).max(10000), z.null(), z.array(z.number().int().min(10).max(10000)).min(1)])
+      .describe("Um número (todos os frames escolhidos), null (volta ao fps global) ou uma LISTA com uma duração por frame, na mesma ordem de `frames`. Ex.: frames \"all\" e [120, 90, 100, 90]."),
   }),
   run(p, i) {
     const list = resolveFrames(p, i.frames);
+    if (Array.isArray(i.duration_ms)) {
+      if (i.duration_ms.length !== list.length) throw new Error(`A lista tem ${i.duration_ms.length} duração(ões), mas ${list.length} frame(s) foram escolhidos (${fmtList(list)}). Mande uma duração por frame.`);
+      list.forEach((j, k) => { p.frames[j].duration = (i.duration_ms as number[])[k]; });
+      return { changed: true, text: `Durações: ${list.map((j, k) => `${j}:${(i.duration_ms as number[])[k]}ms`).join(" ")}.` };
+    }
     for (const j of list) p.frames[j].duration = i.duration_ms ?? undefined;
     return { changed: true, text: `Duração de ${fmtList(list)}: ${i.duration_ms ?? `padrão (${Math.round(1000 / p.fps)}ms)`}.` };
   },

@@ -371,8 +371,27 @@ function ramp(base: string, steps: number): string {
 
 // ---------- entrada ----------
 
+/** Medidas em pixels para um quadrúpede (cão, gato, cavalo) a partir da altura da cernelha (ombro). */
+function quadrupedMeasures(withers: number): string {
+  const h = Math.max(6, withers);
+  const r = (v: number) => Math.max(1, Math.round(v));
+  return [
+    "",
+    `Medidas para um quadrúpede com ${h} px de altura (do chão à cernelha, o ombro):`,
+    `  corpo (peito → garupa): ${r(h * 1.3)} px (cão/gato 1,2–1,5×; cavalo ≈ 1×) · cabeça: ${r(h * 0.45)} px · pescoço: ${r(h * 0.25)} px · cauda: ${r(h * 0.7)} px`,
+    `  pata dianteira: ombro → cotovelo ${r(h * 0.25)} px, cotovelo → pé ${r(h * 0.5)} px · pata traseira: coxa ${r(h * 0.3)} px, jarrete ${r(h * 0.32)} px, canela ${r(h * 0.3)} px`,
+    `  espessura das patas: ${Math.max(2, r(h * 0.12))} px (cão em 32–48 px: 2–3 px); pé: ${r(h * 0.12)}×${r(h * 0.1)} px`,
+    "Marcha no lugar (loop com o corpo parado no quadro): 8 frames, cada pata defasada 2 frames da anterior (traseira esquerda, dianteira esquerda, traseira direita, dianteira direita).",
+    `  passada ≈ ${r(h * 0.6)}–${r(h * 0.8)} px; o pé de apoio recua a mesma distância que o corpo avançaria; o pé de balanço sobe ${r(h * 0.12)}–${r(h * 0.2)} px e avança em arco.`,
+    "  O corpo desce 1 px quando a pata da frente recebe o peso e sobe 1 px na passagem; a cabeça acompanha com 1 frame de atraso; a cauda balança em fase com atraso de 1–2 frames.",
+    "  Patas do lado de longe: mais escuras (e 1–2 px acima do chão visual) para separar as quatro patas na silhueta.",
+  ].join("\n");
+}
+
 export function reference(topic: ReferenceTopic, opts: ReferenceOptions = {}): string {
   switch (topic) {
+    case "quadrupede":
+      return TEXT.quadrupede + (opts.height ? quadrupedMeasures(Math.round(opts.height * 0.6)) : "");
     case "proporcoes": {
       const style = opts.style ?? "estilizado";
       return proportions(Math.max(8, Math.min(256, Math.round(opts.height ?? 32))), style);

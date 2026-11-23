@@ -86,6 +86,9 @@ const USAGE = `anima — engine de animação pixel art
   anima guide                            guia do animador: fluxo de trabalho e princípios de pixel art e animação
   anima tools                            lista os comandos e parâmetros (JSON Schema)`;
 
+// `anima run ... | head` fecha o pipe no meio da saída: isso não pode derrubar o processo antes de salvar o projeto
+process.stdout.on("error", (e: NodeJS.ErrnoException) => { if (e.code !== "EPIPE") throw e; });
+
 export async function main(argv: string[]): Promise<number> {
   const args = [...argv];
   const cmd = args.shift();
@@ -135,6 +138,7 @@ export async function main(argv: string[]): Promise<number> {
       if (!file || !src) break;
       await store.open(file);
       const list = JSON.parse(src === "-" ? await readStdin() : await readFile(src, "utf8")) as { name: string; input?: unknown }[];
+      const out: string[] = [];
       let fails = 0;
       const cmds = Array.isArray(list) ? list : [list];
       for (const [n, c] of cmds.entries()) {
@@ -142,23 +146,24 @@ export async function main(argv: string[]): Promise<number> {
         const last = n === cmds.length - 1;
         // o último comando e os de leitura (check, view, reference...) mostram tudo; os outros, só a primeira linha
         const reads = ["check", "view", "reference", "get_project_info"].includes(c.name);
-        console.log(`${r.ok ? "ok " : "ERRO"} #${n} ${c.name}: ${last || reads || !r.ok ? r.text : r.text.split("\n")[0]}`);
+        out.push(`${r.ok ? "ok " : "ERRO"} #${n} ${c.name}: ${last || reads || !r.ok ? r.text : r.text.split("\n")[0]}`);
         if (!r.ok) {
           fails++;
           if (!keepGoing) {
-            console.log(`\nParei no primeiro erro (comando #${n}); os ${cmds.length - n - 1} seguintes não rodaram, porque costumam depender dele. Corrija e rode de novo, ou use --continuar.`);
+            out.push(`\nParei no primeiro erro (comando #${n}); os ${cmds.length - n - 1} seguintes não rodaram, porque costumam depender dele. Corrija e rode de novo, ou use --continuar.`);
             break;
           }
         }
         if (last && png) await saveImages(store.project, r, png);
       }
       await store.save();
-      if (!quiet) console.log(`\n${describeProject(store.project)}`);
+      if (!quiet) out.push(`\n${describeProject(store.project)}`);
       const sheet = runCommand(store.project, "view", { frames: "all", as_image: false });
       if (!quiet && sheet.ok && store.project.frames.length > 1) {
-        if (sheet.text.length <= 3500) console.log(`\n${sheet.text}`);
-        else console.log(`\n(folha de frames omitida por ser grande: use \`anima show <projeto> all\` ou \`export <projeto> sheet.png\`)`);
+        if (sheet.text.length <= 3500) out.push(`\n${sheet.text}`);
+        else out.push(`\n(folha de frames omitida por ser grande: use \`anima show <projeto> all\` ou \`export <projeto> sheet.png\`)`);
       }
+      console.log(out.join("\n"));
       return fails ? 1 : 0;
     }
     case "show": {

@@ -654,7 +654,7 @@ function checkSplitFigure(p: Project, frames: number[], moving: Set<string>, iss
       severity: "aviso",
       code: "figura_partida",
       frame: split[0].f,
-      message: `Nos frames ${split.map((c) => c.f).join(", ")} a figura se parte em ${split[0].n} pedaços (nos outros são ${modal}): provavelmente uma fresta de 1 px entre camadas que se moveram (ex.: cabeça sobe e abre um vão no pescoço). Faça as camadas se sobreporem 1–2 px no pivô.`,
+      message: `Nos frames ${split.map((c) => c.f).join(", ")}, a figura se parte em ${split[0].n} pedaços (nos outros são ${modal}): provavelmente uma fresta de 1 px entre camadas que se moveram (ex.: cabeça sobe e abre um vão no pescoço). Faça as camadas se sobreporem 1–2 px no pivô.`,
     });
   }
 }
@@ -800,17 +800,42 @@ function evaluatePrinciples(p: Project, frames: number[], metrics: FrameMetrics[
   };
   const peaks = series.map(argmaxStep).filter((k) => k >= 0);
   if (tipo !== "personagem" || ms.length < 3) add(5, "Follow Through and Overlapping Action (continuidade e sobreposição)", "na", "Vale para personagens com partes soltas (cabelo, capa, cauda, braços).");
-  else if (peaks.length >= 2 && new Set(peaks).size > 1) add(5, "Follow Through and Overlapping Action (continuidade e sobreposição)", "ok", "As camadas se movem em tempos diferentes (uma parte chega depois da outra).");
+  else if (peaks.length >= 2 && new Set(peaks).size > 1) add(5, "Follow Through and Overlapping Action (continuidade e sobreposição)", "ok", "As camadas atingem o pico de movimento em frames diferentes (há defasagem). Isto só mede a defasagem: confira você se as partes soltas (rabo, cabelo, capa) chegam DEPOIS do corpo.");
   else add(5, "Follow Through and Overlapping Action (continuidade e sobreposição)", "atencao", "Tudo se move junto, como um bloco: separe cabelo, capa, cauda e braços em camadas e atrase-os 1–2 frames em relação ao corpo.");
 
+  // quando o corpo anda no lugar (ciclo parado no centro), o movimento está nos membros: usa a camada que mais se move
+  const layerPaths = series.map((sr) => {
+    const pts = sr.filter((q): q is { x: number; y: number } => q !== null);
+    const st = pts.slice(1).map((q, k) => ({ dx: q.x - pts[k].x, dy: q.y - pts[k].y, len: Math.hypot(q.x - pts[k].x, q.y - pts[k].y) }));
+    return { pts, st, max: Math.max(0, ...st.map((q) => q.len)) };
+  });
+  const alt = maxStep < 1.5 ? layerPaths.sort((a, b) => b.max - a.max)[0] : undefined;
+  const useAlt = !!alt && alt.max >= 1.5 && alt.st.length >= 3;
+  const stepsE = useAlt ? alt!.st : steps;
+  const maxE = useAlt ? alt!.max : maxStep;
+  const medE = [...stepsE.map((q) => q.len)].sort((a, b) => a - b)[Math.floor(stepsE.length / 2)] || 0;
+  const spreadE = medE > 0 ? (Math.max(...stepsE.map((q) => q.len)) - Math.min(...stepsE.map((q) => q.len))) / medE : 0;
+
   // 6. Slow in / slow out
-  if (maxStep < 1) add(6, "Slow In and Slow Out (aceleração e desaceleração)", "na", "Movimento pequeno demais para medir o ease.");
+  if (useAlt && stepsE.length >= 4) {
+    if (spreadE < 0.2) add(6, "Slow In and Slow Out (aceleração e desaceleração)", "atencao", `O membro que mais se move anda em passos iguais (~${medE.toFixed(1)} px): acelere/desacelere perto das poses-chave.`);
+    else add(6, "Slow In and Slow Out (aceleração e desaceleração)", "ok", "O membro que mais se move acelera e desacelera (o corpo anda no lugar).");
+  } else if (maxStep < 1) add(6, "Slow In and Slow Out (aceleração e desaceleração)", "na", "Movimento pequeno demais para medir o ease.");
   else if (codes.has("sem_ease")) add(6, "Slow In and Slow Out (aceleração e desaceleração)", "atencao", "Os passos têm tamanho igual: aproxime os frames perto das poses-chave e afaste no meio.");
   else add(6, "Slow In and Slow Out (aceleração e desaceleração)", "ok", "O espaçamento entre frames varia (aceleração e desaceleração).");
 
   // 7. Arcos: o caminho do centro não é uma reta quando há deslocamento nos dois eixos
   const totalX = steps.reduce((a, q) => a + Math.abs(q.dx), 0), totalY = steps.reduce((a, q) => a + Math.abs(q.dy), 0);
-  if (Math.min(totalX, totalY) < 0.15 * Math.max(totalX, totalY, 0.001) || maxStep < 1.5) add(7, "Arcs (movimento em arco)", "na", "O movimento é quase todo em um eixo (ex.: quique vertical); arcos valem para trajetórias e membros.");
+  if (useAlt && alt!.pts.length >= 4) {
+    const pts = alt!.pts;
+    const a0 = pts[0], b0 = pts[pts.length - 1];
+    const len0 = Math.hypot(b0.x - a0.x, b0.y - a0.y);
+    const ax = pts.reduce((q, w, k) => (k ? q + Math.abs(w.x - pts[k - 1].x) : q), 0), ay = pts.reduce((q, w, k) => (k ? q + Math.abs(w.y - pts[k - 1].y) : q), 0);
+    // trajetória em laço fechado (o membro volta ao ponto de partida): se anda nos dois eixos, é arco/elipse
+    const loopy = len0 < 0.4 * Math.max(ax + ay, 1);
+    if (Math.min(ax, ay) < 0.2 * Math.max(ax, ay, 0.001)) add(7, "Arcs (movimento em arco)", "atencao", "O membro que mais se move anda quase em linha reta: levante o pé em arco (sobe e desce enquanto avança).");
+    else add(7, "Arcs (movimento em arco)", "ok", loopy ? "O membro que mais se move faz um laço/arco nos dois eixos (o pé sobe e avança)." : "O membro que mais se move segue uma trajetória curva.");
+  } else if (Math.min(totalX, totalY) < 0.15 * Math.max(totalX, totalY, 0.001) || maxStep < 1.5) add(7, "Arcs (movimento em arco)", "na", "O movimento é quase todo em um eixo (ex.: quique vertical); arcos valem para trajetórias e membros.");
   else {
     const a = ms[0], b = ms[ms.length - 1];
     const len = Math.hypot(b.cx - a.cx, b.cy - a.cy);
@@ -945,9 +970,23 @@ export function analyze(p: Project, frames: number[], opts: AnalyzeOptions = {})
 
 const ICON: Record<Severity, string> = { erro: "ERRO", aviso: "AVISO", info: "info" };
 
+/** Infos que se repetem em vários frames (serrilhado, banding...) viram uma linha só, com a lista de frames. */
+function groupRepeats(issues: Issue[]): Issue[] {
+  const byCode = new Map<string, Issue[]>();
+  for (const i of issues) if (i.severity === "info" && i.frame !== undefined && ["serrilhado", "banding"].includes(i.code)) byCode.set(i.code, [...(byCode.get(i.code) ?? []), i]);
+  const grouped = new Set<Issue>();
+  const extra: Issue[] = [];
+  for (const [code, list] of byCode) {
+    if (list.length < 3) continue;
+    list.forEach((i) => grouped.add(i));
+    extra.push({ severity: "info", code, message: `[em ${list.length} frames: ${list.map((i) => i.frame).join(", ")}] ${list[0].message}`, points: list[0].points });
+  }
+  return [...issues.filter((i) => !grouped.has(i)), ...extra];
+}
+
 export function formatIssues(issues: Issue[], limit = Infinity): string[] {
   const order: Severity[] = ["erro", "aviso", "info"];
-  const sorted = [...issues].sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity));
+  const sorted = groupRepeats(issues).sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity));
   return sorted.slice(0, limit).map((i) => {
     const where = i.frame !== undefined ? `[frame ${i.frame}] ` : "";
     const pts = i.points?.length ? ` Em: ${i.points.map(([x, y]) => `(${x},${y})`).join(" ")}${i.points.length >= MAX_POINTS ? " ..." : ""}` : "";

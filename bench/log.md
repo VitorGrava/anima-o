@@ -83,3 +83,21 @@ O painel dos 12 da caminhada deu 11 ✓ (apelo é sempre "–", avaliação huma
 - `check` mostrava a "base" só das camadas que se movem e parecia que o personagem flutuava → imprime também a caixa de tudo.
 - Exagero: num idle o movimento sutil é de propósito → "–" quando o passo é menor que 2 px.
 - `new` ganha `--camada <nome>` e imprime a dica de `--vazio`; `show --region` sem o cabeçalho; `run -q` sem o resumo; `tools export` com as flags descritas.
+
+## Rodada 5: 09 golpe de espada, 10 cachorro andando
+
+| anim | nota | o que ficou bom | o que ficou ruim |
+|---|---|---|---|
+| 09 golpe de espada | 7,5/10 | 8 frames: pose parada, espada erguida, antecipação agachada, golpe com rastro (smear), impacto segurado, follow-through baixo e volta; membros com comprimento constante (IK de 2 ossos do próprio agente); tempos de 40 a 220 ms | rosto sem olho (um bloco de pele); banding no sombreamento; a lâmina quase se solta do corpo no impacto; espada encosta no topo do quadro |
+| 10 cachorro andando | 6/10 | marcha de 4 tempos com as patas defasadas, corpo que desce 1 px nos contatos, rabo e orelha que se mexem, patas de longe mais escuras | cabeça parece de gato/leão, patas curtas e escuras (viram "blocos"), espinha reta (salsicha), olho de 1 px que não lê, sem zigue-zague do jarrete |
+
+**Atritos → correção**
+- `set_frame_timing` só aceitava um número → aceita lista, uma duração por frame (`frames:"all", duration_ms:[120,90,...]`), com erro claro se o tamanho não bate.
+- `anima run ... | head` derrubava o Node com EPIPE e **deixava os tempos sem aplicar** (perda de trabalho) → `run` salva antes de imprimir e ignora EPIPE; teste de regressão com `| head`.
+- O painel marcava ease e arcos como "–" num ciclo no lugar, onde o corpo mal anda mas as pernas fazem arcos → quando o centro quase não se move, mede a camada que mais se move.
+- "✓ Follow Through" era otimista → a nota diz que só mede a defasagem entre camadas e pede para conferir se rabo/cabelo/capa atrasam em relação ao corpo.
+- `reference quadrupede` não tinha medidas → calcula corpo, cabeça, cauda, segmentos das patas, passada e elevação do pé a partir da altura; descreve a marcha no lugar.
+- Serrilhado/banding repetiam uma linha por frame → agrupados numa linha só com a lista de frames; gramática de "figura partida".
+- `new` cria "Base" mesmo com `--vazio` → documentado no CLAUDE.md/AGENTS.md (`--camada <nome>`).
+
+**Não resolvido, de propósito:** o `check` não vê "lâmina cobrindo o rosto" nem "pé que escorrega". São específicos de cena e o prompt já manda conferir à mão (view check="silhueta", região + grade). Faltaria um comando de pose por ossos (IK) para ciclos: os dois agentes escreveram o próprio; fica como próxima melhoria.

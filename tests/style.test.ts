@@ -443,3 +443,69 @@ describe("lições da caminhada e do cavaleiro (rodada 4)", () => {
     expect(t).toMatch(/canela \+ pé ≈ \d+ px/);
   });
 });
+
+describe("lições do golpe de espada e do cachorro (rodada 5)", () => {
+  it("set_frame_timing aceita uma lista, uma duração por frame", () => {
+    const p = sprite(8, 8, { r: "#d02838" });
+    runCommand(p, "add_frames", { count: 3 });
+    const r = runCommand(p, "set_frame_timing", { frames: "all", duration_ms: [120, 90, 100, 60] });
+    expect(r.ok).toBe(true);
+    expect(p.frames.map((f) => f.duration)).toEqual([120, 90, 100, 60]);
+    const bad = runCommand(p, "set_frame_timing", { frames: "all", duration_ms: [120, 90] });
+    expect(bad.ok).toBe(false);
+    expect(bad.text).toMatch(/2 duração.*4 frame/);
+    expect(runCommand(p, "set_frame_timing", { frames: 0, duration_ms: 200 }).ok).toBe(true);   // o número simples continua valendo
+  });
+
+  it("anima run salva o projeto mesmo se a saída for cortada (| head)", async () => {
+    const { mkdtemp, writeFile, readFile } = await import("node:fs/promises");
+    const os = await import("node:os");
+    const { execSync } = await import("node:child_process");
+    const dir = await mkdtemp(path.join(os.tmpdir(), "anima-pipe-"));
+    const cmds = [
+      { name: "add_frames", input: { count: 3 } },
+      { name: "set_frame_timing", input: { frames: "all", duration_ms: [111, 222, 333, 444] } },
+    ];
+    await writeFile(path.join(dir, "c.json"), JSON.stringify(cmds));
+    execSync(`node ${path.join(ROOT, "bin/anima.mjs")} new ${path.join(dir, "p.anima.json")} 8x8 8 >/dev/null`);
+    execSync(`node ${path.join(ROOT, "bin/anima.mjs")} run ${path.join(dir, "p.anima.json")} ${path.join(dir, "c.json")} | head -1 >/dev/null`, { shell: "/bin/bash" });
+    const saved = JSON.parse(await readFile(path.join(dir, "p.anima.json"), "utf8"));
+    expect(saved.frames.map((f: { duration?: number }) => f.duration)).toEqual([111, 222, 333, 444]);
+  });
+
+  it("ciclo no lugar: o painel mede ease e arco no membro que mais se move, não no centro parado", () => {
+    // corpo parado e um pé que descreve uma elipse (sobe e avança) com aceleração
+    const p = sprite(40, 40, { r: "#d02838", b: "#2030c0" });
+    runCommand(p, "add_layer", { name: "pe" });
+    runCommand(p, "add_layer", { name: "corpo2" });
+    runCommand(p, "add_frames", { count: 7 });
+    const path_: [number, number][] = [[10, 30], [12, 27], [16, 25], [22, 24], [28, 25], [31, 28], [30, 31], [20, 31]];
+    path_.forEach(([x, y], f) => {
+      runCommand(p, "draw_rows", { frames: f, layer: "corpo2", x: 14, y: 12 + (f % 2), rows: ["bbbbbbbb", "bbbbbbbb", "bbbbbbbb", "bbbbbbbb"], preview: false });   // corpo pesado, balança 1 px
+      runCommand(p, "draw_rows", { frames: f, layer: "pe", x, y, rows: ["rr", "rr"], preview: false });
+    });
+    const pr = analyze(p, p.frames.map((_, i) => i)).principles!;
+    expect(pr.find((q) => q.n === 7)!.estado).toBe("ok");
+    expect(pr.find((q) => q.n === 7)!.nota).toMatch(/membro|laço|arco/i);
+  });
+
+  it("follow through avisa que só mede a defasagem entre camadas", () => {
+    const p = sprite(40, 20, { r: "#d02838", b: "#2030c0" });
+    runCommand(p, "add_layer", { name: "cabelo" });
+    runCommand(p, "add_frames", { count: 4 });
+    for (let f = 0; f < 5; f++) {
+      runCommand(p, "draw_rows", { frames: f, layer: "Base", x: 4 + f * 6, y: 8, rows: ["rr", "rr"], preview: false });
+      runCommand(p, "draw_rows", { frames: f, layer: "cabelo", x: 4 + Math.max(0, f - 1) * 6 + 1, y: 6, rows: ["bb"], preview: false });
+    }
+    const q = analyze(p, [0, 1, 2, 3, 4]).principles!.find((x) => x.n === 5)!;
+    expect(q.estado).toBe("ok");
+    expect(q.nota).toMatch(/só mede a defasagem/);
+  });
+
+  it("reference quadrupede dá medidas e passada para a altura pedida", () => {
+    const t = runCommand(createProject({ width: 48, height: 32 }), "reference", { topic: "quadrupede", height: 20 }).text;
+    expect(t).toMatch(/Medidas para um quadrúpede com 12 px/);
+    expect(t).toMatch(/passada ≈ \d+–\d+ px/);
+    expect(t).toMatch(/dianteira esquerda/);
+  });
+});
