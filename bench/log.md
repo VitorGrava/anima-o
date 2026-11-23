@@ -101,3 +101,15 @@ O painel dos 12 da caminhada deu 11 ✓ (apelo é sempre "–", avaliação huma
 - `new` cria "Base" mesmo com `--vazio` → documentado no CLAUDE.md/AGENTS.md (`--camada <nome>`).
 
 **Não resolvido, de propósito:** o `check` não vê "lâmina cobrindo o rosto" nem "pé que escorrega". São específicos de cena e o prompt já manda conferir à mão (view check="silhueta", região + grade). Faltaria um comando de pose por ossos (IK) para ciclos: os dois agentes escreveram o próprio; fica como próxima melhoria.
+
+## Anatomia humana (pedido do usuário: "esse programa tem um erro muito ruim em anatomia humana")
+
+**Diagnóstico (visto nas animações 07, 08 e 09):** braço da frente da caminhada era um toco de ~4 px sem ombro, cotovelo nem mão; no golpe de espada a mão que segura a espada **não tinha braço ligado** (o punho flutuava no peito ou no rosto) e o outro braço era uma vara reta; cabeça sem pescoço (e sem olho no guerreiro); tronco como bloco rígido; pernas como tubos sem joelho; pé como mancha escura; comprimento dos membros variando de um frame para outro.
+
+**Causa:** a IA desenha cada frame do zero, pixel a pixel, sem esqueleto por baixo. A engine só tinha texto de referência e conferências depois do fato. Nada impedia um braço de ficar desconectado. Os dois agentes que mais lidaram com humanos reinventaram sozinhos um gerador de ossos (IK).
+
+**Solução:** pôr a anatomia dentro da engine, por construção.
+- `src/engine/rig.ts`: esqueleto humanoide. A IA escolhe ÂNGULOS de articulação; ossos com comprimento constante (as mesmas proporções do `reference proporcoes`), limites anatômicos aplicados e avisados (cotovelo só dobra para a frente, joelho só para trás), pescoço, mão presa à arma, pé mais baixo no chão, membros como cápsulas com luz.
+- Comando `draw_figure`: presets (parado, caminhada_*), `cycle: "caminhada"` (8 frames prontos), `tween` (interpola entre poses-chave com ease in/out: pose a pose, slow in/out e arcos de graça), `facing`, `style` (realista / estilizado / chibi), materiais por cor (a engine cria contorno, sombra e luz), `light`.
+- Prompt: passo 0a manda usar `draw_figure` para humanos e lista os erros que o esqueleto evita; `reference articulacoes` e CLAUDE.md/AGENTS.md apontam para ele.
+- `tests/anatomy.test.ts` (16 testes): comprimento dos ossos constante nos 8 frames e em poses extremas; proporções por estilo; limites anatômicos; sola no chão em todos os frames; pulo; ciclo sem frestas nem pixel solto; arma presa à mão em 4 ângulos; pescoço; tween com ease; `facing: left`; o prompt orienta o uso.

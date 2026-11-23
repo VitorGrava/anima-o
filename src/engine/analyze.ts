@@ -908,7 +908,8 @@ function checkContrastAndLight(p: Project, frames: number[], moving: Set<string>
       if (fg[i]) { fs += lumOf(p, fg[i]); fn++; }
       if (bg[i] && !fg[i]) { bs += lumOf(p, bg[i]); bn++; }
     }
-    if (fn >= 10 && bn >= 10 && Math.abs(fs / fn - bs / bn) < 22) {
+    // só compara com um FUNDO de verdade (camadas estáticas que cobrem boa parte do quadro); um chão fino não é o fundo da figura
+    if (fn >= 10 && bn >= 0.35 * p.width * p.height && Math.abs(fs / fn - bs / bn) < 22) {
       issues.push({
         severity: "aviso",
         code: "contraste_fraco",

@@ -273,9 +273,18 @@ Como isto vira comandos na CLI (sem MCP)
       if (json) { console.log(JSON.stringify(name ? all.filter((t) => t.name === name) : all, null, 1)); return 0; }
       type Prop = { type?: string; description?: string; default?: unknown; enum?: unknown[]; properties?: Record<string, Prop>; items?: Prop; required?: string[]; anyOf?: Prop[] };
       const line = (k: string, v: Prop, req: boolean, indent: string): string[] => {
-        const kind = v.enum ? v.enum.join("|") : v.type === "array" ? `lista de ${v.items?.type === "object" ? "objetos" : v.items?.type ?? "?"}` : v.type ?? (v.anyOf ? "uma de várias formas (veja --json)" : "?");
+        const kind = v.enum ? v.enum.join("|") : v.type === "array" ? `lista de ${v.items?.type === "object" ? "objetos" : v.items?.anyOf ? "formas (uma de várias, veja abaixo)" : v.items?.type ?? "?"}` : v.type ?? (v.anyOf ? "uma de várias formas (veja --json)" : "?");
         const out = [`${indent}${k}${req ? "*" : ""}: ${kind}${v.default !== undefined ? ` (padrão ${JSON.stringify(v.default)})` : ""}${v.description ? ` — ${String(v.description).split("\n")[0].slice(0, 110)}` : ""}`];
         const inner = v.type === "array" ? v.items : v;
+        // lista de formas (draw_shapes): uma linha por variante, com os campos de cada uma
+        if (inner?.anyOf?.length) {
+          for (const variant of inner.anyOf) {
+            const props = variant.properties ?? {};
+            const kindName = (props.type as unknown as { const?: string } | undefined)?.const;
+            const rq = new Set(variant.required ?? []);
+            out.push(`${indent}    · ${kindName ?? "variante"}: ${Object.entries(props).filter(([kk]) => kk !== "type").map(([kk, vv]) => `${kk}${rq.has(kk) ? "*" : ""}${vv.enum ? `(${vv.enum.join("|")})` : ""}`).join(", ")}${variant.description ? ` — ${String(variant.description).split("\n")[0].slice(0, 100)}` : ""}`);
+          }
+        }
         if (inner?.properties) {
           const r = new Set(inner.required ?? []);
           for (const [kk, vv] of Object.entries(inner.properties)) out.push(...line(kk, vv, r.has(kk), indent + "    "));

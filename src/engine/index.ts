@@ -9,3 +9,4 @@ export * from "./tools.ts";
 export * from "./view.ts";
 export * from "./analyze.ts";
 export * from "./reference.ts";
+export { renderFigure, clampPose, lerpPose, swapSides, DEFAULT_POSE, FIGURE_LAYERS, WALK_CYCLE, PRESETS as POSE_PRESETS, type Pose, type FigureSpec, type Ramp } from "./rig.ts";

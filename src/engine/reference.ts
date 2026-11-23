@@ -96,6 +96,36 @@ const PRESETS: Record<NonNullable<ReferenceOptions["style"]>, Preset> = {
   },
 };
 
+export type BodyStyle = NonNullable<ReferenceOptions["style"]>;
+
+/** Segmentos do corpo em pixels para uma altura total e um estilo (as mesmas medidas do reference proporcoes). */
+export function bodyProportions(height: number, style: BodyStyle) {
+  const pr = PRESETS[style];
+  const unit = height / pr.heads;                       // altura de uma cabeça
+  const mk = (name: string): number | undefined => pr.marks.find(([n]) => n.startsWith(name))?.[1];
+  const floor = mk("chão") ?? pr.heads;
+  const shoulder = mk("ombros") ?? 1.2;
+  const crotch = mk("virilha") ?? floor * 0.5;
+  const hip = crotch - 0.12;                              // a articulação do quadril fica um pouco acima da virilha
+  const knee = mk("joelho") ?? (hip + floor) / 2;
+  const ankle = mk("tornozelo") ?? floor - 0.12;
+  const elbow = mk("cotovelo") ?? mk("cintura") ?? (shoulder + crotch) / 2;
+  const finger = mk("ponta dos dedos") ?? crotch + 0.2;
+  const px = (h: number) => h * unit;
+  return {
+    head: unit,                                           // altura da cabeça
+    neck: px(0.16),
+    torso: px(hip - shoulder),                            // ombro → quadril
+    thigh: px(knee - hip),
+    shin: px(ankle - knee),
+    footH: Math.max(1.6, px(floor - ankle)),
+    footL: px(0.62),
+    upperArm: px(elbow - shoulder),
+    foreArm: px((finger - elbow) * 0.78),
+    handR: Math.max(0.9, px(0.12)),
+  };
+}
+
 function proportions(height: number, style: NonNullable<ReferenceOptions["style"]>): string {
   const pr = PRESETS[style];
   const head = height / pr.heads;
@@ -167,7 +197,8 @@ O comando check imprime um painel (✓ / ! / –) dos que dá para medir; os out
 - Pescoço/cabeça: gira ~±70°, inclina ~45°; no movimento, a cabeça compensa o tronco para manter os olhos no alvo.
 - Coluna/tronco: inclina e torce; ombros e quadril giram em sentidos opostos (contra-rotação) em caminhada e golpes.
 - Centro de massa: fica sobre o pé de apoio (ou entre os dois pés). Pose com o corpo fora desse apoio sem justificar (inclinação, impulso) parece que vai cair.
-- Para sprites pequenos, a articulação é a mudança de direção do contorno, não um detalhe: um joelho dobrado se lê por um "dente" na silhueta.`,
+- Para sprites pequenos, a articulação é a mudança de direção do contorno, não um detalhe: um joelho dobrado se lê por um "dente" na silhueta.
+- NA ENGINE: draw_figure aplica estes limites sozinho (ajusta o ângulo e avisa) e mantém o comprimento dos ossos constante; use-o para figuras humanas em vez de desenhar os membros à mão. Convenção dos ângulos: 0° = pendurado, + = para a frente (ombro 90° = braço horizontal à frente; quadril 90° = coxa horizontal à frente; joelho/cotovelo = flexão).`,
 
   rosto_mao: `Rosto e mãos (anatomia traduzida para poucos pixels):
 Rosto (realista, de frente): olhos na metade da altura da cabeça; a distância entre os olhos ≈ a largura de um olho; base do nariz na metade entre olhos e queixo; boca ≈ 1/3 do caminho entre o nariz e o queixo; topo das orelhas na altura das sobrancelhas, base na do nariz.
@@ -353,6 +384,13 @@ export function makeRamp(baseHex: string, steps = 5): string[] {
   }
   out[Math.round(mid)] = normalizeHex(baseHex);
   return out;
+}
+
+/** Contorno de um material: um tom bem escuro e pouco saturado da mesma cor (não preto puro, não avermelhado). */
+export function darkOutline(baseHex: string): string {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(normalizeHex(baseHex).slice(i, i + 2), 16));
+  const [h, sat, l] = rgbToHsl(r, g, b);
+  return hslToHex(hueToward(h, 260, 0.18), Math.min(0.45, sat * 0.55), Math.max(0.07, Math.min(0.16, l * 0.3)));
 }
 
 function ramp(base: string, steps: number): string {

@@ -9,7 +9,8 @@ import { z } from "zod";
 import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.ts";
 import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
-import { REFERENCE_TOPICS, reference } from "./reference.ts";
+import { REFERENCE_TOPICS, darkOutline, makeRamp, reference } from "./reference.ts";
+import { DEFAULT_POSE, FIGURE_LAYERS, PRESETS as POSE_PRESETS, WALK_CYCLE, clampPose, lerpPose, renderFigure, swapSides, type Pose, type Ramp } from "./rig.ts";
 import type { CheckMode } from "./render.ts";
 import { autoScale, clampRegion, diffRows, type ImageRequest } from "./view.ts";
 import {
@@ -310,7 +311,7 @@ const updateLayer = def({
 const addFrames = def({
   name: "add_frames",
   description:
-    "Insere frames na timeline. Com `copy_from`, os novos frames começam como cópia daquele frame (o jeito normal de animar: copie e depois altere só o que muda).",
+    "Insere frames na timeline. Com `copy_from`, os novos frames começam como cópia daquele frame (o jeito normal de animar: copie e depois altere só o que muda). ORDEM: desenhe o que é igual em todos os frames (fundo, chão, corpo base) no frame 0 ANTES de add_frames com copy_from, ou depois use frames:\"all\" para desenhar em todos.",
   schema: z.object({
     count: z.number().int().min(1).max(64).default(1),
     copy_from: z.number().int().min(0).optional().describe("Índice do frame a copiar. Omitido = frames vazios."),
@@ -358,7 +359,7 @@ const moveFrame = def({
 
 const setTiming = def({
   name: "set_frame_timing",
-  description: "Define quanto tempo (ms) cada frame fica na tela. Use para segurar poses (antecipação, impacto) ou acelerar trechos.",
+  description: 'Define quanto tempo (ms) cada frame fica na tela. Use para segurar poses (antecipação, impacto) ou acelerar trechos. Um número vale para todos os frames escolhidos; uma LISTA dá uma duração por frame. Ex.: {"frames": "all", "duration_ms": [120, 90, 100, 60]}.',
   schema: z.object({
     frames: framesSel,
     duration_ms: z
@@ -447,6 +448,175 @@ const drawFramesCmd = def({
   },
 });
 
+// ---------- figura humana por esqueleto ----------
+
+const angle = (what: string) => z.number().min(-180).max(360).optional().describe(what);
+const poseSchema = z
+  .object({
+    torso: angle("inclinação do tronco para a frente (graus)"),
+    head: angle("inclinação da cabeça em relação ao tronco"),
+    shoulder_front: angle("ombro do braço da FRENTE: 0 = pendurado, 90 = horizontal à frente, 180 = para cima, negativo = para trás"),
+    elbow_front: angle("cotovelo da frente: flexão 0–145 (o antebraço sobe para a frente)"),
+    shoulder_back: angle("ombro do braço de TRÁS (o do lado de longe)"),
+    elbow_back: angle("cotovelo de trás: flexão 0–145"),
+    hip_front: angle("quadril da perna da FRENTE: 0 = coxa para baixo, 90 = horizontal à frente, negativo = para trás"),
+    knee_front: angle("joelho da frente: flexão 0–135 (a canela vai para trás)"),
+    ankle_front: angle("tornozelo da frente: + dedos para cima, − ponta do pé"),
+    hip_back: angle("quadril da perna de TRÁS"),
+    knee_back: angle("joelho de trás: flexão 0–135"),
+    ankle_back: angle("tornozelo de trás"),
+    weapon: z
+      .object({
+        hand: z.enum(["front", "back"]).default("front").describe("em qual mão: a do braço da frente ou a do de trás"),
+        angle: z.number().describe("direção da lâmina no mundo: 0 = para cima, 90 = para a frente (horizontal), 180 = para baixo, negativo = para trás"),
+        length: z.number().min(3).max(60).default(12).describe("comprimento da lâmina em px"),
+      })
+      .optional()
+      .describe("arma PRESA à mão (nunca flutua): cabo, guarda e lâmina saem da mão"),
+  })
+  .describe("Ângulos das articulações em graus; o que não for dado fica na pose-base (parado) ou no preset.");
+
+const PRESET_NAMES = Object.keys(POSE_PRESETS) as [string, ...string[]];
+
+/** Cor (hex) → índice da paleta; cria a cor se não existir. */
+function ensureColor(p: Project, hex: string, name: string): number {
+  const h = normalizeHex(hex);
+  const found = p.palette.findIndex((c) => c.hex === h);
+  if (found >= 0) return found + 1;
+  const key = [...KEY_CHARS].find((k) => !p.palette.some((c) => c.key === k) && k !== TRANSPARENT_KEY);
+  if (!key || p.palette.length >= MAX_COLORS) throw new Error("Paleta cheia: não dá para criar as cores da figura.");
+  p.palette.push({ key, hex: h, name });
+  return p.palette.length;
+}
+/** Rampa de 4 tons com mudança de matiz (contorno, sombra, base, luz) a partir de uma cor base. */
+function ensureRamp(p: Project, hex: string, name: string): Ramp {
+  const r = makeRamp(hex, 5);
+  const outline = darkOutline(hex);
+  const mix = (a: string, b: string, t: number) => {
+    const [x, y] = [a, b].map((h) => [1, 3, 5].map((i) => parseInt(normalizeHex(h).slice(i, i + 2), 16)));
+    return `#${x.map((v, k) => Math.round(v * (1 - t) + y[k] * t).toString(16).padStart(2, "0")).join("")}`;
+  };
+  // pele: a rampa de matiz deslocado satura demais e fica avermelhada; aqui a sombra é a própria pele escurecida e a luz, a pele clareada
+  const skin = name === "pele";
+  return {
+    outline: ensureColor(p, outline, `${name}-contorno`),
+    dark: ensureColor(p, skin ? mix(hex, outline, 0.32) : r[1], `${name}-sombra`),
+    base: ensureColor(p, hex, `${name}`),
+    light: ensureColor(p, skin ? mix(hex, "#fff0dc", 0.4) : r[3], `${name}-luz`),
+  };
+}
+
+const drawFigure = def({
+  name: "draw_figure",
+  description: [
+    "Desenha uma figura HUMANA por esqueleto: você dá os ÂNGULOS das articulações e a engine desenha. A anatomia sai certa por construção: ossos de comprimento constante (proporções do estilo), ombro→cotovelo→mão sempre ligados, pescoço, mão presa à arma, o pé mais baixo encosta no chão, e os limites anatômicos são respeitados (o cotovelo só dobra para a frente, o joelho só para trás; fora do limite a engine ajusta e avisa).",
+    "Vista lateral, olhando para a direita (facing=left espelha). Cria/usa as camadas contorno, braco-tras, perna-tras, tronco, cabeca, perna-frente, braco-frente e arma, e as cores (contorno, sombra, base e luz de cada material) na paleta.",
+    "Cada item diz o frame e a pose: `preset` (parado, caminhada_contato, caminhada_abaixo, caminhada_passagem, caminhada_acima) e/ou `pose` com ângulos (que sobrescrevem o preset); `swap` troca o lado da frente com o de trás.",
+    '`cycle: "caminhada"` faz um ciclo completo de 8 frames (contato, abaixo, passagem, acima e o espelho): precisa de 8 frames. `tween: true` preenche os frames que estão ENTRE dois itens interpolando os ângulos com ease in/out (pose a pose + slow in/slow out + arcos, de graça): defina só as poses-chave.',
+    "Convenção: 0° = membro pendurado para baixo; + = para a frente. Ex. de golpe de espada: shoulder_front 160 + elbow_front 60 + weapon {angle: 170} (espada erguida atrás), depois shoulder_front 85 + elbow_front 10 + weapon {angle: 90} (golpe horizontal).",
+  ].join("\n"),
+  schema: z.object({
+    items: z
+      .array(
+        z.object({
+          frame: z.number().int().min(0),
+          preset: z.enum(PRESET_NAMES).optional(),
+          swap: z.boolean().optional().describe("troca frente e trás (segunda metade de um ciclo)"),
+          pose: poseSchema.optional(),
+          airborne: z.number().min(0).max(100).optional().describe("pés no ar, em px (pulos)"),
+        }),
+      )
+      .max(128)
+      .optional(),
+    cycle: z.enum(["caminhada"]).optional().describe("ciclo pronto de 8 frames (frames 0..7)"),
+    tween: z.boolean().default(false).describe("interpola os frames entre os itens"),
+    figure_height: z.number().int().min(8).max(240).optional().describe("altura total (chão → topo da cabeça) em px. Padrão: 70% do canvas"),
+    style: z.enum(["realista", "estilizado", "chibi"]).default("estilizado").describe("proporções: realista 7,5 cabeças, estilizado 4, chibi 2,5"),
+    x: z.number().int().optional().describe("x do quadril (padrão: centro do canvas)"),
+    ground: z.number().int().optional().describe("y do chão, onde a sola encosta (padrão: altura − 2)"),
+    facing: z.enum(["right", "left"]).default("right"),
+    materials: z
+      .object({
+        skin: z.string().default("#f0c09a"), hair: z.string().default("#6b3b1e"), top: z.string().default("#3d7fd0"),
+        bottom: z.string().default("#6a4a8a"), boots: z.string().default("#5a3420"), metal: z.string().default("#b9c4d6"), gold: z.string().default("#e0b040"),
+      })
+      .default({ skin: "#f0c09a", hair: "#6b3b1e", top: "#3d7fd0", bottom: "#6a4a8a", boots: "#5a3420", metal: "#b9c4d6", gold: "#e0b040" })
+      .describe("cores base (hex) de cada material; a engine cria sombra, luz e contorno com mudança de matiz"),
+    face: z.boolean().default(true).describe("olho, nariz e boca"),
+    light: z.enum(["frente", "esquerda"]).default("frente").describe('"frente": luz de cima e do lado para onde ele olha (o rosto fica iluminado e legível). "esquerda": de cima-esquerda, igual ao resto da cena.'),
+    preview: previewFlag,
+  }),
+  run(p, i) {
+    type Item = { frame: number; pose: Pose; airborne?: number };
+    let items: Item[] = [];
+    const merge = (base: Pose, over?: Record<string, unknown>): Pose => {
+      const out = { ...base } as unknown as Record<string, unknown>;
+      for (const [k, v] of Object.entries(over ?? {})) if (v !== undefined) out[k] = v;
+      return out as unknown as Pose;
+    };
+    if (i.cycle === "caminhada") {
+      if (p.frames.length < 8) throw new Error(`O ciclo de caminhada tem 8 frames, e o projeto tem ${p.frames.length}. Rode add_frames com count ${8 - p.frames.length} antes.`);
+      items = Array.from({ length: 8 }, (_, f) => {
+        const base = POSE_PRESETS[WALK_CYCLE[f % 4]];
+        return { frame: f, pose: f >= 4 ? swapSides(base) : base };
+      });
+    }
+    for (const it of i.items ?? []) {
+      resolveFrames(p, it.frame);
+      let base = it.preset ? POSE_PRESETS[it.preset] : DEFAULT_POSE;
+      if (it.swap) base = swapSides(base);
+      items = items.filter((x) => x.frame !== it.frame);
+      items.push({ frame: it.frame, pose: merge(base, it.pose as Record<string, unknown> | undefined), airborne: it.airborne });
+    }
+    if (!items.length) throw new Error('Diga o que desenhar: `items` (frame + preset/pose) ou `cycle: "caminhada"`.');
+    items.sort((a, b) => a.frame - b.frame);
+    if (i.tween) {
+      const extra: Item[] = [];
+      for (let k = 0; k + 1 < items.length; k++) {
+        const a = items[k], b = items[k + 1];
+        for (let f = a.frame + 1; f < b.frame && f < p.frames.length; f++) {
+          const t = (f - a.frame) / (b.frame - a.frame);
+          extra.push({ frame: f, pose: lerpPose(a.pose, b.pose, t), airborne: a.airborne !== undefined || b.airborne !== undefined ? (a.airborne ?? 0) * (1 - t) + (b.airborne ?? 0) * t : undefined });
+        }
+      }
+      items = [...items, ...extra].sort((a, b) => a.frame - b.frame);
+    }
+    // camadas na ordem certa (de baixo para cima), juntas
+    const have = FIGURE_LAYERS.map((n) => p.layers.find((l) => l.name === n));
+    const firstIdx = Math.min(...have.filter(Boolean).map((l) => p.layers.indexOf(l!)), p.layers.length);
+    const figureLayers = FIGURE_LAYERS.map((n, k) => have[k] ?? { id: newId("L"), name: n, visible: true });
+    p.layers = p.layers.filter((l) => !figureLayers.includes(l));
+    p.layers.splice(Math.min(firstIdx, p.layers.length), 0, ...figureLayers);
+    if (p.layers.length > MAX_LAYERS) throw new Error(`Máximo de ${MAX_LAYERS} camadas.`);
+    for (const l of figureLayers) for (const f of p.frames) if (!f.cels[l.id]) f.cels[l.id] = new Uint8Array(p.width * p.height);
+
+    const m = i.materials;
+    const ramps = {
+      skin: ensureRamp(p, m.skin, "pele"), hair: ensureRamp(p, m.hair, "cabelo"), top: ensureRamp(p, m.top, "roupa"),
+      bottom: ensureRamp(p, m.bottom, "calca"), boots: ensureRamp(p, m.boots, "bota"), metal: ensureRamp(p, m.metal, "metal"), gold: ensureRamp(p, m.gold, "ouro"),
+    };
+    const figureHeight = i.figure_height ?? Math.round(p.height * 0.7);
+    const warns = new Set<string>();
+    for (const it of items) {
+      const { warnings } = clampPose(it.pose);
+      warnings.forEach((w) => warns.add(`frame ${it.frame}: ${w}`));
+      const out = renderFigure({
+        width: p.width, height: p.height, figureHeight, style: i.style, x: i.x ?? Math.round(p.width / 2), ground: i.ground ?? p.height - 2,
+        facing: i.facing, pose: it.pose, ramps, face: i.face, airborne: it.airborne, light: i.light,
+      });
+      for (const l of figureLayers) {
+        const cel = getCel(p, it.frame, l.id);
+        cel.fill(0);
+        const src = out.layers[l.name as (typeof FIGURE_LAYERS)[number]];
+        for (let k = 0; k < src.length; k++) if (src[k]) cel[k] = src[k];
+      }
+    }
+    const frames = items.map((x) => x.frame);
+    const note = warns.size ? `\nATENÇÃO (limites anatômicos):\n- ${[...warns].slice(0, 6).join("\n- ")}` : "";
+    return result(p, `Figura (${i.style}, ${figureHeight} px) desenhada em ${fmtList([...new Set(frames)])}.${note}`, [...new Set(frames)], i.preview);
+  },
+});
+
 const shape = z.discriminatedUnion("type", [
   z.object({ type: z.literal("pixels"), points: z.array(z.array(z.number().int()).length(2)).min(1).max(4096).describe("Lista de [x, y]"), color: colorRef }),
   z.object({ type: z.literal("line"), x1: z.number().int(), y1: z.number().int(), x2: z.number().int(), y2: z.number().int(), color: colorRef }),
@@ -480,14 +650,16 @@ const shape = z.discriminatedUnion("type", [
     shadow: colorRef.describe("lado oposto e embaixo"),
     highlight: colorRef.optional().describe("brilho de 1–2 px perto do canto da luz (opcional)"),
     squareness: z.number().min(2).max(6).default(2.4).describe("2 = elipse; 3–4 = bloco arredondado (slime, gota); 6 = quase retângulo"),
+    anchor: z.enum(["corner", "center"]).default("corner").describe('"corner": x,y = canto superior esquerdo. "center": x,y = o CENTRO da forma (útil para centralizar e para animar o squash e o stretch mantendo o centro/base). w e h SEMPRE incluem o contorno.'),
   }).describe("Forma orgânica pronta: superelipse com contorno, luz de cima-esquerda e sombra embaixo/direita, sem pillow shading. Use para bolas, slimes, frutas, cabeças, pedras."),
   z.object({ type: z.literal("fill"), x: z.number().int(), y: z.number().int(), color: colorRef }).describe("Balde de tinta a partir de (x, y)"),
 ]);
 
-interface BlobSpec { x: number; y: number; w: number; h: number; outline: string; base: string; light: string; shadow: string; highlight?: string; squareness: number }
+interface BlobSpec { anchor?: "corner" | "center"; x: number; y: number; w: number; h: number; outline: string; base: string; light: string; shadow: string; highlight?: string; squareness: number }
 
 /** Superelipse com contorno de 1 px e sombreamento direcional (luz de cima-esquerda): luz no quadrante da luz, sombra no oposto. */
 function drawBlob(s: { width: number; height: number; data: Uint8Array }, b: BlobSpec, idx: (ref: string) => number): void {
+  if (b.anchor === "center") { b = { ...b, x: Math.round(b.x - b.w / 2), y: Math.round(b.y - b.h / 2) }; }
   const cx = b.x + b.w / 2, cy = b.y + b.h / 2, rx = b.w / 2, ry = b.h / 2;
   const inside = (x: number, y: number) => (Math.abs((x + 0.5 - cx) / rx)) ** b.squareness + (Math.abs((y + 0.5 - cy) / ry)) ** b.squareness <= 1;
   const set = (x: number, y: number, ref: string) => { if (x >= 0 && y >= 0 && x < s.width && y < s.height) s.data[y * s.width + x] = idx(ref); };
@@ -839,6 +1011,7 @@ export const COMMANDS = [
   setTiming,
   drawRowsCmd,
   drawFramesCmd,
+  drawFigure,
   drawShapes,
   transform,
   copyCel,
