@@ -947,6 +947,12 @@ const rigPart = def({
       .object({ r0: z.number().min(0.5).max(30), r1: z.number().min(0.5).max(30).optional(), base: z.string(), light: z.string().optional(), dark: z.string().optional(), back: z.number().min(0).max(30).optional() })
       .optional()
       .describe("gera uma cápsula ao longo do osso com estas cores (chaves da paleta)"),
+    variantes: z.array(z.object({
+      de: z.number().describe("início da faixa de ângulo (graus de giro do osso em relação ao repouso; + = para a frente)"),
+      ate: z.number().describe("fim da faixa"),
+      rows: z.array(z.string().max(128)).min(1).max(128),
+      pivot: z.object({ x: z.number().int(), y: z.number().int() }),
+    })).max(8).optional().describe("ARTE POR FAIXA DE ÂNGULO: uma arte pré-desenhada para cada faixa (ex.: escudo de lado em 0..30°, escudo inclinado em 30..70°). Dentro da faixa a engine usa essa arte e gira só o resíduo em torno do centro da faixa, em vez de girar a arte de repouso (que borra escudo e cabeça). Fora de qualquer faixa usa a arte de repouso."),
     from_layer: z
       .object({
         layer: z.string().describe("camada que já tem a arte do personagem NA POSE DE REPOUSO"),
@@ -1014,9 +1020,15 @@ const rigPart = def({
     const w = Math.max(...rows.map((r) => [...r].length));
     if (pivot.x < 0 || pivot.y < 0 || pivot.x >= w || pivot.y >= rows.length) throw new Error(`O pivot (${pivot.x}, ${pivot.y}) está fora da arte (${w}×${rows.length}).`);
     for (const k of new Set(rows.join("").split(""))) if (k !== TRANSPARENT_KEY && k !== " ") colorIndex(p, k);
-    const part: RigPart = { name: i.name, bone, layer: i.layer ?? old?.layer ?? i.name, z: i.z ?? old?.z ?? 0, pivot, rows };
+    for (const v of i.variantes ?? []) {
+      if (v.de > v.ate) throw new Error(`Variante com faixa invertida (${v.de}..${v.ate}).`);
+      const vw = Math.max(...v.rows.map((r) => [...r].length));
+      if (v.pivot.x < 0 || v.pivot.y < 0 || v.pivot.x >= vw || v.pivot.y >= v.rows.length) throw new Error(`O pivot (${v.pivot.x}, ${v.pivot.y}) da variante ${v.de}..${v.ate} está fora da arte (${vw}×${v.rows.length}).`);
+      for (const k of new Set(v.rows.join("").split(""))) if (k !== TRANSPARENT_KEY && k !== " ") colorIndex(p, k);
+    }
+    const part: RigPart = { name: i.name, bone, layer: i.layer ?? old?.layer ?? i.name, z: i.z ?? old?.z ?? 0, pivot, rows, ...((i.variantes ?? old?.variantes) ? { variantes: i.variantes ?? old?.variantes } : {}) };
     rig.parts = rig.parts.filter((x) => x.name !== i.name).concat(part);
-    return { changed: true, text: `Parte "${i.name}" ${old ? "atualizada" : "criada"}: arte ${w}×${rows.length} presa ao osso "${bone}" (pivô ${pivot.x},${pivot.y}), camada "${part.layer}".` };
+    return { changed: true, text: `Parte "${i.name}" ${old ? "atualizada" : "criada"}: arte ${w}×${rows.length} presa ao osso "${bone}" (pivô ${pivot.x},${pivot.y}), camada "${part.layer}"${part.variantes?.length ? `, ${part.variantes.length} variante(s) de ângulo (${part.variantes.map((v) => `${v.de}..${v.ate}°`).join(", ")})` : ""}.` };
   },
 });
 

@@ -175,10 +175,15 @@ export function renderRigFrame(p: Project, pose: FramePose | undefined, opts: Ba
     const buf = layers.get(part.layer) ?? new Uint8Array(W * H);
     layers.set(part.layer, buf);
     let delta = st.world - rs.world;
+    // variante de arte por faixa de ângulo: usa a arte pré-desenhada e gira só o resíduo em torno do centro da faixa
+    const real = delta;
+    const variante = part.variantes?.find((v) => real >= v.de - 1e-6 && real <= v.ate + 1e-6);
+    const artRows = variante ? variante.rows : part.rows, artPivot = variante ? variante.pivot : part.pivot;
+    if (variante) delta = real - (variante.de + variante.ate) / 2;
     if (opts.snapAngle && opts.snapAngle > 0) delta = Math.round(delta / opts.snapAngle) * opts.snapAngle;
     const c = Math.cos(rad(delta)), s = Math.sin(rad(delta));
-    const ah = part.rows.length, aw = Math.max(...part.rows.map((r) => [...r].length));
-    const pivot = { x: part.pivot.x + 0.5, y: part.pivot.y + 0.5 };
+    const ah = artRows.length, aw = Math.max(...artRows.map((r) => [...r].length));
+    const pivot = { x: artPivot.x + 0.5, y: artPivot.y + 0.5 };
     // caixa de saída: os 4 cantos da arte transformados
     const J = st.start;
     const corners = [[0, 0], [aw, 0], [0, ah], [aw, ah]].map(([ax, ay]) => {
@@ -187,7 +192,7 @@ export function renderRigFrame(p: Project, pose: FramePose | undefined, opts: Ba
     });
     const x0 = Math.max(0, Math.floor(Math.min(...corners.map((q) => q.x)))), x1 = Math.min(W - 1, Math.ceil(Math.max(...corners.map((q) => q.x))));
     const y0 = Math.max(0, Math.floor(Math.min(...corners.map((q) => q.y)))), y1 = Math.min(H - 1, Math.ceil(Math.max(...corners.map((q) => q.y))));
-    const rows = part.rows.map((r) => [...r]);
+    const rows = artRows.map((r) => [...r]);
     const votes = new Map<string, number>();
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {

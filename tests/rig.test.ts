@@ -632,3 +632,24 @@ describe("atritos do cavaleiro: ossos travados, rig_info, aviso de osso novo, ca
     expect(runCommand(p, "avaliar", { tipo: "personagem", ignorar: ["sem_contorno", "arte_chapada"] }).text).not.toMatch(/sem_contorno/);
   });
 });
+
+describe("rig_part com variantes por faixa de ângulo", () => {
+  it("dentro da faixa usa a arte pré-desenhada (sem girar a de repouso); fora, a de repouso; e sobrevive a salvar/abrir", () => {
+    const p = bare(32, 32);
+    ok(p, "set_palette", { colors: [{ key: "a", hex: "#d84a3a", name: "a" }, { key: "b", hex: "#3a6ad8", name: "b" }] });
+    ok(p, "rig_create", { template: "vazio", x: 16, ground: 30, bones: [{ name: "braco", parent: null, length: 8, mode: "relative", rest: 0, sign: 1, min: -90, max: 90 }] });
+    ok(p, "rig_part", { name: "braco", bone: "braco", rows: ["aa", "aa", "aa", "aa", "aa", "aa", "aa", "aa"], pivot: { x: 0, y: 0 }, variantes: [{ de: 40, ate: 80, rows: ["bbbb", "bbbb"], pivot: { x: 0, y: 0 } }] });
+    ok(p, "rig_pose", { items: [{ frame: 0, angles: { braco: 0 } }] });
+    ok(p, "add_frames", { count: 1, copy_from: 0 });
+    ok(p, "rig_pose", { items: [{ frame: 1, angles: { braco: 60 } }] });
+    ok(p, "rig_bake", {});
+    const colorsAt = (f: number) => new Set(Array.from(p.frames[f].cels[p.layers.find((l) => l.name === "braco")!.id]).filter((v) => v).map((v) => p.palette[v - 1].key));
+    expect(colorsAt(0)).toEqual(new Set(["a"]));              // repouso: arte vermelha
+    expect(colorsAt(1)).toEqual(new Set(["b"]));              // dentro da faixa 40..80: arte azul pré-desenhada
+    expect(() => fromJSON(JSON.parse(JSON.stringify(toJSON(p))))).not.toThrow();
+    const back = fromJSON(JSON.parse(JSON.stringify(toJSON(p))));
+    expect(back.rig!.parts[0].variantes?.[0]).toMatchObject({ de: 40, ate: 80 });
+    const bad = runCommand(p, "rig_part", { name: "x", bone: "braco", rows: ["a"], pivot: { x: 0, y: 0 }, variantes: [{ de: 50, ate: 10, rows: ["b"], pivot: { x: 0, y: 0 } }] });
+    expect(bad.ok).toBe(false);
+  });
+});

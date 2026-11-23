@@ -69,6 +69,8 @@ export interface RigPart {
   pivot: { x: number; y: number };
   /** Linhas de texto com as chaves da paleta ("." = transparente). */
   rows: string[];
+  /** Arte pré-desenhada por faixa de ângulo (graus de giro do osso em relação ao repouso): dentro da faixa usa esta arte (e gira só o resíduo em torno do centro da faixa) em vez de girar a arte de repouso. */
+  variantes?: { de: number; ate: number; pivot: { x: number; y: number }; rows: string[] }[];
 }
 
 /** Uma perna para marcha e IK: dois ossos que alcançam o alvo no chão (e, opcionalmente, ossos que seguem). */

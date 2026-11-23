@@ -28,7 +28,7 @@ PAL = [
     ("D", "#d4ccd0", "fumaca-luz"), ("E", "#a9a3b2", "fumaca"), ("F", "#7f7b92", "fumaca-sombra"),
     ("G", "#e86a7c", "flor-rosa"), ("H", "#f4d65a", "flor-amarela"), ("I", "#b8d4f4", "flor-azul"),
     ("J", "#2a2230", "contorno"),
-    ("K", "#a9a552", "grama-luz-janela"), ("L", "#b39075", "pedra-luz-janela"),
+    ("K", "#a9a552", "grama-luz-janela"), ("L", "#a88b7c", "pedra-luz-janela"),
     ("N", "#2f5232", "arbusto-sombra"), ("O", "#4a7a40", "arbusto"),
 ]
 
@@ -127,30 +127,47 @@ def masonry(courses, unit, seed, base, light, dark, joint, quoin=None):
 
 def build_house():
     g = grid()
-    # ---- parede da frente (na sombra, fria) ----
-    mf = masonry(9, 36, 11, "j", "k", "l", "m")
-    front_pts = [(FX0, FYT), PEAK, (FX1, FYT), (FX1, FYB), (FX0, FYB)]
+    # ---- parede da frente (na sombra, fria): fiadas de altura variável, pedras irregulares ----
+    rf = random.Random(11)
+    courses = []   # (y_topo_junta, altura_pedra, [(x0,x1,tom)])
+    y = FYB
+    while y > PEAK[1] - 2:
+        hgt = rf.choice([2, 2, 3, 3, 4])
+        top = y - hgt - 1
+        xs = []; pos = FX0 - rf.randint(0, 4)
+        while pos < FX1 + 2:
+            w = rf.choice([3, 4, 5, 5, 6, 7])
+            xs.append((pos, pos + w, rf.random()))
+            pos += w + 1
+        courses.append((top, hgt, xs))
+        y = top
     def ffront(x, y):
-        v = (y - FYT) / (FYB - FYT)
-        U = x - FX0
-        if y < FYT:  # empena: continua as fiadas para cima
-            return mf(0, v % 1.0, U)
-        c = mf(0, v, U)
-        if y >= FYB - 3 and c == "j":
-            c = "l"
-        if y >= FYB - 3 and c == "k" and (x + y) % 2:
-            c = "j"
-        # cunhais: pedras grandes e claras na quina direita (que pega um pouco de luz)
-        if x >= FX1 - 3:
-            fv = (v * 9) % 1
-            k = int(v * 9)
-            if fv < 1 / 3:
+        for (top, hgt, xs) in courses:
+            if top <= y < top + hgt + 1:
+                if y == top:
+                    return "m"
+                for (a0, a1, tone) in xs:
+                    if a0 <= x < a1:
+                        first = (y == top + 1)
+                        last = (y == top + hgt)
+                        if x >= FX1 - 3:          # cunhal claro na quina
+                            return "k" if not last else "j"
+                        if tone > 0.8:
+                            c = "k"
+                        elif tone < 0.25:
+                            c = "l"
+                        else:
+                            c = "j"
+                        if last and hgt >= 3 and c == "j" and (x - a0) > 0:
+                            c = "l"               # base da pedra mais escura
+                        if first and x == a1 - 1 and c != "l":
+                            c = "k"               # quina de cima-direita pega luz
+                        if y >= FYB - 3 and c == "j":
+                            c = "l"
+                        return c
                 return "m"
-            if k % 2 == 0 and x >= FX1 - 3:
-                return "k" if x < FX1 - 1 else "k"
-            if k % 2 == 1 and x >= FX1 - 2:
-                return "k"
-        return c
+        return "j"
+    front_pts = [(FX0, FYT), PEAK, (FX1, FYT), (FX1, FYB), (FX0, FYB)]
     fill_poly(g, front_pts, ffront)
     # ---- parede lateral (no sol, quente) ----
     ms = masonry(9, 30, 23, "n", "o", "p", "p")
@@ -339,8 +356,10 @@ def build_details(inten=1.0):
         for x in range(27, 50):
             d = ((x + 0.5 - 40.5) / (13 * (0.75 + 0.25 * inten))) ** 2 + ((y + 0.5 - 63) / (11 * (0.75 + 0.25 * inten))) ** 2
             if d < 1 and hg[y][x] in ("j", "k", "l"):
-                if d < 0.6 or (d < 1 and (x + y) % 2 == 0):
+                if d < 0.5:
                     g[y][x] = "L"
+                elif d < 0.85 and hg[y][x] != "k":
+                    g[y][x] = "k"
     # ---- porta de madeira em arco ----
     dx0, dx1, dy0, dy1 = 19, 28, 63, 78  # x1 exclusivo
     arch = {0: 3, 1: 1, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 1, 8: 3}
@@ -552,18 +571,16 @@ def build_tree():
         for x in (83, 84, 85):
             g[y][x] = "x" if x < 85 else "w"
     g[52][82] = "x"; g[52][86] = "x"
-    # copa: vários lóbulos, luz da direita-cima
-    lobes = [(84, 36, 8, 7), (78, 40, 5, 4.5), (90, 40, 5, 4.5), (84, 30, 5, 4), (80, 33, 4, 3.5), (89, 33, 4, 3.5)]
+    # copa: tufos desenhados de trás/baixo para frente/cima, cada um com sua luz (direita-cima)
+    lobes = [(79, 41, 5, 4), (89, 41, 5, 4), (84, 40, 6, 4.5), (78, 35, 5, 4.5), (90, 35, 5, 4.5),
+             (84, 34, 6, 5), (81, 29, 4.5, 4), (88, 29, 4.5, 4), (85, 26, 4, 3)]
     for (cx, cy, rx, ry) in lobes:
         for y in range(int(cy - ry) - 1, int(cy + ry) + 2):
             for x in range(int(cx - rx) - 1, int(cx + rx) + 2):
                 dx = (x + 0.5 - cx) / rx; dy = (y + 0.5 - cy) / ry
                 if dx * dx + dy * dy <= 1 and 0 <= x < W and 0 <= y < H:
-                    sh = dx - dy
-                    c = "d" if sh > 1.0 else ("N" if sh < -0.45 else "O")
-                    if g[y][x] == "d" and c != "d":
-                        continue
-                    g[y][x] = c
+                    sh = dx * 0.7 - dy
+                    g[y][x] = "d" if sh > 0.75 else ("N" if sh < -0.55 else "O")
     # alguns pontos de luz
     for _ in range(14):
         x = r.randint(78, 93); y = r.randint(28, 44)
