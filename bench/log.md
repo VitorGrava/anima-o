@@ -16,3 +16,26 @@
 - `tools` não mostrava `export`/`--columns`/`--frame` → entrada de `export` em `tools` e no CLAUDE.md; `new` documentado (sobrescreve e já define tamanho/fps).
 - Cores 0/1 padrão geravam "cor sem uso" → não são mais avisadas.
 - Prompt: checklist de entrega (ver todos os frames, `check`, tempos variados, formas redondas com `ellipse`, squash com volume constante) e regra para efeitos.
+
+## Rodada 2: 03 coração pulsando, 04 fogueira
+
+| anim | nota | o que ficou bom | o que ficou ruim |
+|---|---|---|---|
+| 03 coração | 8/10 | forma e sombreamento limpos, "lub-dub" (pico, contração, pulso menor), luz fixa em cima à esquerda, faísca | só 4 frames; o brilho de 1 px de ruído isolado (faísca) conta como pixel solto |
+| 04 fogueira | 8,5/10 | base da chama fixa e ponta variando, brasas em arco defasadas, estrelas, reflexo no chão, loop de 6 frames com tempos variados | o agente não viu o GIF em movimento |
+
+**Atritos → correção**
+- `draw_rows` aceitou `frame` (singular) em silêncio e sobrescreveu o frame 0 cinco vezes → **chave desconhecida agora é erro com sugestão** ("frame" → quis dizer "frames"), em todos os comandos.
+- O `--efeito` não aparecia no `anima help` (minha edição tinha caído no comentário do cabeçalho) e `--tipo efeito` era ignorado em silêncio → help corrigido, `--tipo` aceito, **flags desconhecidas na CLI viram erro**.
+- `run` seguia depois de um erro e gerava dezenas de erros em cascata → **para no primeiro erro** (`--continuar` mantém o comportamento antigo).
+- `tools` despejava JSON Schema → `anima tools` lista compacto, `anima tools <nome>` mostra parâmetros e exemplo, `--json` traz o schema.
+- `show all --png` gerava um PNG por frame → gera a folha de todos os frames.
+- `new` deixava cores 0/1 → `new --vazio`.
+- Faltavam desenhar frames diferentes de uma vez, espelhar e centralizar → **`draw_frames`**, **`mirror: "horizontal"`** (em `draw_rows` e `draw_frames`), **`transform center`**.
+- `check` contava faíscas como parte da figura → `ignore_layers` (CLI `--ignorar a,b`).
+- Prompt: export também quando o pedido é um arquivo; `preview=false` documentado.
+
+**Regras de estilo novas no `check`** (pedido: testes que cubram desenhar melhor e seguir padrões de pixel art)
+contorno mais claro que o miolo, banding, pillow shading, ruído/dither aleatório, contraste fraco com o fundo e luz que troca de lado entre frames.
+`tests/style.test.ts` tem um exemplo ruim e um bom para cada regra, três casos de falso positivo que as regras não podem ter, um teste de contrato (o prompt tem de ensinar cada regra que o `check` cobra) e um portão de qualidade que roda em todas as animações de `bench/out`.
+Duas dessas regras acusaram a fogueira e o coração na primeira versão; eram falsos positivos meus (chama emite luz, contorno escuro não é "almofada", diagonal de 1 px não é ruído) e foram corrigidos junto com testes que os protegem.

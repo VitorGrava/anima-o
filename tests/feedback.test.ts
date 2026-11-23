@@ -4,6 +4,7 @@ import {
   analyze,
   analyzeFrame,
   createProject,
+  frameToRows,
   makeRamp,
   reference,
   renderImages,
@@ -327,3 +328,54 @@ describe("check: movimento, tempos e efeitos", () => {
     expect(r.text.split("\n").find((l) => l.includes("Frame 0") && l.includes("Frame 1") && l.includes("Frame 2"))).toBeTruthy();
   });
 });
+
+describe("ferramentas que os agentes pediram", () => {
+  it("chave desconhecida vira erro com sugestão (antes `frame` era ignorado e escrevia no frame 0)", () => {
+    const p = setup(8, 8);
+    const r = runCommand(p, "draw_rows", { frame: 2, rows: ["rr"] });
+    expect(r.ok).toBe(false);
+    expect(r.text).toMatch(/desconhecida/);
+    expect(r.text).toMatch(/"frame" \(quis dizer "frames"\?\)/);
+    expect(frameToRowsSafe(p)).toBe("........");        // nada foi desenhado
+    expect(runCommand(p, "update_layer", { layer: "Base", name: "x" }).text).toMatch(/quis dizer "rename"/);
+  });
+
+  it("mirror horizontal espelha a metade esquerda (largura final 2n-1)", () => {
+    const p = setup(9, 3);
+    const r = runCommand(p, "draw_rows", { rows: ["..r", ".rr", "rrr"], mirror: "horizontal", preview: false });
+    expect(r.ok).toBe(true);
+    expect(frameToRows(p, 0).slice(0, 3)).toEqual(["..r......", ".rrr.....", "rrrrr...."]);   // "..r" -> "..r.." ; ".rr" -> ".rrr." ; "rrr" -> "rrrrr"
+  });
+
+  it("draw_frames desenha arte diferente em frames diferentes numa chamada", () => {
+    const p = setup(6, 2);
+    runCommand(p, "add_frames", { count: 2 });
+    const r = runCommand(p, "draw_frames", { items: [{ frame: 0, rows: ["r"] }, { frame: 2, x: 3, rows: ["b"] }], preview: false });
+    expect(r.ok).toBe(true);
+    expect(frameToRows(p, 0)[0]).toBe("r.....");
+    expect(frameToRows(p, 1)[0]).toBe("......");
+    expect(frameToRows(p, 2)[0]).toBe("...b..");
+  });
+
+  it("transform center centraliza o conteúdo", () => {
+    const p = setup(9, 9);
+    runCommand(p, "draw_rows", { rows: ["rr", "rr"], preview: false });
+    runCommand(p, "transform", { frames: 0, op: "center", preview: false });
+    const rows = frameToRows(p, 0);
+    expect(rows[3].slice(3, 5)).toBe("rr");
+    expect(rows[4].slice(3, 5)).toBe("rr");
+  });
+
+  it("check ignore_layers tira a camada das medidas de movimento", () => {
+    const p = setup(16, 8);
+    runCommand(p, "add_layer", { name: "faisca" });
+    runCommand(p, "add_frames", { count: 1, copy_from: 0 });
+    runCommand(p, "draw_rows", { frames: 0, layer: "Base", x: 6, y: 3, rows: ["rr", "rr"], preview: false });
+    runCommand(p, "draw_rows", { frames: 1, layer: "Base", x: 6, y: 3, rows: ["rr", "rr"], preview: false });
+    runCommand(p, "draw_rows", { frames: 1, layer: "faisca", x: 14, y: 0, rows: ["b"], preview: false });
+    const r = runCommand(p, "check", { ignore_layers: ["faisca"], as_image: false });
+    expect(r.text).toMatch(/ignoradas.*faisca/);
+  });
+});
+
+const frameToRowsSafe = (p: Project) => frameToRows(p, 0)[0];

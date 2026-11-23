@@ -49,6 +49,10 @@ export interface AnalyzeOptions {
   loop?: boolean;
   /** "efeito" (brilho, chama, fumaça...) muda de tamanho de propósito: não cobra volume, base nem largura. */
   tipo?: "personagem" | "efeito";
+  /** ids de camadas a deixar fora das medidas (efeitos, fundo). */
+  ignoreLayers?: string[];
+  /** pixels da figura (sem o fundo estático), para as regras de estilo; padrão: o frame inteiro. */
+  figure?: Uint8Array;
 }
 
 const MAX_POINTS = 12;
@@ -277,6 +281,151 @@ function checkSymmetry(flat: Uint8Array, w: number, h: number, frame: number, is
   }
 }
 
+// ---------- estilo de pixel art ----------
+
+const lumOf = (p: Project, idx: number): number => {
+  const [r, g, b] = hexToRgb(p.palette[idx - 1]?.hex ?? "#000000");
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+};
+
+/** Distância (4 vizinhos) de cada pixel opaco até a borda da silhueta. */
+function edgeDistance(mask: Uint8Array, w: number, h: number): Float32Array {
+  const d = new Float32Array(mask.length).fill(-1);
+  const q: number[] = [];
+  for (let i = 0; i < mask.length; i++) {
+    if (!mask[i]) continue;
+    const x = i % w;
+    const y = (i - x) / w;
+    const edge = x === 0 || y === 0 || x === w - 1 || y === h - 1 || !mask[i - 1] || !mask[i + 1] || !mask[i - w] || !mask[i + w];
+    if (edge) { d[i] = 0; q.push(i); }
+  }
+  for (let k = 0; k < q.length; k++) {
+    const i = q[k];
+    const x = i % w;
+    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w]) {
+      if (j >= 0 && j < mask.length && mask[j] && d[j] < 0) { d[j] = d[i] + 1; q.push(j); }
+    }
+  }
+  return d;
+}
+
+function pearson(a: number[], b: number[]): number {
+  const n = a.length;
+  const ma = a.reduce((x, y) => x + y, 0) / n;
+  const mb = b.reduce((x, y) => x + y, 0) / n;
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < n; i++) { num += (a[i] - ma) * (b[i] - mb); da += (a[i] - ma) ** 2; db += (b[i] - mb) ** 2; }
+  return da && db ? num / Math.sqrt(da * db) : 0;
+}
+
+/** Contorno escuro: a borda da silhueta não pode ser mais clara que o miolo (salvo brilho/halo de propósito). */
+function checkOutline(p: Project, flat: Uint8Array, frame: number, issues: Issue[]) {
+  const w = p.width, h = p.height;
+  const mask = opaqueMask(flat);
+  const d = edgeDistance(mask, w, h);
+  let eSum = 0, eN = 0, iSum = 0, iN = 0;
+  for (let i = 0; i < flat.length; i++) {
+    if (d[i] < 0) continue;
+    if (d[i] === 0) { eSum += lumOf(p, flat[i]); eN++; } else { iSum += lumOf(p, flat[i]); iN++; }
+  }
+  if (eN < 12 || iN < 12) return;
+  const edge = eSum / eN, inner = iSum / iN;
+  if (edge > inner + 12) {
+    issues.push({
+      severity: "aviso",
+      code: "contorno_claro",
+      frame,
+      message: `O contorno (luminância média ${edge.toFixed(0)}) é mais claro que o preenchimento (${inner.toFixed(0)}). Em pixel art o contorno é um tom escuro do próprio material (selout), não claro, para a forma se destacar do fundo.`,
+    });
+  }
+}
+
+/** Banding: faixas de 1 px com tons em sequência monótona (4+ seguidas) acompanhando a borda. */
+function checkBanding(p: Project, flat: Uint8Array, frame: number, issues: Issue[]) {
+  const w = p.width, h = p.height;
+  let hits = 0;
+  const scan = (get: (a: number, b: number) => number, A: number, B: number) => {
+    for (let a = 0; a < A; a++) {
+      const runs: { len: number; lum: number }[] = [];
+      for (let b = 0; b < B; b++) {
+        const v = get(a, b);
+        if (!v) { runs.push({ len: 0, lum: -1 }); continue; }
+        const last = runs[runs.length - 1];
+        if (last && last.len > 0 && last.lum === lumOf(p, v)) last.len++;
+        else runs.push({ len: 1, lum: lumOf(p, v) });
+      }
+      const solid = runs.filter((r) => r.len > 0);
+      for (let k = 0; k + 3 < solid.length; k++) {
+        const win = solid.slice(k, k + 4);
+        if (win.every((r) => r.len === 1) && (win[0].lum < win[1].lum && win[1].lum < win[2].lum && win[2].lum < win[3].lum || win[0].lum > win[1].lum && win[1].lum > win[2].lum && win[2].lum > win[3].lum)) hits++;
+      }
+    }
+  };
+  scan((y, x) => flat[y * w + x], h, w);
+  scan((x, y) => flat[y * w + x], w, h);
+  if (hits >= 4) {
+    issues.push({
+      severity: "info",
+      code: "banding",
+      frame,
+      message: `${hits} trechos de faixas de 1 px com tons em degradê seguido (banding). Agrupe a luz e a sombra em poucos blocos grandes e decididos, em vez de várias linhas paralelas.`,
+    });
+  }
+}
+
+/** Pillow shading: o claro/escuro depende só da distância à borda (centro claro, borda escura em toda a volta), sem direção de luz. */
+function checkPillow(p: Project, flat: Uint8Array, frame: number, issues: Issue[]) {
+  const w = p.width, h = p.height;
+  const mask = opaqueMask(flat);
+  const d = edgeDistance(mask, w, h);
+  const xs: number[] = [], ys: number[] = [], ds: number[] = [], ls: number[] = [];
+  for (let i = 0; i < flat.length; i++) {
+    if (d[i] < 1) continue;          // o anel do contorno (d = 0) é escuro de propósito: só o interior conta
+    xs.push(i % w); ys.push(Math.floor(i / w)); ds.push(d[i]); ls.push(lumOf(p, flat[i]));
+  }
+  if (xs.length < 50 || new Set(ls).size < 3) return;
+  const radial = pearson(ds, ls);
+  let directional = 0;
+  for (let k = 0; k < 8; k++) {
+    const ang = (k * Math.PI) / 4;
+    directional = Math.max(directional, Math.abs(pearson(xs.map((x, i) => x * Math.cos(ang) + ys[i] * Math.sin(ang)), ls)));
+  }
+  if (radial > 0.55 && directional < 0.35) {
+    issues.push({
+      severity: "aviso",
+      code: "pillow_shading",
+      frame,
+      message: `Sombreamento "almofada": a luz cresce do contorno para o centro (correlação ${radial.toFixed(2)}) e não vem de uma direção (${directional.toFixed(2)}). Escolha uma fonte de luz (cima-esquerda): luz no lado voltado a ela, sombra no oposto e embaixo.`,
+    });
+  }
+}
+
+/** Ruído: muitos pixels isolados de cor diferente dentro de uma área (dither aleatório, manchas), em vez de clusters. */
+function checkNoise(p: Project, flat: Uint8Array, frame: number, issues: Issue[]) {
+  const w = p.width, h = p.height;
+  let area = 0, speckle = 0;
+  const pts: number[] = [];
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      if (!flat[i]) continue;
+      area++;
+      const n = [flat[i - 1], flat[i + 1], flat[i - w], flat[i + w], flat[i - w - 1], flat[i - w + 1], flat[i + w - 1], flat[i + w + 1]];
+      // ilha de verdade: nenhum dos 8 vizinhos tem a mesma cor (uma diagonal de 1 px não é ruído)
+      if (n.every((v) => v && v !== flat[i]) && new Set(n).size <= 2) { speckle++; pts.push(i); }
+    }
+  }
+  if (area >= 80 && speckle / area > 0.06) {
+    issues.push({
+      severity: "aviso",
+      code: "ruido",
+      frame,
+      message: `${speckle} pixels (${Math.round((100 * speckle) / area)}% da área) são "ilhas" de 1 px cercadas por outra cor: parece ruído/dither aleatório. Use clusters de 3+ px; dither só em xadrez 50% em áreas grandes de transição.`,
+      points: toPoints(pts, w),
+    });
+  }
+}
+
 // ---------- paleta ----------
 
 function checkPalette(p: Project, frames: number[], issues: Issue[]) {
@@ -388,7 +537,7 @@ function checkSequence(p: Project, metrics: FrameMetrics[], loop: boolean, issue
         severity: "aviso",
         code: "volume_pulou",
         frame: b.frame,
-        message: `${tag}: a área da silhueta mudou ${Math.round(change * 100)}% (${a.area}→${b.area} px). Em squash & stretch o volume deve se manter; confira se não é erro de desenho.`,
+        message: `${tag}: a área da silhueta mudou ${Math.round(change * 100)}% (${a.area}→${b.area} px). Em squash & stretch o volume deve se manter; confira se não é erro de desenho. Se o objeto cresce/pulsa de propósito (batimento, brilho), rode check com tipo=\"efeito\".`,
       });
     }
     if (tipo === "personagem" && a.bbox && b.bbox) {
@@ -517,16 +666,76 @@ export function analyzeFrame(p: Project, frame: number, opts: AnalyzeOptions = {
   checkStray(mask, p.width, p.height, frame, issues);
   checkHoles(mask, p.width, p.height, frame, issues);
   checkJaggies(mask, p.width, p.height, frame, issues);
+  const figure = opts.figure ?? flat;
+  // efeitos (chama, brilho) emitem luz: centro claro e bordas escuras estão certos, e não têm contorno sólido
+  if (opts.tipo !== "efeito") {
+    checkOutline(p, figure, frame, issues);
+    checkPillow(p, figure, frame, issues);
+  }
+  checkBanding(p, figure, frame, issues);
+  checkNoise(p, figure, frame, issues);
   if (opts.symmetric) checkSymmetry(flat, p.width, p.height, frame, issues);
   return issues;
+}
+
+/** Contraste figura × fundo (camadas estáticas) e consistência da direção da luz entre frames. */
+function checkContrastAndLight(p: Project, frames: number[], moving: Set<string>, issues: Issue[]) {
+  const staticIds = new Set(p.layers.filter((l) => l.visible && !moving.has(l.id)).map((l) => l.id));
+  if (staticIds.size && moving.size) {
+    const bg = flattenLayers(p, frames[0], staticIds);
+    const fg = flattenLayers(p, frames[0], moving);
+    let fs = 0, fn = 0, bs = 0, bn = 0;
+    for (let i = 0; i < fg.length; i++) {
+      if (fg[i]) { fs += lumOf(p, fg[i]); fn++; }
+      if (bg[i] && !fg[i]) { bs += lumOf(p, bg[i]); bn++; }
+    }
+    if (fn >= 10 && bn >= 10 && Math.abs(fs / fn - bs / bn) < 22) {
+      issues.push({
+        severity: "aviso",
+        code: "contraste_fraco",
+        message: `A figura (luminância média ${(fs / fn).toFixed(0)}) quase não se distingue do fundo (${(bs / bn).toFixed(0)}). Escureça/clareie um dos dois: o personagem precisa se destacar e o fundo deve ter menos contraste e saturação.`,
+      });
+    }
+  }
+  // direção da luz: do centro da silhueta para o centro de luminância; não pode virar de lado entre frames
+  const dirs: { frame: number; vx: number; vy: number }[] = [];
+  for (const f of frames) {
+    const flat = flattenLayers(p, f, moving);
+    let n = 0, cx = 0, cy = 0, lw = 0, lx = 0, ly = 0;
+    for (let i = 0; i < flat.length; i++) {
+      if (!flat[i]) continue;
+      const x = i % p.width, y = Math.floor(i / p.width), l = lumOf(p, flat[i]) + 1;
+      n++; cx += x; cy += y; lw += l; lx += x * l; ly += y * l;
+    }
+    if (n >= 30) dirs.push({ frame: f, vx: lx / lw - cx / n, vy: ly / lw - cy / n });
+  }
+  const strong = dirs.filter((d) => Math.hypot(d.vx, d.vy) > 0.6);
+  for (let a = 0; a < strong.length; a++) {
+    for (let b = a + 1; b < strong.length; b++) {
+      const dot = strong[a].vx * strong[b].vx + strong[a].vy * strong[b].vy;
+      const cos = dot / (Math.hypot(strong[a].vx, strong[a].vy) * Math.hypot(strong[b].vx, strong[b].vy));
+      if (cos < -0.5) {
+        issues.push({
+          severity: "aviso",
+          code: "luz_inconsistente",
+          frame: strong[b].frame,
+          message: `A luz parece vir de lados opostos nos frames ${strong[a].frame} e ${strong[b].frame}. Mantenha a mesma direção de luz (cima-esquerda) em todos os frames.`,
+        });
+        return;
+      }
+    }
+  }
 }
 
 export function analyze(p: Project, frames: number[], opts: AnalyzeOptions = {}): AnalysisResult {
   const issues: Issue[] = [];
   const moving = movingLayerIds(p);
+  for (const id of opts.ignoreLayers ?? []) moving.delete(id);
+  if (!moving.size) for (const l of p.layers) if (l.visible && !(opts.ignoreLayers ?? []).includes(l.id)) moving.add(l.id);
   const ignored = p.layers.filter((l) => l.visible && !moving.has(l.id)).map((l) => l.name);
   const metrics = frames.map((f) => frameMetrics(p, f, frames.length > 1 ? moving : undefined));
-  for (const f of frames) issues.push(...analyzeFrame(p, f, opts));
+  for (const f of frames) issues.push(...analyzeFrame(p, f, { ...opts, figure: frames.length > 1 ? flattenLayers(p, f, moving) : undefined }));
+  if (frames.length > 1) checkContrastAndLight(p, frames, moving, issues);
   checkPalette(p, frames, issues);
   if (frames.length > 1) {
     checkSequence(p, metrics, opts.loop ?? true, issues, opts.tipo ?? "personagem");

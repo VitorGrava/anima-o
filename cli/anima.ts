@@ -3,14 +3,13 @@
  *
  *   anima mcp                              servidor MCP (Claude Code, Codex, ...)
  *   anima view [projeto.anima.json]        abre o app no navegador acompanhando o arquivo ao vivo
- *   anima new <projeto> [LxA] [fps]        cria um projeto vazio
+ *   anima new <projeto> [LxA] [fps] [--vazio]   cria um projeto (--vazio: sem as cores 0 e 1 padrão)
  *   anima run <projeto> <comandos.json|->  aplica uma lista de comandos [{ "name", "input" }]
  *   anima show <projeto> [frame|all] [--png saida.png] [--check cinza|luz_sombra|silhueta]
              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--scale N]
-  anima check <projeto> [--symmetric] [--efeito] [--png saida.png]   aponta defeitos da arte e da animação (--efeito: brilhos, chamas, fumaça)
   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
  *              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--scale N]
- *   anima check <projeto> [--symmetric] [--efeito] [--png saida.png]   aponta defeitos da arte e da animação
+ *   anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--png saida.png]
  *   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
  *   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N]
  *   anima guide                            imprime o guia do animador (fluxo e princípios): leia antes de começar
@@ -58,6 +57,12 @@ async function saveImages(p: Project, r: CommandResult, png: string): Promise<vo
   }
 }
 
+/** Flags que sobraram depois do parse são erro (antes eram ignoradas em silêncio, ex.: `--tipo efeito`). */
+function rejectUnknownFlags(args: string[], cmd: string): void {
+  const bad = args.filter((a) => a.startsWith("--"));
+  if (bad.length) throw new Error(`flag(s) desconhecida(s) em "${cmd}": ${bad.join(", ")}. Veja \`anima help\`.`);
+}
+
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const c of process.stdin) chunks.push(c as Buffer);
@@ -69,11 +74,12 @@ const USAGE = `anima — engine de animação pixel art
   anima mcp                              servidor MCP para Claude Code, Codex e outros agentes
   anima view [projeto.anima.json]        abre o app no navegador acompanhando o arquivo ao vivo
   anima new <projeto> [LxA] [fps]        cria um projeto vazio
-  anima run <projeto> <comandos.json|-> [--png prévia.png]
+  anima run <projeto> <comandos.json|-> [--png prévia.png] [--continuar]
                                          aplica comandos [{"name": "...", "input": {...}}]; o último mostra a prévia
-  anima show <projeto> [frame] [--png saida.png] [--check cinza|luz_sombra|silhueta]
+  anima show <projeto> [frame|all] [--png saida.png] [--check cinza|luz_sombra|silhueta]
              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--scale N]
-  anima check <projeto> [--symmetric] [--png saida.png]   aponta defeitos da arte e da animação
+  anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--png saida.png]
+                                         defeitos da arte e da animação (--efeito: brilho, chama, fumaça)
   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N]
   anima guide                            guia do animador: fluxo de trabalho e princípios de pixel art e animação
@@ -100,15 +106,20 @@ export async function main(argv: string[]): Promise<number> {
       return -1;
     }
     case "new": {
+      const vazio = boolFlag(args, "vazio");
+      rejectUnknownFlags(args, "new");
       const [file, size = "32x32", fps = "8"] = args;
       if (!file) break;
       const [w, h] = size.toLowerCase().split("x").map(Number);
       await store.open(file, { width: w, height: h || w, fps: Number(fps) }, true);
+      if (vazio) { runCommand(store.project, "remove_colors", { keys: ["0", "1"] }); await store.save(); }
       console.log(`Criado: ${store.path}\n${describeProject(store.project)}`);
       return 0;
     }
     case "run": {
       const png = flag(args, "png");
+      const keepGoing = boolFlag(args, "continuar");
+      rejectUnknownFlags(args, "run");
       const [file, src] = args;
       if (!file || !src) break;
       await store.open(file);
@@ -120,7 +131,13 @@ export async function main(argv: string[]): Promise<number> {
         const last = n === cmds.length - 1;
         // o último comando mostra tudo (prévia, avisos); os outros, só a primeira linha
         console.log(`${r.ok ? "ok " : "ERRO"} #${n} ${c.name}: ${last ? r.text : r.text.split("\n")[0]}`);
-        if (!r.ok) fails++;
+        if (!r.ok) {
+          fails++;
+          if (!keepGoing) {
+            console.log(`\nParei no primeiro erro (comando #${n}); os ${cmds.length - n - 1} seguintes não rodaram, porque costumam depender dele. Corrija e rode de novo, ou use --continuar.`);
+            break;
+          }
+        }
         if (last && png) await saveImages(store.project, r, png);
       }
       await store.save();
@@ -137,6 +154,7 @@ export async function main(argv: string[]): Promise<number> {
       const scale = flag(args, "scale");
       const grid = boolFlag(args, "grid");
       const onion = boolFlag(args, "onion");
+      rejectUnknownFlags(args, "show");
       const [file, frame = "0"] = args;
       if (!file) break;
       await store.open(file);
@@ -154,17 +172,23 @@ export async function main(argv: string[]): Promise<number> {
       const r = runCommand(p, "view", input);
       console.log(`${describeProject(p)}\n\n${r.text}`);
       if (!r.ok) return 1;
-      if (png) await saveImages(p, r, png);
+      if (png && frame === "all") {
+        const done = await exportToFile(p, { format: "spritesheet_png", path: png, scale: Number(scale ?? 6), columns: undefined, frame: 0 });
+        console.log(`Folha com todos os frames: ${done}`);
+      } else if (png) await saveImages(p, r, png);
       return 0;
     }
     case "check": {
       const png = flag(args, "png");
       const symmetric = boolFlag(args, "symmetric");
       const efeito = boolFlag(args, "efeito");
+      const ignorar = flag(args, "ignorar");
+      const tipoFlag = flag(args, "tipo");
+      rejectUnknownFlags(args, "check");
       const [file] = args;
       if (!file) break;
       await store.open(file);
-      const r = runCommand(store.project, "check", { symmetric, tipo: efeito ? "efeito" : "personagem" });
+      const r = runCommand(store.project, "check", { symmetric, tipo: efeito || tipoFlag === "efeito" ? "efeito" : "personagem", ignore_layers: ignorar ? ignorar.split(",") : undefined });
       console.log(r.text);
       if (png) await saveImages(store.project, r, png);
       return r.ok ? 0 : 1;
@@ -173,6 +197,7 @@ export async function main(argv: string[]): Promise<number> {
       const height = flag(args, "height");
       const style = flag(args, "style");
       const color = flag(args, "color");
+      rejectUnknownFlags(args, "reference");
       const [topic] = args;
       if (!topic || !(REFERENCE_TOPICS as readonly string[]).includes(topic)) {
         console.log(`Tópicos: ${REFERENCE_TOPICS.join(", ")}`);
@@ -191,6 +216,7 @@ export async function main(argv: string[]): Promise<number> {
       const scale = Number(flag(args, "scale") ?? 4);
       const columns = flag(args, "columns");
       const frame = flag(args, "frame");
+      rejectUnknownFlags(args, "export");
       const [file, out] = args;
       if (!file || !out) break;
       await store.open(file);
@@ -206,12 +232,27 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "tools": {
-      const tools = [...commandTools(["export"]), {
-        name: "export (CLI: anima export <projeto> <saida>)",
-        description: "Exporta: .gif (animação), .png (spritesheet com todos os frames; use --columns N para o layout; com --frame N exporta só um frame), .json. --scale N amplia os pixels (padrão 4).",
+      const json = boolFlag(args, "json");
+      const [name] = args;
+      const all = [...commandTools(["export"]), {
+        name: "export",
+        description: "(CLI: anima export <projeto> <saida>) .gif = animação; .png = spritesheet com todos os frames (--columns N muda o layout; --frame N exporta só um); .json. --scale N amplia (padrão 4).",
         inputSchema: { type: "object", properties: { scale: { type: "integer" }, columns: { type: "integer" }, frame: { type: "integer" } } },
       }];
-      console.log(JSON.stringify(tools, null, 1));
+      if (json) { console.log(JSON.stringify(name ? all.filter((t) => t.name === name) : all, null, 1)); return 0; }
+      const describe = (t: (typeof all)[number]) => {
+        const props = ((t.inputSchema as { properties?: Record<string, { type?: string; description?: string; default?: unknown; enum?: unknown[] }> }).properties) ?? {};
+        const req = new Set(((t.inputSchema as { required?: string[] }).required) ?? []);
+        return Object.entries(props).map(([k, v]) => `    ${k}${req.has(k) ? "*" : ""}: ${v.enum ? v.enum.join("|") : v.type ?? "?"}${v.default !== undefined ? ` (padrão ${JSON.stringify(v.default)})` : ""}${v.description ? ` — ${String(v.description).split("\n")[0].slice(0, 110)}` : ""}`).join("\n");
+      };
+      if (name) {
+        const t = all.find((x) => x.name === name);
+        if (!t) { console.log(`Comando "${name}" não existe. Rode \`anima tools\` para a lista.`); return 1; }
+        console.log(`${t.name}\n${t.description}\n\n  parâmetros (* = obrigatório):\n${describe(t)}\n\nUso em run: [{"name": "${t.name}", "input": { ... }}]`);
+        return 0;
+      }
+      console.log("Comandos (use `anima tools <nome>` para os parâmetros; `anima tools --json` para o JSON Schema completo). Use em `anima run`: [{\"name\": \"<comando>\", \"input\": {...}}]\n");
+      for (const t of all) console.log(`  ${t.name.padEnd(20)} ${t.description.split("\n")[0].slice(0, 100)}`);
       return 0;
     }
   }

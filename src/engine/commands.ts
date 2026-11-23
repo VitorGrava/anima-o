@@ -372,6 +372,10 @@ const drawRowsCmd = def({
     x: z.number().int().default(0).describe("Coluna do canto superior esquerdo"),
     y: z.number().int().default(0).describe("Linha do canto superior esquerdo"),
     rows: z.array(z.string().max(256)).min(1).max(256),
+    mirror: z
+      .enum(["none", "horizontal"])
+      .default("none")
+      .describe('"horizontal": escreva só a METADE ESQUERDA, incluindo a coluna do meio como última coluna; a engine espelha para a direita (corações, estrelas, rostos, personagens de frente). Largura final = 2×largura − 1.'),
     dot_is_transparent: z
       .boolean()
       .default(true)
@@ -382,8 +386,43 @@ const drawRowsCmd = def({
     const layer = findLayer(p, i.layer);
     const list = resolveFrames(p, i.frames);
     let n = 0;
-    for (const f of list) n = drawRows(p, getCel(p, f, layer.id), i.rows, i.x, i.y, i.dot_is_transparent);
+    const rows = i.mirror === "horizontal" ? i.rows.map((r) => r + [...r].slice(0, -1).reverse().join("")) : i.rows;
+    for (const f of list) n = drawRows(p, getCel(p, f, layer.id), rows, i.x, i.y, i.dot_is_transparent);
     return result(p, `${n} pixels escritos em "${layer.name}", ${fmtList(list)}.`, list, i.preview);
+  },
+});
+
+const drawFramesCmd = def({
+  name: "draw_frames",
+  description:
+    "Desenha arte DIFERENTE em vários frames de uma vez (o jeito normal de fazer um ciclo): cada item diz o frame, as linhas de texto e a posição. Equivale a vários draw_rows, mas numa chamada só e com uma prévia no fim. As chaves e o '.' valem como em draw_rows.",
+  schema: z.object({
+    layer: layerSel,
+    items: z
+      .array(
+        z.object({
+          frame: z.number().int().min(0),
+          x: z.number().int().default(0),
+          y: z.number().int().default(0),
+          rows: z.array(z.string().max(256)).min(1).max(256),
+          mirror: z.enum(["none", "horizontal"]).default("none").describe("horizontal: escreva só a metade esquerda (com a coluna do meio por último); a engine espelha."),
+        }),
+      )
+      .min(1)
+      .max(128),
+    dot_is_transparent: z.boolean().default(true),
+    preview: previewFlag,
+  }),
+  run(p, i) {
+    const layer = findLayer(p, i.layer);
+    const frames = i.items.map((it) => it.frame);
+    resolveFrames(p, frames);
+    let n = 0;
+    for (const it of i.items) {
+      const rows = it.mirror === "horizontal" ? it.rows.map((r) => r + [...r].slice(0, -1).reverse().join("")) : it.rows;
+      n += drawRows(p, getCel(p, it.frame, layer.id), rows, it.x, it.y, i.dot_is_transparent);
+    }
+    return result(p, `${n} pixels escritos em "${layer.name}", ${i.items.length} frame(s): ${[...new Set(frames)].join(", ")}.`, [...new Set(frames)], i.preview, i.layer);
   },
 });
 
@@ -460,12 +499,14 @@ const transform = def({
     "- replace_color: troca a cor `from` por `to`",
     "- outline: contorna automaticamente a silhueta com `color`",
     "- rotate: gira `angle` graus (positivo = horário) em torno do pivô (cx, cy). Ótimo para braços, armas e objetos girando. Gire sempre a partir de uma cópia limpa (copy_layer_content) em vez de girar várias vezes o mesmo frame, para não acumular distorção.",
+    "- center: centraliza o conteúdo da camada no canvas (axis: x, y ou both)",
     "- clear: apaga tudo",
   ].join("\n"),
   schema: z.object({
     frames: framesSel,
     layer: layerSel,
-    op: z.enum(["shift", "flip_horizontal", "flip_vertical", "replace_color", "outline", "rotate", "clear"]),
+    op: z.enum(["shift", "flip_horizontal", "flip_vertical", "replace_color", "outline", "rotate", "center", "clear"]),
+    axis: z.enum(["x", "y", "both"]).optional().describe("center: eixo a centralizar (padrão: both)"),
     angle: z.number().min(-360).max(360).optional().describe("rotate: graus, positivo = horário"),
     cx: z.number().optional().describe("rotate: pivô x (padrão: centro do canvas)"),
     cy: z.number().optional().describe("rotate: pivô y (padrão: centro do canvas)"),
@@ -505,6 +546,16 @@ const transform = def({
           if (i.angle === undefined) throw new Error("rotate precisa de `angle`.");
           draw.rotate(s, i.angle, i.cx ?? p.width / 2, i.cy ?? p.height / 2);
           break;
+        case "center": {
+          let x0 = p.width, x1 = -1, y0 = p.height, y1 = -1;
+          for (let y = 0; y < p.height; y++) for (let x = 0; x < p.width; x++) if (s.data[y * p.width + x]) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+          if (x1 < 0) break;
+          const axis = i.axis ?? "both";
+          const dx = axis === "y" ? 0 : Math.floor((p.width - (x1 - x0 + 1)) / 2) - x0;
+          const dy = axis === "x" ? 0 : Math.floor((p.height - (y1 - y0 + 1)) / 2) - y0;
+          draw.shift(s, dx, dy, false);
+          break;
+        }
         case "clear":
           s.data.fill(0);
           break;
@@ -643,11 +694,13 @@ const check = def({
       .enum(["personagem", "efeito"])
       .default("personagem")
       .describe('"efeito" (brilho, chama, fumaça, estrela...) muda de tamanho de propósito: não cobra volume, base nem largura. "personagem": cobra.'),
+    ignore_layers: z.array(z.string()).optional().describe("Camadas a deixar fora das medidas (ex.: faíscas e efeitos que se mexem de propósito, ou o fundo)."),
     as_image: z.boolean().default(true).describe("Devolve a imagem com os pixels problemáticos marcados em magenta."),
   }),
   run(p, i) {
     const list = resolveFrames(p, i.frames ?? "all");
-    const r = analyze(p, list, { symmetric: i.symmetric, loop: i.loop, tipo: i.tipo });
+    const ignore = (i.ignore_layers ?? []).map((n) => findLayer(p, n).id);
+    const r = analyze(p, list, { symmetric: i.symmetric, loop: i.loop, tipo: i.tipo, ignoreLayers: ignore });
     const marked = r.issues.find((x) => x.points?.length && x.frame !== undefined);
     const f = marked?.frame ?? list[0];
     const highlight = r.issues.filter((x) => x.frame === f).flatMap((x) => x.points ?? []);
@@ -720,6 +773,7 @@ export const COMMANDS = [
   moveFrame,
   setTiming,
   drawRowsCmd,
+  drawFramesCmd,
   drawShapes,
   transform,
   copyCel,
@@ -741,10 +795,36 @@ export function describeProject(p: Project): string {
   ].join("\n");
 }
 
+function editDistance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+
+/**
+ * O Zod descarta em silêncio chaves que o schema não conhece (ex.: `frame` em vez de `frames`),
+ * e o comando roda "com sucesso" no lugar errado. Aqui isso vira erro, com a sugestão da chave certa.
+ */
+function unknownKeys(schema: z.ZodType, input: unknown): string | null {
+  if (!(schema instanceof z.ZodObject) || !input || typeof input !== "object" || Array.isArray(input)) return null;
+  const valid = Object.keys(schema.shape);
+  const bad = Object.keys(input as object).filter((k) => !valid.includes(k));
+  if (!bad.length) return null;
+  const hint = (k: string) => {
+    const best = valid.map((v) => ({ v, d: editDistance(k.toLowerCase(), v.toLowerCase()) })).sort((a, b) => a.d - b.d)[0];
+    return best && best.d <= Math.max(2, Math.floor(k.length / 3)) ? ` (quis dizer "${best.v}"?)` : "";
+  };
+  return `chave(s) desconhecida(s): ${bad.map((k) => `"${k}"${hint(k)}`).join(", ")}. Chaves válidas: ${valid.join(", ")}.`;
+}
+
 /** Valida e executa um comando. Erros viram texto amigável — nunca exceções. */
 export function runCommand(p: Project, name: string, input: unknown): CommandResult & { ok: boolean } {
   const cmd = byName.get(name);
   if (!cmd) return { ok: false, changed: false, text: `Comando desconhecido: ${name}` };
+  const unknown = unknownKeys(cmd.schema, input);
+  if (unknown) return { ok: false, changed: false, text: `Entrada inválida para ${name}: ${unknown}` };
   const parsed = cmd.schema.safeParse(input ?? {});
   if (!parsed.success) {
     return { ok: false, changed: false, text: `Entrada inválida para ${name}: ${z.prettifyError(parsed.error)}` };
