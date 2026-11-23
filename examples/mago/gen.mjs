@@ -7,12 +7,12 @@ import { writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 const W = 48, H = 48, N = 8;
 const pal = [
-  ["m", "#353570", "manto"], ["d", "#1c1a40", "manto-sombra"], ["l", "#6064be", "manto-luz"], ["t", "#8a8cd0", "manto-barra"],
+  ["m", "#353570", "manto"], ["d", "#1c1a40", "manto-sombra"], ["n", "#2a2a5c", "manto-medio"], ["l", "#6064be", "manto-luz"], ["t", "#8a8cd0", "manto-barra"],
   ["c", "#4a3058", "capa"], ["C", "#36224a", "capa-sombra"], ["p", "#6a4a7e", "capa-luz"],
   ["w", "#ece8e0", "barba-luz"], ["g", "#b4b0b4", "barba"], ["G", "#7c7888", "barba-sombra"],
   ["s", "#e8b090", "pele"], ["k", "#b87464", "pele-sombra"], ["e", "#1c1630", "olho"],
   ["S", "#b07a4a", "cajado-luz"], ["T", "#7a4a2e", "cajado"], ["U", "#4a2a1e", "cajado-sombra"],
-  ["b", "#33262c", "bota"], ["B", "#584440", "bota-luz"], ["r", "#7a4a36", "cinto"],
+  ["b", "#33262c", "bota"], ["B", "#584440", "bota-luz"], ["r", "#7a5a8a", "cinto"],
   ["z", "#ffffff", "cristal-brilho"], ["x", "#8af0f8", "cristal-luz"], ["X", "#30b4d0", "cristal"], ["Y", "#186080", "cristal-sombra"],
   ["h", "#c8fcff", "aura"], ["o", "#6a5c72", "sombra-chao"], ["O", "#54465e", "sombra-chao-centro"],
 ];
@@ -26,9 +26,9 @@ const OX = 2; // centraliza a massa
 // ---------- ponta do chapéu (desenhada à parte para balançar em arco) ----------
 function pontaChapeu() {
   const g = grid();
-  fillRows(g, { 3: [14, 15], 4: [15, 17], 5: [16, 20], 6: [18, 21] }, "m");
-  px(g, 14, 3, "l"); px(g, 15, 4, "l"); px(g, 16, 5, "l");
-  px(g, 17, 4, "d"); span(g, 5, 19, 20, "d"); span(g, 6, 20, 21, "d"); px(g, 15, 3, "d");
+  fillRows(g, { 3: [14, 15], 4: [15, 17], 5: [16, 19], 6: [17, 21] }, "m");
+  px(g, 14, 3, "l"); px(g, 15, 4, "l"); px(g, 16, 5, "l"); px(g, 17, 6, "l");
+  px(g, 17, 4, "d"); px(g, 19, 5, "d"); span(g, 6, 20, 21, "d");
   return g;
 }
 // ---------- CORPO (copa do chapéu, rosto, manto, braços, pés) ----------
@@ -39,8 +39,9 @@ function corpoBase() {
   fillRows(g, copa, "m");
   for (const [y, [a, b]] of Object.entries(copa)) { px(g, a, +y, "l"); span(g, +y, b - 1, b, "d"); }
   px(g, 18, 7, "l"); span(g, 10, 16, 25, "c"); span(g, 10, 16, 17, "p"); px(g, 25, 10, "C"); // faixa
-  fillRows(g, { 11: [13, 29], 12: [11, 32], 13: [13, 31] }, "m");
-  span(g, 11, 14, 21, "l"); span(g, 12, 11, 15, "l"); span(g, 13, 13, 31, "d"); span(g, 12, 29, 32, "d");
+  fillRows(g, { 11: [16, 27], 12: [13, 30], 13: [12, 31] }, "m");
+  span(g, 11, 16, 21, "l"); span(g, 12, 13, 17, "l"); span(g, 12, 28, 30, "d");
+  span(g, 13, 14, 15, "."); span(g, 13, 12, 13, "d"); span(g, 13, 16, 31, "d"); px(g, 12, 14, "d"); // pontas curvadas para baixo
   // cabeça 3/4: cabelo atrás, testa na sombra da aba, sobrancelha branca saliente, nariz grande
   fillRows(g, { 14: [17, 20], 15: [17, 20], 16: [18, 20] }, "g"); px(g, 17, 15, "G");
   span(g, 14, 21, 27, "k");
@@ -57,26 +58,35 @@ function corpoBase() {
   fillRows(g, manto, "m");
   for (const [y, [a, b]] of Object.entries(manto)) {
     const Y = +y;
-    if (Y <= 25) { px(g, a, Y, "l"); px(g, a + 1, Y, "l"); } else px(g, a, Y, "l");
+    if (Y <= 21) { px(g, a, Y, "l"); px(g, a + 1, Y, "l"); } else px(g, a, Y, "l");
     span(g, Y, b - (Y > 33 ? 2 : 1), b, "d");
   }
   span(g, 17, 16, 21, "l"); span(g, 18, 15, 19, "l");
   // cinto e dobras em V saindo da cintura
   span(g, 30, 18, 29, "r"); px(g, 18, 30, "C"); px(g, 23, 31, "r"); px(g, 22, 32, "r");
-  const vL = [[20, 32], [19, 34], [18, 36], [17, 38], [16, 40], [16, 41]], vR = [[27, 32], [28, 34], [29, 36], [30, 38], [31, 40], [31, 41]];
-  for (const [x, y] of vL) { px(g, x, y, "d"); px(g, x, y + 1, "d"); px(g, x + 1, y + 1, "l"); }
-  for (const [x, y] of vR) { px(g, x, y, "d"); px(g, x, y + 1, "d"); }
-  // abertura da frente e vão entre os pés
-  for (let y = 27; y <= 40; y++) if (y !== 30) px(g, 24 + (y > 35 ? 1 : 0), y, "t");
-  for (let y = 31; y <= 40; y++) px(g, 23 + (y > 35 ? 1 : 0), y, "d");
+  // metade direita (longe da luz e do cristal) no tom médio-escuro
+  for (const [y, [a, b]] of Object.entries(manto)) if (+y >= 31) for (let x = 26; x <= b - 2; x++) px(g, x, +y, "n");
+  for (let y = 26; y <= 29; y++) for (let x = 26; x <= 27; x++) px(g, x, y, "n");
+  const fold = (x0, y0, dir, len, light) => { for (let k = 0; k < len; k++) { const x = x0 + dir * Math.floor(k / 2), y = y0 + k; px(g, x, y, "d"); if (light) px(g, x - 1, y, "l"); } };
+  fold(21, 31, -1, 11, true); fold(19, 33, -1, 9, false);   // leque da esquerda (dobra com crista clara)
+  fold(26, 31, 1, 11, false); fold(29, 33, 1, 9, false);     // leque da direita
+  // abertura da frente (diagonal suave) e vão entre os pés
+  for (let y = 27; y <= 40; y++) if (y !== 30) px(g, 24 + Math.floor(Math.max(0, y - 31) / 4), y, "t");
   // barra em sino ondulada
   span(g, 42, 12, 35, "d"); span(g, 42, 14, 18, "m");
   for (const x of [19, 20, 33, 34, 35]) px(g, x, 42, ".");
   px(g, 12, 41, "d"); px(g, 35, 41, "d");
   span(g, 41, 24, 26, "C"); span(g, 42, 23, 27, ".");
   // pés escuros
-  span(g, 42, 20, 22, "b"); span(g, 43, 17, 22, "b"); span(g, 43, 18, 19, "B");
-  span(g, 42, 27, 29, "b"); span(g, 43, 27, 32, "b"); span(g, 43, 29, 30, "B");
+  return g;
+}
+function pes() {
+  const g = grid();
+  span(g, 42, 20, 22, "b"); span(g, 43, 17, 22, "b"); px(g, 22, 42, "B");
+  span(g, 42, 27, 30, "b"); span(g, 43, 27, 32, "b"); px(g, 30, 42, "B"); px(g, 32, 43, "B");
+  return g;
+}
+function bracos(g) {
   // braço de trás (segura o cajado): cotovelo para trás, manga em sino sob a mão
   fillRows(g, { 19: [12, 14], 20: [11, 14], 21: [11, 14], 22: [11, 15], 23: [12, 15], 24: [12, 15], 25: [13, 15] }, "m");
   px(g, 12, 19, "l"); px(g, 11, 20, "l"); px(g, 11, 21, "l");
@@ -87,6 +97,8 @@ function corpoBase() {
   for (const [y, [a]] of Object.entries(braco)) px(g, a, +y, "d"); // separa do tronco
   px(g, 31, 19, "l"); px(g, 32, 20, "l"); px(g, 33, 21, "l"); px(g, 34, 22, "l"); px(g, 35, 22, "l");
   span(g, 26, 31, 35, "d"); span(g, 27, 31, 34, "d"); px(g, 36, 24, "d"); px(g, 36, 25, "d"); px(g, 32, 24, "d"); px(g, 31, 25, "d"); // dobra do cotovelo, interior do punho
+  // capa passando por cima do ombro de trás: liga a gola à capa de baixo
+  fillRows(g, { 17: [14, 16], 18: [13, 15], 19: [12, 14], 20: [11, 13] }, "c"); px(g, 14, 17, "p"); px(g, 13, 18, "p"); px(g, 12, 19, "p"); px(g, 11, 20, "p"); px(g, 16, 17, "C"); px(g, 15, 18, "C");
   return g;
 }
 // ---------- BARBA (camada própria, atrasa 1 frame) ----------
@@ -104,7 +116,7 @@ function barba() {
 // ---------- CAPA: menor, dobrada, borda irregular, tom frio ----------
 function capaBase(sway) {
   const g = grid();
-  fillRows(g, { 10: [13, 15], 11: [12, 15], 12: [12, 15], 13: [14, 17], 14: [13, 17], 15: [13, 17], 16: [13, 18] }, "c"); px(g, 13, 14, "p"); px(g, 13, 15, "p");
+  fillRows(g, { 10: [13, 15], 11: [11, 15], 12: [11, 15], 13: [14, 17], 14: [13, 17], 15: [13, 17], 16: [13, 18] }, "c"); px(g, 13, 14, "p"); px(g, 13, 15, "p");
   const ML = { 17: 16, 18: 15, 19: 14, 20: 14, 21: 14, 22: 15, 23: 15, 24: 16, 25: 16, 26: 17, 27: 17, 28: 18, 29: 18, 30: 18, 31: 17, 32: 17, 33: 16, 34: 16, 35: 15, 36: 15, 37: 14, 38: 14 };
   const L = (y) => ML[y] - (y < 22 ? 2 : y < 30 ? 3 : 2) + (y >= 26 && y <= 31 ? 0 : 0);
   for (let y = 17; y <= 38; y++) {
@@ -133,11 +145,13 @@ function cajado() {
   return g;
 }
 // ---------- MÃOS ----------
-function maos(dyF) {
+function maos(dyF, dxF) {
   const g = grid();
-  // mão da frente 3x3 com polegar para cima, saindo do punho
-  span(g, 21 + dyF, 37, 38, "s"); span(g, 22 + dyF, 37, 39, "s"); span(g, 23 + dyF, 37, 39, "s"); span(g, 24 + dyF, 37, 38, "k");
-  px(g, 39, 23 + dyF, "k"); px(g, 38, 20 + dyF, "s"); px(g, 39, 21 + dyF, "s");
+  // mão da frente 3x3 com polegar para cima, saindo do punho (punho de 1 px liga a mão à manga no arco)
+  const X = 37 + dxF;
+  if (dxF) { px(g, 37, 23 + dyF - handDYoff(dyF), "k"); px(g, 37, 24 + dyF - handDYoff(dyF), "k"); }
+  span(g, 21 + dyF, X, X + 1, "s"); span(g, 22 + dyF, X, X + 2, "s"); span(g, 23 + dyF, X, X + 2, "s"); span(g, 24 + dyF, X, X + 1, "k");
+  px(g, X + 2, 23 + dyF, "k"); px(g, X + 1, 20 + dyF, "s"); px(g, X + 2, 21 + dyF, "s");
   // mão de trás fechada no cajado
   span(g, 20, 6, 9, "s"); span(g, 21, 5, 10, "s"); span(g, 22, 5, 10, "k"); span(g, 23, 6, 8, "k");
   px(g, 5, 21, "k"); px(g, 9, 22, "s"); px(g, 7, 21, "k"); px(g, 10, 21, "k");
@@ -163,29 +177,31 @@ function aura(dy, lv) {
 }
 
 // ---------- animação ----------
-const breath = [0, 0, -1, -1, -1, 0, 0, 0];             // peito/ombros sobem 1 px nos frames 2–4
+const handDYoff = () => 0;
+const breath = [0, 0, -1, -1, -1, -1, 0, 0];            // peito, ombros, barba e mão sobem 1 px nos frames 2–5
 const lag = (k, t) => breath[(t - k + N) % N];
-const tipDX = [0, 0, 0, 1, 1, 0, -1, -1];               // ponta do chapéu em arco (atraso 2)
-const tipDY = [0, 0, 0, 0, -1, -1, -1, 0];
+const tipDX = [0, 0, 0, 1, 1, 0, -1, 0];                // ponta do chapéu: 1 frame atrasada, em arco
 const glow = [0, 1, 2, 3, 3, 2, 1, 0];
 const capeSway = [0, 0, 0, 0, -1, -1, -1, 0];           // barra da capa (atraso 2)
-const handDY = [0, 0, 0, -1, -1, -1, 0, 0];            // mão da frente acompanha 1 frame depois
+const handDY = [0, 0, 0, -1, -1, 0, 0, 0];             // gesto: a mão levantada sobe mais 1 px e volta (arco pequeno)
+const handDX = [0, 0, 0, 0, 1, 1, 0, 0];
 const shiftRows = (g, fn) => { const o = grid(); for (let y = 0; y < H; y++) { const sy = y - fn(y); if (sy >= 0 && sy < H) o[y] = [...g[sy]]; } return o; };
 const offX = (g, d) => g.map((r) => { const o = Array(W).fill("."); r.forEach((c, x) => { if (c !== "." && x + d >= 0 && x + d < W) o[x + d] = c; }); return o; });
 const over = (a, b) => a.map((r, y) => r.map((c, x) => (b[y][x] !== "." ? b[y][x] : c)));
 const sombra = () => { const g = grid(); span(g, 43, 11, 35, "O"); span(g, 45, 8, 38, "o"); span(g, 44, 10, 36, "o"); span(g, 45, 13, 33, "O"); return g; };
 
-const CB = corpoBase(), CJ = offX(cajado(), -1), PT = pontaChapeu(), BB = barba();
+const CB = bracos(corpoBase()), PE = pes(), CJ = offX(cajado(), -1), PT = pontaChapeu(), BB = barba();
 const upper = (y) => (y <= 31 ? 1 : 0);
 const layers = ["capa", "corpo", "barba", "cajado", "mao", "cristal"];
 function frame(t) {
   const b = breath[t];
-  const ponta = shiftRows(offX(PT, tipDX[t]), () => b + tipDY[t]);
-  const corpo = over(shiftRows(CB, (y) => upper(y) * b), ponta);
+  const ponta = shiftRows(offX(PT, tipDX[t]), () => lag(1, t));
+  const hem = lag(1, t); // barra do manto: 1 px, 1 frame atrasada
+  const base = shiftRows(CB, (y) => upper(y) * b);
+  const corpo = over(over(base.map((r, y) => (y >= 38 && y <= 42 && hem ? offX([r], -1)[0] : r)), PE), ponta);
   const capa = shiftRows(capaBase(capeSway[t]), (y) => (y <= 30 ? lag(1, t) : 0));
-  const barbaL = shiftRows(BB, () => lag(1, t));
-  const mao = maos(handDY[t]);
-  const m = over(grid(), shiftRows(mao, (y) => (y < 25 && y > 19 ? 0 : 0)));
+  const barbaL = shiftRows(BB, () => b);
+  const m = maos(handDY[t] + b, handDX[t]);
   return { capa, corpo, barba: barbaL, cajado: CJ, mao: m, cristal: offX(cristal(lag(2, t), glow[t]), -1), aura: offX(aura(lag(2, t), glow[t]), -1), sombra: sombra() };
 }
 const cmds = [{ name: "set_palette", input: { colors: pal.map(([key, hex, name]) => ({ key, hex, name })) } },
