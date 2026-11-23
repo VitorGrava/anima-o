@@ -695,7 +695,9 @@ function checkMotion(p: Project, metrics: FrameMetrics[], loop: boolean, issues:
   }
   // tempos: tudo igual deixa o movimento mecânico
   const durs = ms.map(dur);
-  if (ms.length >= 4 && new Set(durs).size === 1) {
+  // marcha com chão rolando (rig_walk no_lugar): a duração TEM de ser igual, senão o chão acelera e freia contra o pé
+  const lockedTiming = p.rig?.travel !== undefined;
+  if (ms.length >= 4 && new Set(durs).size === 1 && !lockedTiming) {
     issues.push({
       severity: "info",
       code: "tempo_uniforme",
@@ -787,7 +789,8 @@ function evaluatePrinciples(p: Project, frames: number[], metrics: FrameMetrics[
   const durs = ms.map((m) => dur(m.frame));
   const sortedD = [...durs].sort((a, b) => a - b);
   const medD = sortedD[Math.floor(sortedD.length / 2)] || 1;
-  if (Math.max(...durs) >= Math.min(...durs) * 1.3 || durs.some((d) => d >= medD * 1.5)) add(4, "Straight Ahead and Pose to Pose (ação direta e pose a pose)", "ok", "Há poses-chave seguradas (duração maior) entre intermediários mais rápidos: bom sinal de pose a pose.");
+  if (p.rig?.travel) add(4, "Straight Ahead and Pose to Pose (ação direta e pose a pose)", "na", "Marcha gerada por IK com o chão em velocidade fixa: as poses vêm da fase do passo, não de poses-chave seguradas.");
+  else if (Math.max(...durs) >= Math.min(...durs) * 1.3 || durs.some((d) => d >= medD * 1.5)) add(4, "Straight Ahead and Pose to Pose (ação direta e pose a pose)", "ok", "Há poses-chave seguradas (duração maior) entre intermediários mais rápidos: bom sinal de pose a pose.");
   else add(4, "Straight Ahead and Pose to Pose (ação direta e pose a pose)", "atencao", "Nenhuma pose é segurada: defina as poses-chave (extremos), segure-as e preencha os intermediários.");
 
   // 5. Follow through e overlapping: partes diferentes se movem com atraso
@@ -857,7 +860,8 @@ function evaluatePrinciples(p: Project, frames: number[], metrics: FrameMetrics[
   else add(8, "Secondary Action (ação secundária)", "atencao", "Só uma camada se move: acrescente piscar, respirar, balançar, faíscas ou uma sombra que reage.");
 
   // 9. Timing
-  if (codes.has("tempo_uniforme")) add(9, "Timing (temporização)", "atencao", "Todos os frames duram o mesmo: segure o apogeu/impacto (2–3×) e acelere o resto.");
+  if (p.rig?.travel) add(9, "Timing (temporização)", "na", "Marcha com chão que rola numa velocidade fixa: a duração igual é de propósito (variar o tempo faria o chão acelerar e frear contra o pé).");
+  else if (codes.has("tempo_uniforme")) add(9, "Timing (temporização)", "atencao", "Todos os frames duram o mesmo: segure o apogeu/impacto (2–3×) e acelere o resto.");
   else add(9, "Timing (temporização)", ms.length < 3 ? "na" : "ok", ms.length < 3 ? "" : `Durações variam entre ${Math.min(...durs)} e ${Math.max(...durs)} ms.`);
 
   // 10. Exagero

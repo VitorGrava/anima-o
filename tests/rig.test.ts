@@ -570,3 +570,16 @@ describe("melhorias do rig vindas do pinguim: at numérico, rig_bone, sole, dica
     expect(SYSTEM_PROMPT).toMatch(/rig_bone|rig_walk/);
   });
 });
+
+describe("rig_bake outline auto (sel-out)", () => {
+  it("contorna com o tom escuro do material vizinho, não com uma cor única", () => {
+    const p = createProject({ width: 32, height: 32 });
+    runCommand(p, "rig_create", { template: "humanoide", height: 24, auto_art: true });
+    runCommand(p, "rig_pose", { items: [{ frame: 0, angles: { coxa_frente: 10 } }] });
+    const r = runCommand(p, "rig_bake", { outline: "auto" });
+    expect(r.ok, r.text).toBe(true);
+    const layer = p.layers.find((l) => l.name === "contorno")!;
+    const used = new Set(Array.from(p.frames[0].cels[layer.id]).filter((v) => v));
+    expect(used.size).toBeGreaterThan(1);
+  });
+});

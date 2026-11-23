@@ -286,22 +286,28 @@ export function walkPoses(rig: Rig, o: WalkOptions): { angles: Record<string, nu
   const legs = rig.legs!;
   const out: { angles: Record<string, number>; root: V }[] = [];
   const reach = legs.reduce((m, l) => Math.max(m, rig.bones.find((b) => b.name === l.upper)!.length + rig.bones.find((b) => b.name === l.lower)!.length), 0);
-  const dropMax = Math.max(...legs.map((l) => l.drop));
   const has = (n: string) => rig.bones.some((b) => b.name === n);
-  const hc = Math.sqrt(Math.max(1, (0.985 * reach) ** 2 - (o.stride / 2) ** 2));        // altura do quadril no contato
+  // altura da raiz: cada perna alcança o chão até (sola + raiz de (0,985·alcance)² − (passo/2)²); vale a mais curta, para todas alcançarem
+  const rootH = Math.min(...legs.map((l) => {
+    const r = rig.bones.find((b) => b.name === l.upper)!.length + rig.bones.find((b) => b.name === l.lower)!.length;
+    return l.drop + Math.sqrt(Math.max(1, (0.985 * r) ** 2 - (o.stride / 2) ** 2));
+  }));
+  void reach;
   for (let k = 0; k < o.frames; k++) {
     const t = (k / o.frames) * o.cycles;
     const angles: Record<string, number> = {};
     const ph = (x: number) => ((x % 1) + 1) % 1;
     const bobV = o.bob * (0.5 - 0.5 * Math.cos(4 * Math.PI * ph(t)));                  // sobe na passagem, desce no contato
-    const root: V = { x: o.x0 + (o.mode === "andar" ? o.speed * k : 0), y: rig.ground - dropMax - (hc + bobV) };
+    const root: V = { x: o.x0 + (o.mode === "andar" ? o.speed * k : 0), y: rig.ground - (rootH + bobV) };
     if (has("tronco")) angles.tronco = o.lean;
     for (const leg of legs) {
       const p0 = ph(t + leg.phase);
       let relX: number, lift = 0, foot: number;
       if (p0 < o.duty) { const u = p0 / o.duty; relX = o.stride / 2 - o.stride * u; foot = 12 - 32 * u; }
       else { const u = (p0 - o.duty) / (1 - o.duty); relX = -o.stride / 2 + o.stride * smooth(u); lift = o.lift * Math.sin(Math.PI * u); foot = -20 + 25 * u; }
-      const target = { x: root.x + relX * (rig.facing === "right" ? 1 : -1), y: rig.ground - leg.drop - lift };
+      // o alvo parte do ponto onde ESTA perna se prende ao corpo (o ombro de uma pata da frente fica à frente do quadril)
+      const hip0 = forwardKinematics(rig, { angles: {}, root }, { roundJoints: false, zero: true }).get(leg.upper)!.start;
+      const target = { x: hip0.x + relX * (rig.facing === "right" ? 1 : -1), y: rig.ground - leg.drop - lift };
       const sol = solveTwoBone(rig, leg.upper, leg.lower, angles, root, target, leg.bend);
       angles[leg.upper] = sol.upper; angles[leg.lower] = sol.lower;
       if (leg.foot) angles[leg.foot] = foot;
@@ -317,6 +323,8 @@ export function walkPoses(rig: Rig, o: WalkOptions): { angles: Record<string, nu
     }
     if (has("cauda1")) { angles.cauda1 = 14 * Math.sin(2 * Math.PI * t); if (has("cauda2")) angles.cauda2 = 22 * Math.sin(2 * Math.PI * t - 0.9); }
     if (has("cabeca") && !has("braco_frente")) angles.cabeca = 5 * Math.sin(4 * Math.PI * t);
+    if (has("orelha")) angles.orelha = 16 * Math.sin(4 * Math.PI * t - 0.7);
+    if (has("espinha")) angles.espinha = 1.6 * Math.sin(4 * Math.PI * t);
     out.push({ angles, root });
   }
   return out;
@@ -326,4 +334,42 @@ export function walkPoses(rig: Rig, o: WalkOptions): { angles: Record<string, nu
 export function legTips(rig: Rig, pose: FramePose | undefined): { leg: number; x: number; y: number }[] {
   const st = forwardKinematics(rig, pose, { roundJoints: false });
   return (rig.legs ?? []).map((l, i) => { const e = st.get(l.lower)!.end; return { leg: i, x: e.x, y: e.y }; });
+}
+
+
+// ---------------- modelo quadrúpede ----------------
+
+/** Esqueleto de um quadrúpede (cão) a partir da altura da cernelha (ombro) em px. A raiz é o quadril. */
+export function quadrupedBones(h: number): { bones: Bone[]; legs: import("./project.ts").RigLeg[] } {
+  const bone = (b: Partial<Bone> & { name: string; parent: string | null; length: number }): Bone => ({ at: "end", mode: "relative", rest: 0, sign: 1, min: -180, max: 180, ...b });
+  const paw = Math.max(1.5, h * 0.1), sole = Math.max(0.8, h * 0.045), meta = h * 0.2;
+  const bones: Bone[] = [
+    bone({ name: "espinha", parent: null, length: h * 1.3, mode: "absolute", rest: 90, sign: -1, min: -25, max: 25 }),
+    bone({ name: "pescoco", parent: "espinha", length: h * 0.28, rest: 50, sign: -1, min: -35, max: 35 }),
+    bone({ name: "cabeca", parent: "pescoco", length: h * 0.42, rest: -65, sign: -1, min: -35, max: 35 }),
+    bone({ name: "orelha", parent: "cabeca", at: 0.25, length: h * 0.18, mode: "absolute", rest: 0, sign: 1, min: -60, max: 60 }),
+    bone({ name: "cauda1", parent: "espinha", at: "start", length: h * 0.35, rest: 130, sign: -1, min: -45, max: 45 }),
+    bone({ name: "cauda2", parent: "cauda1", length: h * 0.3, rest: -25, sign: -1, min: -50, max: 50 }),
+  ];
+  const legs: import("./project.ts").RigLeg[] = [];
+  const order: [string, "frente" | "tras", number][] = [["perto", "tras", 0], ["perto", "frente", 0.25], ["longe", "tras", 0.5], ["longe", "frente", 0.75]];
+  for (const [side, kind, phase] of order) {
+    if (kind === "frente") {
+      bones.push(
+        bone({ name: `braco_${side}`, parent: "espinha", length: h * 0.37, mode: "absolute", rest: 0, sign: 1, min: -60, max: 80 }),
+        bone({ name: `antebraco_${side}`, parent: `braco_${side}`, length: h * 0.44, rest: 0, sign: 1, min: 0, max: 140 }),
+        bone({ name: `pe_f_${side}`, parent: `antebraco_${side}`, length: paw, mode: "absolute", rest: 90, sign: -1, min: -50, max: 40, sole }),
+      );
+      legs.push({ upper: `braco_${side}`, lower: `antebraco_${side}`, foot: `pe_f_${side}`, phase, bend: -1, drop: sole });
+    } else {
+      bones.push(
+        bone({ name: `coxa_${side}`, parent: "espinha", at: "start", length: h * 0.34, mode: "absolute", rest: 0, sign: 1, min: -50, max: 80 }),
+        bone({ name: `canela_${side}`, parent: `coxa_${side}`, length: h * 0.32, rest: 0, sign: -1, min: 0, max: 140 }),
+        bone({ name: `metatarso_${side}`, parent: `canela_${side}`, length: meta, mode: "absolute", rest: 0, sign: 1, min: -60, max: 60 }),
+        bone({ name: `pe_t_${side}`, parent: `metatarso_${side}`, length: paw, mode: "absolute", rest: 90, sign: -1, min: -50, max: 40, sole }),
+      );
+      legs.push({ upper: `coxa_${side}`, lower: `canela_${side}`, follow: [`metatarso_${side}`], foot: `pe_t_${side}`, phase, bend: 1, drop: meta + sole });
+    }
+  }
+  return { bones, legs };
 }

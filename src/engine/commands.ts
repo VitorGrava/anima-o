@@ -10,7 +10,7 @@ import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.t
 import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
 import { REFERENCE_TOPICS, bodyProportions, darkOutline, makeRamp, reference } from "./reference.ts";
-import { HUMANOID_BONES, walkPoses, boneSegments, capsuleArt, clampAngles, humanoidAngles, humanoidBones, groundedRoot, ellipseArt, renderRigFrame } from "./skeleton.ts";
+import { HUMANOID_BONES, quadrupedBones, walkPoses, boneSegments, capsuleArt, clampAngles, humanoidAngles, humanoidBones, groundedRoot, ellipseArt, renderRigFrame } from "./skeleton.ts";
 import { DEFAULT_POSE, FIGURE_LAYERS, PRESETS as POSE_PRESETS, WALK_CYCLE, clampPose, lerpPose, renderFigure, swapSides, type Pose, type Ramp } from "./rig.ts";
 import type { CheckMode } from "./render.ts";
 import { autoScale, clampRegion, diffRows, type ImageRequest } from "./view.ts";
@@ -25,6 +25,7 @@ import {
   colorIndex,
   findLayer,
   getCel,
+  hexToRgb,
   newId,
   normalizeHex,
   type Bone,
@@ -496,6 +497,11 @@ function scalePose(pose: Pose, amp: number): Pose {
 }
 
 /** Cor (hex) → índice da paleta; cria a cor se não existir. */
+function mix(a: string, b: string, t: number): string {
+  const [x, y] = [a, b].map((h) => [1, 3, 5].map((i) => parseInt(normalizeHex(h).slice(i, i + 2), 16)));
+  return `#${x.map((v, k) => Math.round(v * (1 - t) + y[k] * t).toString(16).padStart(2, "0")).join("")}`;
+}
+
 function ensureColor(p: Project, hex: string, name: string): number {
   const h = normalizeHex(hex);
   const found = p.palette.findIndex((c) => c.hex === h);
@@ -513,10 +519,6 @@ function ensureColor(p: Project, hex: string, name: string): number {
 function ensureRamp(p: Project, hex: string, name: string, sharedOutline?: string, withHighlight = false): Ramp {
   const r = makeRamp(hex, 5);
   const outline = sharedOutline ?? darkOutline(hex);
-  const mix = (a: string, b: string, t: number) => {
-    const [x, y] = [a, b].map((h) => [1, 3, 5].map((i) => parseInt(normalizeHex(h).slice(i, i + 2), 16)));
-    return `#${x.map((v, k) => Math.round(v * (1 - t) + y[k] * t).toString(16).padStart(2, "0")).join("")}`;
-  };
   // pele: a rampa de matiz deslocado satura demais e fica avermelhada; aqui a sombra é a própria pele escurecida e a luz, a pele clareada
   const skin = name === "pele";
   return {
@@ -662,7 +664,7 @@ const drawFigure = def({
 
 const NO_RIG = "Este projeto não tem rig (o esqueleto é opcional). Crie um com rig_create, ou use draw_figure para um humano rápido sem rig.";
 const needRig = (p: Project) => { if (!p.rig) throw new Error(NO_RIG); return p.rig; };
-const GEN_ORDER = ["contorno", "braco-tras", "perna-tras", "mochila", "tronco", "cabeca", "chapeu", "perna-frente", "braco-frente", "arma"];
+const GEN_ORDER = ["contorno", "braco-tras", "perna-tras", "pata-longe", "cauda", "mochila", "tronco", "corpo", "cabeca", "chapeu", "orelha", "perna-frente", "braco-frente", "pata-perto", "arma"];
 
 /** Garante as camadas geradas do rig, juntas e na ordem certa (de baixo para cima). */
 function ensureGeneratedLayers(p: Project, names: string[]): Map<string, string> {
@@ -706,15 +708,16 @@ const rigCreate = def({
   description: [
     "Cria um ESQUELETO invisível (opcional: sem isto o projeto não tem rig e nada muda). Os ossos ditam o movimento; a arte de cada parte é presa a um osso e o rig_bake a desenha em cada frame. A anatomia sai certa porque os ossos têm comprimento fixo e limites de articulação; o movimento sai bom porque você pensa em ÂNGULOS (poses-chave + tween com ease).",
     'template "humanoide": 13 ossos (tronco, pescoco, cabeca, braco/antebraco e coxa/canela/pe, frente e tras), com proporções de reference proporcoes. Com auto_art=true (padrão) já cria partes de arte provisórias (cápsulas com luz) EDITÁVEIS: troque qualquer uma pela sua arte com rig_part. `weapon_length` acrescenta o osso "espada" preso ao antebraço da frente.',
+    'template "quadrupede": cão com coluna (a raiz é o quadril), pescoço, cabeça, orelha, rabo de 2 ossos e 4 patas (as de trás com o jarrete), já com `legs` para rig_walk (marcha de 4 tempos: trás-perto, frente-perto, trás-longe, frente-longe). `height` é a altura da cernelha. Cores: materials.coat (pelagem), accent (peito, focinho, meias) e hair (orelha).',
     'template "vazio" + `bones`: esqueleto livre (pinguim, monstro, robô, qualquer coisa). Cada osso: parent, at ("start", "end" ou uma fração 0..1 ao longo do pai), length, mode (absolute|relative), rest, sign, min, max, sole (só nos pés). Ângulo: graus a partir de "para baixo", + = para a frente; osso para cima = rest 180.',
     'COMO LER OS ÂNGULOS: o valor de cada osso em rig_pose é o DESVIO do repouso (0 = repouso). mode "absolute": o ângulo no mundo é rest + sign×valor (ombro, quadril, tronco). mode "relative": soma ao ângulo do pai (cotovelo, joelho, cabeça). sign +1 gira para a frente; −1 para trás (joelho dobra para trás: sign −1 e o valor é a flexão).',
     'RECEITA para um personagem com poucas partes (ex.: pinguim): ossos corpo (absolute, rest 180, sign −1, length do tronco), cabeca (relative, at "end", rest 0), nadadeira_frente e nadadeira_tras (absolute, rest 0, at 0.6 do corpo, mínimos e máximos ±70), perna_frente/perna_tras (absolute, rest 0) e pe_* (absolute, rest 90, sign −1, sole 1). Depois rig_part com a arte de cada parte (ou from_layer) e rig_pose com ângulos pequenos.',
     "Depois: rig_pose (poses e tween) → rig_bake (renderiza) → view bones=true (vê o esqueleto por cima; na CLI: `anima show <projeto> <frame> --bones --png f.png`). Para mudar um osso sem perder a arte: rig_bone.",
   ].join("\n"),
   schema: z.object({
-    template: z.enum(["humanoide", "vazio"]).default("humanoide"),
+    template: z.enum(["humanoide", "quadrupede", "vazio"]).default("humanoide"),
     bones: z.array(boneSchema).max(60).optional().describe('template "vazio": os ossos (o primeiro, sem parent, é a raiz)'),
-    height: z.number().int().min(8).max(240).optional().describe("humanoide: altura total em px (padrão 70% do canvas)"),
+    height: z.number().int().min(8).max(240).optional().describe("humanoide: altura total em px (padrão 70% do canvas). quadrupede: altura da CERNELHA (ombro) em px (padrão 55% do canvas)"),
     style: z.enum(["realista", "estilizado", "chibi"]).default("estilizado"),
     facing: z.enum(["right", "left"]).default("right"),
     x: z.number().int().optional().describe("x da raiz (quadril); padrão: centro do canvas"),
@@ -722,15 +725,19 @@ const rigCreate = def({
     weapon_length: z.number().min(3).max(60).optional().describe("humanoide: acrescenta o osso espada com esta lâmina em px"),
     auto_art: z.boolean().default(true).describe("humanoide: cria as partes de arte provisórias (cápsulas) já com cores"),
     materials: z
-      .object({ skin: z.string().default("#f0c09a"), hair: z.string().default("#6b3b1e"), top: z.string().default("#3d7fd0"), bottom: z.string().default("#6a4a8a"), boots: z.string().default("#5a3420"), metal: z.string().default("#b9c4d6"), gold: z.string().default("#e0b040") })
-      .default({ skin: "#f0c09a", hair: "#6b3b1e", top: "#3d7fd0", bottom: "#6a4a8a", boots: "#5a3420", metal: "#b9c4d6", gold: "#e0b040" }),
+      .object({ skin: z.string().default("#f0c09a"), hair: z.string().default("#6b3b1e"), top: z.string().default("#3d7fd0"), bottom: z.string().default("#6a4a8a"), boots: z.string().default("#5a3420"), metal: z.string().default("#b9c4d6"), gold: z.string().default("#e0b040"), coat: z.string().default("#c8864a"), accent: z.string().default("#f0dcb0") })
+      .default({ skin: "#f0c09a", hair: "#6b3b1e", top: "#3d7fd0", bottom: "#6a4a8a", boots: "#5a3420", metal: "#b9c4d6", gold: "#e0b040", coat: "#c8864a", accent: "#f0dcb0" })
+      .describe("cores base (hex). humanoide: skin, hair, top, bottom, boots, metal, gold. quadrupede: coat (pelagem), accent (peito, focinho, meias), hair (orelha e rabo, mais escuro)"),
+    accessories: z.array(z.object({ kind: z.enum(["chapeu", "mochila", "capa"]), color: z.string() })).max(4).optional().describe("humanoide: chapéu, mochila ou capa presos ao osso certo (e editáveis depois com rig_part)"),
     replace: z.boolean().default(false).describe("true: troca um rig que já existe"),
   }),
   run(p, i) {
     if (p.rig && !i.replace) throw new Error("Este projeto já tem um rig. Use replace=true para recriá-lo (as partes e as poses atuais são perdidas).");
     const x = i.x ?? Math.round(p.width / 2), ground = i.ground ?? p.height - 2;
     let bones: Bone[];
+    const quad = i.template === "quadrupede" ? quadrupedBones(i.height ?? Math.round(p.height * 0.55)) : undefined;
     if (i.template === "humanoide") bones = humanoidBones(i.height ?? Math.round(p.height * 0.7), i.style, i.weapon_length);
+    else if (quad) bones = quad.bones;
     else {
       if (!i.bones?.length) throw new Error('template "vazio" precisa de `bones` (a lista de ossos).');
       bones = i.bones.map((b) => ({ ...b, at: b.at }));
@@ -740,7 +747,8 @@ const rigCreate = def({
     const legs = i.template === "humanoide"
       ? (["frente", "tras"] as const).map((side, k) => ({ upper: `coxa_${side}`, lower: `canela_${side}`, foot: `pe_${side}`, phase: k * 0.5, bend: 1 as const, drop: bones.find((b) => b.name === `pe_${side}`)?.sole ?? 1 }))
       : undefined;
-    p.rig = { bones, legs, parts: [], facing: i.facing, root: { x, y: ground - Math.round((i.height ?? p.height * 0.7) * 0.5) }, ground };
+    const stand = quad ? Math.round((i.height ?? Math.round(p.height * 0.55)) * 0.9) : Math.round((i.height ?? p.height * 0.7) * 0.5);
+    p.rig = { bones, legs: quad ? quad.legs : legs, parts: [], facing: i.facing, root: { x, y: ground - stand }, ground };
     for (const f of p.frames) f.pose = undefined;
     let parts = 0;
     if (i.template === "humanoide" && i.auto_art) {
@@ -777,6 +785,21 @@ const rigCreate = def({
         const put = (lx: number, ly: number, k: string) => { const xx = Math.floor(c.x + lx * pr.head), y = Math.floor(c.y + ly * pr.head); if (cells[y]?.[xx] && cells[y][xx] !== TRANSPARENT_KEY) cells[y][xx] = k; };
         put(0.14, -0.04, key(ramp.skin.outline)); put(0.42, 0.06, skinKeys.light); if (pr.head >= 7) put(0.32, 0.22, skinKeys.dark);
       }), "cabeca", 0);
+      for (const acc of i.accessories ?? []) {
+        const ar = R(acc.color, acc.kind);
+        const ak = K(ar);
+        if (acc.kind === "chapeu") {
+          const crown = ellipseArt(rig, B("cabeca"), pr.head * 0.8, pr.head * 0.34, pr.head * 0.2, ak);
+          add("chapeu_copa", "cabeca", crown, "chapeu", 0);
+          add("chapeu_aba", "cabeca", ellipseArt(rig, B("cabeca"), pr.head * 0.68, pr.head * 0.62, pr.head * 0.09, ak), "chapeu", 1);
+        } else if (acc.kind === "mochila") {
+          const rows = ellipseArt(rig, B("tronco"), pr.torso * 0.5, pr.head * 0.22, pr.head * 0.38, ak);
+          // desloca a mochila para as costas: o pivô fica à frente da arte
+          add("mochila", "tronco", { rows: rows.rows, pivot: { x: rows.pivot.x + Math.round(pr.head * 0.5), y: rows.pivot.y } }, "mochila", 0);
+        } else {
+          add("capa", "tronco", { ...capsuleArt(rig, B("tronco"), pr.head * 0.34, pr.head * 0.5, ak), pivot: capsuleArt(rig, B("tronco"), pr.head * 0.34, pr.head * 0.5, ak).pivot }, "mochila", 0);
+        }
+      }
       if (i.weapon_length) {
         const sw = capsuleArt(rig, B("espada"), 0.9, 0.55, K(ramp.metal));
         // guarda (perpendicular) e cabo, desenhados na arte da lâmina
@@ -786,6 +809,43 @@ const rigCreate = def({
         for (let d = -2; d <= 2; d++) if (rows[py]?.[px + d]) rows[py][px + d] = gk;
         for (let d = 1; d <= 2; d++) if (rows[py - d]?.[px]) rows[py - d][px] = hk;
         add("espada", "espada", { rows: rows.map((r) => r.join("")), pivot: sw.pivot }, "arma", 0);
+      }
+    }
+    if (quad && i.auto_art) {
+      const h = i.height ?? Math.round(p.height * 0.55);
+      const outline = darkOutline(i.materials.coat);
+      const R = (hex: string, name: string) => ensureRamp(p, hex, name, outline);
+      const coat = R(i.materials.coat, "pelo"), accent = R(i.materials.accent, "creme"), ear = R(i.materials.hair, "orelha");
+      const key = (n: number) => p.palette[n - 1].key;
+      const K = (r: Ramp, far = false) => (far ? { dark: key(r.outline), base: key(r.dark), light: key(r.base) } : { dark: key(r.dark), base: key(r.base), light: key(r.light) });
+      const rig = p.rig;
+      const B = (n: string) => bones.find((b) => b.name === n)!;
+      const add = (name: string, bone: string, art: { rows: string[]; pivot: { x: number; y: number } }, layer: string, z: number) => { rig.parts.push({ name, bone, layer, z, pivot: art.pivot, rows: art.rows }); parts++; };
+      const L = B("espinha").length;
+      add("espinha", "espinha", capsuleArt(rig, B("espinha"), h * 0.17, h * 0.21, K(coat)), "corpo", 0);
+      add("peito", "espinha", ellipseArt(rig, B("espinha"), L * 0.93, h * 0.1, h * 0.15, K(accent)), "corpo", 1);
+      add("pescoco", "pescoco", capsuleArt(rig, B("pescoco"), h * 0.11, h * 0.1, K(coat)), "corpo", 2);
+      const dark = key(coat.outline);
+      add("cabeca", "cabeca", ellipseArt(rig, B("cabeca"), h * 0.2, h * 0.17, h * 0.15, K(coat), (cells, c) => {
+        const px = Math.floor(c.x + h * 0.06), py = Math.floor(c.y - h * 0.04);
+        if (cells[py]?.[px] && cells[py][px] !== TRANSPARENT_KEY) cells[py][px] = dark;
+      }), "cabeca", 0);
+      add("focinho", "cabeca", ellipseArt(rig, B("cabeca"), h * 0.33, h * 0.12, h * 0.075, K(accent), (cells, c) => {
+        const px = Math.floor(c.x + h * 0.1), py = Math.floor(c.y - h * 0.01);
+        if (cells[py]?.[px] && cells[py][px] !== TRANSPARENT_KEY) cells[py][px] = dark;
+      }), "cabeca", 1);
+      add("orelha", "orelha", capsuleArt(rig, B("orelha"), h * 0.06, h * 0.045, K(ear)), "orelha", 0);
+      add("cauda1", "cauda1", capsuleArt(rig, B("cauda1"), h * 0.05, h * 0.045, K(coat)), "cauda", 0);
+      add("cauda2", "cauda2", capsuleArt(rig, B("cauda2"), h * 0.045, h * 0.03, K(accent)), "cauda", 1);
+      for (const side of ["longe", "perto"] as const) {
+        const far = side === "longe", layer = `pata-${side}`;
+        add(`braco_${side}`, `braco_${side}`, capsuleArt(rig, B(`braco_${side}`), h * 0.09, h * 0.07, K(coat, far)), layer, 0);
+        add(`antebraco_${side}`, `antebraco_${side}`, capsuleArt(rig, B(`antebraco_${side}`), h * 0.065, h * 0.05, K(coat, far)), layer, 1);
+        add(`pe_f_${side}`, `pe_f_${side}`, capsuleArt(rig, B(`pe_f_${side}`), Math.max(0.9, h * 0.045), Math.max(0.8, h * 0.04), K(accent, far), h * 0.03), layer, 2);
+        add(`coxa_${side}`, `coxa_${side}`, capsuleArt(rig, B(`coxa_${side}`), h * 0.12, h * 0.08, K(coat, far)), layer, 0);
+        add(`canela_${side}`, `canela_${side}`, capsuleArt(rig, B(`canela_${side}`), h * 0.07, h * 0.05, K(coat, far)), layer, 1);
+        add(`metatarso_${side}`, `metatarso_${side}`, capsuleArt(rig, B(`metatarso_${side}`), h * 0.045, h * 0.04, K(coat, far)), layer, 2);
+        add(`pe_t_${side}`, `pe_t_${side}`, capsuleArt(rig, B(`pe_t_${side}`), Math.max(0.9, h * 0.045), Math.max(0.8, h * 0.04), K(accent, far), h * 0.03), layer, 3);
       }
     }
     return { changed: true, text: `Rig criado (${i.template}): ${bones.length} ossos${parts ? `, ${parts} partes de arte provisórias` : ""}. Ossos: ${bones.map((b) => b.name).join(", ")}. Próximo: rig_pose, depois rig_bake.` };
@@ -972,13 +1032,13 @@ const rigBake = def({
   name: "rig_bake",
   description: [
     "Renderiza o rig: desenha as partes de arte nas camadas (marcadas como GERADAS) de cada frame com pose, girando SEMPRE a partir da arte limpa guardada no rig. É repetível e não destrutivo: depois de mudar poses ou arte, rode de novo. Para retocar à mão, desenhe em OUTRA camada (por cima): o bake só reescreve as camadas geradas.",
-    "`snap_angle`: arredonda o ângulo de cada parte (ex.: 15) para um serrilhado mais estável em sprites pequenos; 0 = sem arredondar. `outline`: chave da paleta para um contorno de 1 px em volta de tudo (camada contorno). As juntas são arredondadas ao pixel.",
+    "`snap_angle`: arredonda o ângulo de cada parte (ex.: 15) para um serrilhado mais estável em sprites pequenos; 0 = sem arredondar. `outline`: chave da paleta para um contorno de 1 px em volta de tudo (camada contorno), ou \"auto\" para contorno seletivo (sel-out: cada trecho no tom escuro do material vizinho, mais claro no lado da luz; evita o halo preto uniforme). As juntas são arredondadas ao pixel.",
   ].join("\n"),
   schema: z.object({
     frames: framesSel.optional().describe('Padrão: todos os frames que têm pose'),
     snap_angle: z.number().min(0).max(90).default(0),
     round_joints: z.boolean().default(true),
-    outline: z.string().optional().describe("chave da paleta do contorno externo (opcional)"),
+    outline: z.string().optional().describe('chave da paleta do contorno externo (opcional), ou "auto": contorno seletivo, tom escuro do material vizinho e mais claro no lado da luz (cria cores)'),
     preview: previewFlag,
   }),
   run(p, i) {
@@ -988,14 +1048,43 @@ const rigBake = def({
     if (!list.length) throw new Error("Nenhum frame tem pose. Rode rig_pose primeiro.");
     const names = [...new Set(rig.parts.map((x) => x.layer)), ...(i.outline ? ["contorno"] : [])];
     const ids = ensureGeneratedLayers(p, names);
-    const outlineIdx = i.outline ? colorIndex(p, i.outline) : 0;
+    const auto = i.outline === "auto";
+    const outlineIdx = i.outline && !auto ? colorIndex(p, i.outline) : 0;
+    const selCache = new Map<string, number>();
+    // contorno seletivo (sel-out): tom escuro do próprio material vizinho; mais claro no lado da luz (cima/esquerda)
+    const selOut = (neighbor: number, lit: boolean): number => {
+      const key = `${neighbor}:${lit ? 1 : 0}`;
+      const hit = selCache.get(key);
+      if (hit) return hit;
+      const hex = p.palette[neighbor - 1].hex;
+      const idx = ensureColor(p, mix(hex, darkOutline(hex), lit ? 0.68 : 0.88), `contorno-${p.palette[neighbor - 1].name}${lit ? "-luz" : ""}`);
+      selCache.set(key, idx);
+      return idx;
+    };
     for (const f of list) {
       const out = renderRigFrame(p, p.frames[f].pose, { snapAngle: i.snap_angle, roundJoints: i.round_joints });
       for (const n of names) getCel(p, f, ids.get(n)!).fill(0);
       const union = new Uint8Array(p.width * p.height);
+      const top = new Uint8Array(p.width * p.height);
       for (const [layer, buf] of out) {
         const cel = getCel(p, f, ids.get(layer)!);
-        for (let k = 0; k < buf.length; k++) if (buf[k]) { cel[k] = buf[k]; union[k] = 1; }
+        for (let k = 0; k < buf.length; k++) if (buf[k]) { cel[k] = buf[k]; union[k] = 1; top[k] = buf[k]; }
+      }
+      if (auto) {
+        const cel = getCel(p, f, ids.get("contorno")!);
+        const lum = (idx: number) => { const [r, g, b] = hexToRgb(p.palette[idx - 1].hex); return 0.3 * r + 0.59 * g + 0.11 * b; };
+        for (let y = 0; y < p.height; y++) for (let x = 0; x < p.width; x++) {
+          const k = y * p.width + x;
+          if (union[k]) continue;
+          let best = 0, lit = false;
+          for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+            const xx = x + dx, yy = y + dy;
+            if (xx < 0 || yy < 0 || xx >= p.width || yy >= p.height) continue;
+            const c = top[yy * p.width + xx];
+            if (c && (!best || lum(c) < lum(best))) { best = c; lit = dx === 1 || dy === 1; }
+          }
+          if (best) cel[k] = selOut(best, lit);
+        }
       }
       if (outlineIdx) {
         const cel = getCel(p, f, ids.get("contorno")!);
@@ -1064,13 +1153,14 @@ const rigWalk = def({
   description: [
     "Gera uma MARCHA com PÉS TRAVADOS NO CHÃO por IK de dois ossos: cada perna tem uma fase; quando apoiada, a sola fica PARADA no mundo (nada de pé que escorrega); no balanço o pé sobe em arco e avança. O corpo sobe e desce (bob), os braços balançam contra as pernas e, no quadrúpede, a cauda e a cabeça acompanham.",
     '`mode: "andar"`: a raiz avança (o personagem cruza o quadro). `mode: "no_lugar"`: a raiz fica parada e o CHÃO rola para trás; passe `scroll_layer` (uma camada com o chão/fundo desenhada no frame inicial) e a engine rola essa camada na mesma velocidade, sem deslize.',
-    "A velocidade é ajustada para um número INTEIRO de px por frame (o chão rola em pixels inteiros, sem deslizar o pé); o `stride` pode ser corrigido um pouco e a resposta diz qual. Precisa dos frames criados (add_frames) e de um rig com pernas (humanoide ou quadrúpede).",
+    "A velocidade é ajustada para um número INTEIRO de px por frame (o chão rola em pixels inteiros, sem deslizar o pé); o `stride` pode ser corrigido um pouco e a resposta diz qual. Precisa dos frames criados (add_frames) e de um rig com pernas (humanoide ou quadrúpede). Velocidade = round(stride ÷ (apoio × frames por ciclo)) px por frame; ou escolha direto com `speed`. Mantenha as durações IGUAIS (o chão rola uma distância fixa por frame). Re-rodar é seguro: o chão é sempre rolado a partir do desenho do frame inicial.",
   ].join("\n"),
   schema: z.object({
     start: z.number().int().min(0).default(0).describe("primeiro frame"),
     frames: z.number().int().min(4).max(128).optional().describe("quantos frames (padrão: do start até o fim)"),
     cycles: z.number().int().min(1).max(8).default(1).describe("ciclos completos de marcha nesses frames"),
     stride: z.number().min(2).max(120).optional().describe("quanto o pé percorre no apoio, em px (padrão: ~55% do comprimento da perna)"),
+    speed: z.number().int().min(1).max(12).optional().describe("velocidade em px INTEIROS por frame (anula o stride: o passo sai de velocidade × apoio × frames do ciclo). Use para escolher exatamente quanto o chão rola; o chão deve se repetir num divisor de velocidade × frames."),
     lift: z.number().min(0).max(60).optional().describe("altura do pé no balanço, em px"),
     bob: z.number().min(0).max(30).optional().describe("quanto o corpo sobe e desce, em px"),
     duty: z.number().min(0.3).max(0.9).optional().describe("fração do ciclo com o pé no chão (bípede ~0,55; quadrúpede ~0,72)"),
@@ -1089,8 +1179,8 @@ const rigWalk = def({
     const reach = Math.max(...rig.legs.map((l) => rig.bones.find((b) => b.name === l.upper)!.length + rig.bones.find((b) => b.name === l.lower)!.length));
     const duty = i.duty ?? (rig.legs.length >= 4 ? 0.72 : 0.55);
     const Nc = N / i.cycles;
-    const stride0 = i.stride ?? Math.max(3, Math.round(reach * 0.55));
-    const speed = Math.max(1, Math.round(stride0 / (duty * Nc)));
+    const stride0 = i.speed !== undefined ? i.speed * duty * Nc : i.stride ?? Math.max(3, Math.round(reach * 0.55));
+    const speed = i.speed ?? Math.max(1, Math.round(stride0 / (duty * Nc)));
     const stride = speed * duty * Nc;
     const total = speed * (N - 1);
     const x0 = i.x0 ?? (i.mode === "andar" ? Math.round(rig.root.x - total / 2) : rig.root.x);

@@ -147,3 +147,8 @@ Dois agentes novos, só com o pedido e o guia, usaram `draw_figure` por conta pr
 - Exemplo: `examples/rig-robo/` (arte própria de braços e pernas de aço presa aos ossos do humanoide, ciclo de caminhada).
 
 **Limites conhecidos:** só vista lateral; sem IK de pé travado nem deslocamento da raiz (o ciclo é no lugar); em sprites muito pequenos (16–24 px) girar arte serrilha (use `snap_angle`); o pivô é uma célula inteira; a arte de uma parte precisa ser desenhada na pose de repouso.
+
+## Passo 3 — cachorro quadrúpede (rig_create quadrupede + rig_walk IK)
+- Agente entregou 8 frames, 4 patas no chão, sem `pe_escorrega`. Atritos: raiz não centraliza (cabeça cortada em 48x32, sem aviso), chão com período 6 (não divide 8, emenda salta), nomes `frames`/`frame` e `durations` inconsistentes, patas "tubo", sombras avermelhadas, `check` acusa furo entre as patas com chão visível.
+- Contorno (pedido do usuário): halo único escuro de 1 px deixava pernas fundidas e pé em bloco preto. Pesquisa (Lospec outlines 1 e 2, Pixel Parmesan, Humbird0, pixel-perfect): contorno colorido pelo material, sel-out, claro no lado da luz, linhas internas com a cor da parte mais próxima ou omitidas, limpar quinas em L.
+- Feito: `rig_bake outline "auto"` (sel-out + lado da luz). Falta: linhas internas entre partes sobrepostas, limpeza de L, aviso de silhueta cortada, centralizar raiz.
