@@ -122,3 +122,30 @@ describe("reflect, haze e luz", () => {
     expect(runCommand(p, "avaliar", { tipo: "personagem" }).text).toContain("paleta_duplicada");
   });
 });
+
+describe("box3d (caixa/casa em perspectiva)", () => {
+  it("a lateral recua em direção ao horizonte e o telhado aparece", async () => {
+    const { drawBox3d, pontoLateral } = await import("../src/engine/paint.ts");
+    const s = { width: 60, height: 60, data: new Uint8Array(3600) };
+    const b = { x: 10, y: 50, w: 20, h: 16, prof: 12, xv: 80, yh: 10, rise: 8, frente: 1, lado: 2, telhado: 3, empena: 4, espaco: 3 };
+    drawBox3d(s, b);
+    const at = (x: number, y: number) => s.data[y * 60 + x];
+    expect(at(15, 45)).toBe(1);                          // frente
+    expect(at(33, 40)).toBe(2);                          // lateral (à direita da frente)
+    expect([...s.data].includes(3)).toBe(true);           // água do telhado
+    expect([...s.data].includes(4)).toBe(true);           // empena
+    // a aresta de baixo da lateral SOBE em direção ao horizonte (y menor que o chão da frente)
+    const [, yFar] = pontoLateral(b, 1, 1);
+    expect(yFar).toBeLessThan(50);
+    // e o topo também converge: a lateral fica mais baixa (mais curta) no fundo
+    const [, topFar] = pontoLateral(b, 1, 0), [, topNear] = pontoLateral(b, 0, 0);
+    expect(yFar - topFar).toBeLessThan(50 - 34);
+    expect(topNear).toBe(34);
+  });
+  it("funciona pela ferramenta draw_shapes", () => {
+    const p = createProject({ width: 64, height: 64 });
+    pal(p, "abcd");
+    ok(p, "draw_shapes", { shapes: [{ type: "box3d", x: 8, y: 56, w: 24, h: 18, prof: 14, xv: 100, yh: 20, rise: 10, frente: "a", lado: "b", telhado: "c", empena: "d" }] });
+    expect(new Set(Array.from(cel(p)).filter((v) => v)).size).toBeGreaterThanOrEqual(4);
+  });
+});

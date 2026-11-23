@@ -134,3 +134,55 @@ export function scatter(s: Surface, sp: ScatterSpec): number {
   }
   return n;
 }
+
+export interface Box3dSpec {
+  x: number; y: number;            // canto inferior ESQUERDO da face da frente (y = chão)
+  w: number; h: number;            // largura e altura da parede da frente
+  prof: number;                    // profundidade em px na horizontal (a lateral aparece à direita se prof > 0, à esquerda se < 0)
+  xv: number; yh: number;          // ponto de fuga: x e a altura do horizonte (linha dos olhos); as arestas em profundidade convergem para ele
+  rise: number;                    // altura do telhado de duas águas (0 = teto plano)
+  frente: number; lado: number; telhado: number; empena: number;
+  linhas?: number; linhasTelhado?: number; espaco: number;   // tábuas/telhas (cores de risco) e distância entre elas
+}
+
+/** ponto recuado em profundidade: desloca `prof` em x e converge a altura para o horizonte (um ponto de fuga) */
+function recuar(px: number, py: number, s: Box3dSpec): [number, number] {
+  const f = s.prof / (s.xv - px);
+  return [px + s.prof, py + (s.yh - py) * f];
+}
+
+/**
+ * Caixa/casa em PERSPECTIVA de um ponto de fuga: face da frente, lateral que recua para o horizonte
+ * e telhado de duas águas (só a água voltada para a lateral visível). Cores: `frente` (ex.: à sombra),
+ * `lado` (voltada para a luz), `telhado`, `empena` (triângulo da frente). Risca tábuas e telhas em perspectiva.
+ */
+export function drawBox3d(s: Surface, b: Box3dSpec): void {
+  const top = b.y - b.h, R = b.x + b.w;
+  const tl: [number, number] = [b.x, top], tr: [number, number] = [R, top], bl: [number, number] = [b.x, b.y], br: [number, number] = [R, b.y];
+  const rt = recuar(tr[0], tr[1], b), rb = recuar(br[0], br[1], b);
+  const poly = (pts: [number, number][], c: number) => fillPolygon(s, pts.map(([x, y]) => [Math.round(x), Math.round(y)] as [number, number]), c);
+  const ln = (a: [number, number], c: [number, number], col: number) => { const n = Math.max(Math.abs(c[0] - a[0]), Math.abs(c[1] - a[1])) | 0; for (let i = 0; i <= n; i++) { const t = n ? i / n : 0; const x = Math.round(a[0] + (c[0] - a[0]) * t), y = Math.round(a[1] + (c[1] - a[1]) * t); if (x >= 0 && y >= 0 && x < s.width && y < s.height) s.data[y * s.width + x] = col; } };
+  // lateral (recua para o horizonte)
+  poly([tr, rt, rb, br], b.lado);
+  // frente
+  poly([tl, tr, br, bl], b.frente);
+  if (b.rise > 0) {
+    const A: [number, number] = [b.x + b.w / 2, top - b.rise];
+    const A2 = recuar(A[0], A[1], b);
+    poly([tl, A, tr], b.empena);                         // empena (triângulo da frente)
+    poly([A, A2, rt, tr], b.telhado);                    // água do telhado voltada para o observador/lateral
+    if (b.linhasTelhado) for (let k = 1; k * b.espaco < Math.hypot(tr[0] - A[0], tr[1] - A[1]); k++) { const t = (k * b.espaco) / Math.hypot(tr[0] - A[0], tr[1] - A[1]); ln([A[0] + (tr[0] - A[0]) * t, A[1] + (tr[1] - A[1]) * t], [A2[0] + (rt[0] - A2[0]) * t, A2[1] + (rt[1] - A2[1]) * t], b.linhasTelhado); }
+  }
+  if (b.linhas) {
+    for (let y = top + b.espaco; y < b.y; y += b.espaco) { const t = (y - top) / b.h; ln([b.x, y], [R, y], b.linhas); ln([R, y], [rt[0] + (rb[0] - rt[0]) * t, rt[1] + (rb[1] - rt[1]) * t], b.linhas); }
+  }
+}
+
+/** ponto na lateral recuada (u: 0 = junto à frente, 1 = fundo; v: 0 = topo, 1 = chão): para colocar janelas/portas em perspectiva */
+export function pontoLateral(b: Box3dSpec, u: number, v: number): [number, number] {
+  const top = b.y - b.h, R = b.x + b.w;
+  const rt = recuar(R, top, b), rb = recuar(R, b.y, b);
+  const x = R + (rt[0] - R) * u;
+  const yTop = top + (rt[1] - top) * u, yBot = b.y + (rb[1] - b.y) * u;
+  return [x, yTop + (yBot - yTop) * v];
+}

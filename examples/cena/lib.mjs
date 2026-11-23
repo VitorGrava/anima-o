@@ -31,3 +31,10 @@ export async function loadSprite(file, frame = 0) {
   const p = eng.fromJSON(JSON.parse(readFileSync(new URL(file, import.meta.url), "utf8")));
   return { w: p.width, h: p.height, flat: eng.flattenFrame(p, frame), palette: p.palette };
 }
+
+/** projeção da lateral de uma box3d (mesma matemática da engine) para colocar janelas/portas em perspectiva */
+export async function loadPaint() {
+  const { register } = await import("tsx/esm/api");
+  register();
+  return await import("../../src/engine/paint.ts");
+}

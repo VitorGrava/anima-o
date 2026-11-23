@@ -15,3 +15,4 @@
 | r10 (final) | 92 (régua) / melhor visual | FINAL: vinheta leve e paleta sem duplicata. A nota caiu 3 pontos porque o dithering pesado da vinheta (r09) quebrava as áreas lisas do céu e a régua `areas_chapadas` contou isso como textura; escolhida pelo julgamento visual (borda limpa, menos peso nos cantos) | — |
 
 Resumo: 79 → 86 → 92 → 92 → 92(+reflexo) → 92(+névoa) → 92(+protagonista) → 95 → 95 → 92*. Um retrocesso real (r05a, reflexo com dither desde o começo) foi revertido e refeito. Limite honesto da régua: satura perto de 92–95 e não vê reflexo, névoa nem composição; as decisões das rodadas 4–7 e 10 foram visuais.
+| r11 | 92 | CORREÇÃO a pedido: sem a abelha (não foi pedida) e casa em perspectiva (frente na sombra, lateral recuando para o horizonte com a luz do pôr do sol, telhado e chaminé na mesma projeção; caminho converge ao mesmo ponto de fuga) | `draw_shapes box3d` (um ponto de fuga) |

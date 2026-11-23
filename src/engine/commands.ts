@@ -10,7 +10,7 @@ import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.t
 import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
 import { autoShade, cleanCorners, detailColors, selectiveOutline } from "./polish.ts";
-import { drawGradient, fillPolygon, scatter } from "./paint.ts";
+import { drawBox3d, drawGradient, fillPolygon, scatter } from "./paint.ts";
 import { BG_LAYER, evaluateBeauty, formatCritique, unionBox } from "./critique.ts";
 import { REFERENCE_TOPICS, bodyProportions, darkOutline, makeRamp, reference } from "./reference.ts";
 import { HUMANOID_BONES, quadrupedBones, walkPoses, boneSegments, capsuleArt, clampAngles, humanoidAngles, humanoidBones, groundedRoot, ellipseArt, renderRigFrame } from "./skeleton.ts";
@@ -1286,6 +1286,22 @@ const shape = z.discriminatedUnion("type", [
     ponta: colorRef.optional().describe("cor da ponta do tufo/traço/cruz (ex.: luz)"),
     evitar: z.array(z.string()).max(8).optional().describe("camadas onde NÃO espalhar: o elemento não cai onde estas camadas já têm arte (flores fora da casa)"),
   }).describe("TEXTURA espalhada com distância mínima (grama, estrelas, flores, pedras, folhas)."),
+  z.object({
+    type: z.literal("box3d"),
+    x: z.number().int(), y: z.number().int().describe("canto inferior ESQUERDO da face da frente (y = chão)"),
+    w: z.number().int().min(2), h: z.number().int().min(2),
+    prof: z.number().int().describe("profundidade em px: > 0 mostra a lateral à direita, < 0 à esquerda"),
+    xv: z.number().int().describe("x do ponto de fuga (no horizonte); as arestas em profundidade convergem para ele (use o mesmo do caminho/cerca da cena)"),
+    yh: z.number().int().describe("y do horizonte (linha dos olhos)"),
+    rise: z.number().int().min(0).default(0).describe("altura do telhado de duas águas (0 = teto plano)"),
+    frente: colorRef.describe("parede da frente (ex.: na sombra se a luz vem da lateral)"),
+    lado: colorRef.describe("parede lateral (a que recua)"),
+    telhado: colorRef.optional().describe("água do telhado visível (padrão: cor da frente)"),
+    empena: colorRef.optional().describe("triângulo da frente sob o telhado (padrão: cor da frente)"),
+    linhas: colorRef.optional().describe("cor das tábuas/linhas das paredes, desenhadas em perspectiva"),
+    linhas_telhado: colorRef.optional().describe("cor das fileiras de telhas"),
+    espaco: z.number().int().min(2).max(12).default(3).describe("distância entre tábuas/telhas"),
+  }).describe("CAIXA / CASA EM PERSPECTIVA de um ponto de fuga: frente + lateral que recua para o horizonte + telhado de duas águas, com tábuas e telhas em perspectiva. Coloque o ponto de fuga no mesmo horizonte do resto da cena (caminho, cerca) para a casa não ficar 'de frente' num mundo em perspectiva. Janelas/portas na lateral: use polygon com os pontos calculados na mesma projeção."),
   z.object({ type: z.literal("fill"), x: z.number().int(), y: z.number().int(), color: colorRef }).describe("Balde de tinta a partir de (x, y)"),
 ]);
 
@@ -1364,7 +1380,7 @@ const drawShapes = def({
     for (const f of list) {
       const s = { width: p.width, height: p.height, data: getCel(p, f, layer.id) };
       for (const sh of i.shapes) {
-        const c = sh.type === "blob" || sh.type === "capsule" || sh.type === "gradient" || sh.type === "scatter" ? 0 : colorIndex(p, sh.color);
+        const c = sh.type === "blob" || sh.type === "capsule" || sh.type === "gradient" || sh.type === "scatter" || sh.type === "box3d" ? 0 : colorIndex(p, sh.color);
         switch (sh.type) {
           case "pixels":
             for (const pt of sh.points) { const [x, y] = Array.isArray(pt) ? pt : [pt.x, pt.y]; draw.setPixel(s, x!, y!, c); }
@@ -1387,6 +1403,11 @@ const drawShapes = def({
           case "fill":
             draw.floodFill(s, sh.x, sh.y, c);
             break;
+          case "box3d": {
+            const ci = (k?: string) => (k === undefined ? 0 : colorIndex(p, k));
+            drawBox3d(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, prof: sh.prof, xv: sh.xv, yh: sh.yh, rise: sh.rise, frente: ci(sh.frente), lado: ci(sh.lado), telhado: ci(sh.telhado ?? sh.frente), empena: ci(sh.empena ?? sh.frente), linhas: sh.linhas ? ci(sh.linhas) : undefined, linhasTelhado: sh.linhas_telhado ? ci(sh.linhas_telhado) : undefined, espaco: sh.espaco });
+            break;
+          }
           case "polygon":
             fillPolygon(s, sh.points as [number, number][], c);
             break;
