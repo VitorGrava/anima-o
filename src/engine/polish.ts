@@ -15,11 +15,12 @@ export function selectiveOutline(
   source: Uint8Array, target: Uint8Array, w: number, h: number,
   pick: (neighbor: number, lit: boolean) => number,
   luminance: (idx: number) => number,
+  occupied?: Uint8Array,
 ): number {
   let n = 0;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const k = y * w + x;
-    if (source[k]) continue;
+    if (source[k] || occupied?.[k]) continue;                 // célula ocupada por OUTRA camada: não contorna (evita bolsões de 1 px entre camadas)
     let best = 0, lit = false;
     for (const [dx, dy] of ORTH) {
       const xx = x + dx, yy = y + dy;

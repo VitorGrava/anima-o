@@ -246,6 +246,6 @@ export function formatCritique(c: Critique): string {
       lines.push(`      → ${f.fix}`);
     }
   }
-  lines.push("\nÉ uma avaliação heurística: use como um segundo par de olhos, não como lei. Para consertar o mecânico de uma vez: `polish`.");
+  lines.push("\nATENÇÃO: esta nota mede defeitos MECÂNICOS (pixel solto, contorno, cor, composição, formas quadradas). NÃO mede pose, expressão, anatomia nem semelhança com referências: uma arte com 98 aqui já foi 6,5/10 contra sprites profissionais. Compare sempre com referências reais (anima compare / reference processo) e peça uma crítica independente. Para consertar o mecânico de uma vez: `polish`.");
   return lines.join("\n");
 }

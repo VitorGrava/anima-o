@@ -138,3 +138,21 @@ describe("draw_rows contorno seletivo e tópico processo", () => {
     expect(r.text).toMatch(/contorno=.seletivo./);
   });
 });
+
+describe("contorno seletivo entre camadas e aviso da nota", () => {
+  it("não contorna células ocupadas por outra camada (sem bolsões de 1 px) e lista as cores de contorno criadas", () => {
+    const p = createProject({ width: 12, height: 8 });
+    ok(p, "set_palette", { colors: [{ key: "a", hex: "#d84a3a", name: "corpo" }, { key: "b", hex: "#3a6ad8", name: "asa" }] });
+    ok(p, "add_layer", { name: "asa" });
+    ok(p, "draw_rows", { layer: "asa", x: 6, y: 2, rows: ["bbb", "bbb"] });
+    const r = ok(p, "draw_rows", { layer: "Base", x: 3, y: 2, rows: ["aaa", "aaa"], contorno: "seletivo" });
+    expect(r.text).toMatch(/Cores de contorno criadas: .*=contorno-/);
+    const base = p.frames[0].cels[p.layers[0].id];
+    expect(base[2 * 12 + 2]).not.toBe(0);                  // contorno à esquerda do corpo
+    expect(base[2 * 12 + 6]).toBe(0);                      // célula da asa (outra camada): não contorna
+  });
+  it("avaliar avisa que a nota não mede pose nem semelhança com referências", () => {
+    const p = createProject({ width: 16, height: 16 });
+    expect(runCommand(p, "avaliar", {}).text).toMatch(/NÃO mede pose, expressão, anatomia nem semelhança/);
+  });
+});

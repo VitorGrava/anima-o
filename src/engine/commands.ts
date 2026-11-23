@@ -447,12 +447,18 @@ const drawRowsCmd = def({
     const list = resolveFrames(p, i.frames);
     let n = 0;
     const rows = i.mirror === "horizontal" ? i.rows.map((r) => r + [...r].slice(0, -1).reverse().join("")) : i.rows;
+    const palAntes = p.palette.length;
     for (const f of list) {
       const cel = getCel(p, f, layer.id);
       n = drawRows(p, cel, rows, i.x, i.y, i.dot_is_transparent);
-      if (i.contorno === "seletivo") selectiveOutline(cel.slice(), cel, p.width, p.height, (c, lit) => selOutIndex(p, c, lit), paletteLum(p));
+      if (i.contorno === "seletivo") {
+        const occ = new Uint8Array(p.width * p.height);
+        for (const l of p.layers) if (l.id !== layer.id && l.visible) { const c = getCel(p, f, l.id); for (let k = 0; k < c.length; k++) if (c[k]) occ[k] = 1; }
+        selectiveOutline(cel.slice(), cel, p.width, p.height, (c, lit) => selOutIndex(p, c, lit), paletteLum(p), occ);
+      }
     }
-    return result(p, `${n} pixels escritos em "${layer.name}", ${fmtList(list)}.${widthWarning(rows)}`, list, i.preview);
+    const novas = p.palette.slice(palAntes).map((c) => `${c.key}=${c.name}`);
+    return result(p, `${n} pixels escritos em "${layer.name}", ${fmtList(list)}.${widthWarning(rows)}${novas.length ? ` Cores de contorno criadas: ${novas.join(", ")} (use a chave ou o nome para retocar).` : ""}`, list, i.preview);
   },
 });
 
@@ -1584,7 +1590,9 @@ const transform = def({
           break;
         case "outline":
           if (i.mode === "seletivo") {
-            selectiveOutline(s.data.slice(), s.data, p.width, p.height, (c, lit) => selOutIndex(p, c, lit), paletteLum(p));
+            const occ = new Uint8Array(p.width * p.height);
+            for (const l of p.layers) if (l.id !== layer.id && l.visible) { const c = getCel(p, f, l.id); for (let k = 0; k < c.length; k++) if (c[k]) occ[k] = 1; }
+            selectiveOutline(s.data.slice(), s.data, p.width, p.height, (c, lit) => selOutIndex(p, c, lit), paletteLum(p), occ);
             break;
           }
           if (i.color === undefined) throw new Error("outline precisa de `color` (ou mode: \"seletivo\").");
