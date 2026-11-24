@@ -201,3 +201,10 @@ Regras tiradas das FIGURAS da apostila (trilhos, arcada, cubo de 1 e 2 pontos, s
 - ondas com diminuição: pontos curtos e juntos ao longe, traços longos e espaçados perto (antes tamanho fixo);
 - sombras projetadas pelas casas e postes seguindo raios do pé do sol na LH (contraluz: sombra vem para a frente);
 - fileira de lampiões no cais com passo constante em z: encolhem e se juntam rumo ao ponto de fuga (como a arcada).
+
+## dragão no tesouro + dragão dourado (512x512, estáticos, agente separado + crítico independente)
+16 rodadas com o mesmo crítico. Normal 6,5 → 9,4; dourado 4,5 → 8,9.
+Lições: ouro líquido = reflexão do ambiente em 3 zonas largas + especular curvo quebrado (não escamas recoloridas);
+dither em xadrez grosso lê como "mosquiteiro" (troque por tons sólidos); conferir no zoom quando crítico e artista discordam
+(o crítico errou 3 vezes, o artista 3 vezes). Engine: arredonda coordenadas decimais, raio até 128, `anima avaliar`,
+scatter densidade ≥0.0001, `only_camada` em gradient/scatter (o only olhava a imagem composta e vazava dither).
