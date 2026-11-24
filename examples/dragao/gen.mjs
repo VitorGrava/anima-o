@@ -288,12 +288,15 @@ function buildDragon(v) {
     for (const sm of spine) {
       if (sm.u < next) continue;
       const t = sm.u;
-      const h = clamp(sm.r * 0.5, 3, 20) * (t < 60 ? 0.6 + t / 150 : 1);
+      const h = t < 170 ? 4 + 5 * (t / 170) : clamp(sm.r * 0.5, 3, 20);   // pescoço: 4 -> 9 px, crescendo para o dorso
       next = t + Math.max(6, h * 1.05);
       if (sm.x > 300 && sm.x < 440 && sm.y < 320) continue;          // coberto pela asa / raiz da asa
       const px = sm.ty, py = -sm.tx; // dorso
       const bx = sm.x + px * sm.r * 0.86, by = sm.y + py * sm.r * 0.86;
-      const tip = [sm.x + px * (sm.r + h) - sm.tx * h * 0.55, sm.y + py * (sm.r + h) - sm.ty * h * 0.55];
+      const ang = (Math.sin(t * 12.9898) * 43758.5453 % 1) * 0.17;      // ±10° de variação
+      const dxs = px * (sm.r + h) - sm.tx * h * 0.55, dys = py * (sm.r + h) - sm.ty * h * 0.55;
+      const ca = Math.cos(ang), sa = Math.sin(ang), ox = px * sm.r * 0.86, oy = py * sm.r * 0.86;
+      const tip = [sm.x + ox + (dxs - ox) * ca - (dys - oy) * sa, sm.y + oy + (dxs - ox) * sa + (dys - oy) * ca];
       if (tips.some(([tx, ty]) => Math.hypot(tx - tip[0], ty - tip[1]) < h * 0.75)) continue;   // curva côncava: não amontoar em leque
       tips.push(tip);
       spike(buf, [bx, by], tip, Math.max(1.5, h * 0.42), sm.z - 4, MAT.chifre);
@@ -396,7 +399,7 @@ function shadeDragon(D, v) {
       // de frente = salão (meio-tom). Um brilho especular quente de baixo-esquerda.
       val = clamp(0.47 + 0.6 * ny - 0.18 * nx + 0.1 * (1 - nz), 0, 1);
     }
-    if (buf.flag[k] === 2) val *= m === MAT.pele ? 0.75 : 0.45;   // asa de longe: membrana na sombra, ossos pegam luz
+    if (buf.flag[k] === 2) val *= m === MAT.pele ? 0.95 : 0.45;   // asa de longe: membrana na sombra, ossos pegam luz
     if (buf.flag[k] === 3) val *= 0.55;          // pernas de longe
     if (m === MAT.boca) {
       // boca: garganta em brasa (mais quente no fundo, à direita), céu da boca escuro, língua avermelhada embaixo
@@ -435,7 +438,7 @@ function shadeDragon(D, v) {
         const bd = Math.abs((x - 0.55 * y) - 372);                                  // um feixe de luz cruza 1–2 painéis
         if (bd < 13) t += bd < 9 ? 0.3 : 0.15;
       }
-      if (p && p.far) t = 0.12 + 0.2 * lam + (v === "dourado" ? clamp((y - 100) / 500, 0, 0.2) : 0);
+      if (p && p.far) t = 0.12 + 0.2 * lam + (v === "dourado" ? clamp((y - 100) / 500, 0, 0.2) : 0.16 * clamp((130 - y) / 110, 0, 1));
       const tone = clamp(Math.floor(t * 5 + (bayer(x, y) - 0.5) * 0.5), 0, 4);
       out[k] = ramp.membrana[tone];
       continue;
@@ -487,6 +490,10 @@ function shadeDragon(D, v) {
         if (gap === 1 || gap === 2) nm = "rim1";
         else if (gap >= 3) { nm = null; tg = 2; }
         else { nm = null; tg = ny < 0.4 ? 0 : 1; }                                    // reflexo laranja da piscina subindo pela metade de baixo
+      }
+      if (buf.part[k] === D.spine.part && buf.u[k] < 170 && y > 160 && y < 235 && !nm && tg === 0) {
+        let gp = 0; for (let dd = 1; dd <= 2; dd++) { const q = (y + dd) * W + x; if (!buf.mat[q] || buf.part[q] !== buf.part[k]) { gp = dd; break; } }
+        if (gp) nm = "rim1"; else if (ny > 0.55) tg = 1; else nm = "Rg1";     // garganta: 2 tons seguindo a curva, sem buraco preto
       }
       // escamas em 1 tom só na meia-luz (e sugeridas nas bordas)
       const torso = buf.part[k] === D.spine.part && buf.u[k] > 150 && buf.u[k] < 440;
@@ -624,6 +631,10 @@ function shadeDragon(D, v) {
       for (let i = 0; i <= n; i++) { const xx = Math.round(x0 + ((x1 - x0) * i) / n), yy = Math.round(y0 + ((y1 - y0) * i) / n) - 1; if (res[yy * W + xx] && buf.mat[yy * W + xx] === MAT.pele) res[yy * W + xx] = "R5"; }
     }
   };
+  for (let k = W; k < W * H - W; k++) {
+    if (buf.mat[k] !== MAT.chifre || buf.hornLen.has(buf.part[k]) || !res[k]) continue;
+    if ([k - 1, k + 1, k - W, k + W].some((q) => buf.mat[q] === MAT.pele && buf.part[q] !== buf.part[k] && buf.z[q] > buf.z[k] - 30)) res[k] = v === "dourado" ? "R1" : "H1";   // espinho: 1 px de sombra na base
+  }
   wedge([[402, 346], [416, 348], [408, 360]]);       // joelho (dentro da dobra)
   wedge([[418, 366], [432, 368], [424, 380]]);       // jarrete
   wedge([[224, 389], [240, 386], [232, 398]]);       // pulso (embaixo da dobra)
@@ -878,10 +889,25 @@ function build(v) {
     obj.push({ type: "ellipse", x: 443, y: 431, w: 58, h: 29, color: K("g3"), filled: true });
     obj.push({ type: "ellipse", x: 454, y: 437, w: 36, h: 17, color: K("g2"), filled: false });
     obj.push({ type: "ellipse", x: 466, y: 442, w: 12, h: 7, color: K("g5"), filled: true });
-    // coroa
-    obj.push({ type: "polygon", points: [[250, 440], [254, 426], [259, 434], [264, 422], [269, 434], [274, 426], [278, 440]], color: K("g4") });
-    obj.push({ type: "rect", x: 250, y: 438, w: 29, h: 5, color: K("g3"), filled: true });
-    obj.push({ type: "pixels", points: [[264, 432], [256, 440], [272, 440]], color: K("ruby2") });
+    // coroas legíveis: aro com faixa escura, 3 pontas, rubi, especular
+    const crown = (cx, cy, s) => {
+      const P = (pts) => pts.map(([a, b]) => [Math.round(cx + a * s), Math.round(cy + b * s)]);
+      obj.push({ type: "polygon", points: P([[-8, 4], [-8, -4], [-5, -1], [-3, -8], [0, -2], [3, -8], [5, -1], [8, -4], [8, 4]]), color: K("g4") });
+      obj.push({ type: "polygon", points: P([[3, -8], [5, -1], [8, -4], [8, 4], [4, 4]]), color: K("g3") });
+      obj.push({ type: "rect", x: Math.round(cx - 8 * s), y: Math.round(cy + 1 * s), w: Math.round(16 * s), h: Math.max(2, Math.round(3 * s)), color: K("g2"), filled: true });
+      obj.push({ type: "line", x1: Math.round(cx - 7 * s), y1: Math.round(cy - 3 * s), x2: Math.round(cx - 7 * s), y2: Math.round(cy + 0 * s), color: K("g6") });
+      obj.push({ type: "pixels", points: P([[-3, -7], [3, -7]]), color: K("spark") });
+      obj.push({ type: "rect", x: Math.round(cx - 1 * s), y: Math.round(cy + 1 * s), w: Math.max(2, Math.round(2 * s)), h: Math.max(2, Math.round(2 * s)), color: K("ruby1"), filled: true });
+    };
+    crown(264, 432, 1.4); crown(446, 494, 1.3);
+    // elmo de anão: cúpula, aba, protetor de nariz, chifrinhos
+    obj.push({ type: "ellipse", x: 80, y: 458, w: 22, h: 18, color: K("g4"), filled: true });
+    obj.push({ type: "ellipse", x: 90, y: 462, w: 11, h: 11, color: K("g3"), filled: true });
+    obj.push({ type: "ellipse", x: 83, y: 460, w: 9, h: 7, color: K("g5"), filled: true });
+    obj.push({ type: "pixels", points: [[85, 461], [86, 461]], color: K("g6") });
+    obj.push({ type: "rect", x: 78, y: 468, w: 26, h: 3, color: K("g2"), filled: true });
+    obj.push({ type: "rect", x: 90, y: 468, w: 3, h: 8, color: K("g2"), filled: true });
+    obj.push({ type: "polygon", points: [[80, 462], [72, 452], [76, 462]], color: K("H3") }, { type: "polygon", points: [[102, 462], [110, 452], [106, 462]], color: K("H2") });
     for (let i = 0; i < 26; i++) { const x = 20 + Math.floor(rnd() * 470); const y = Math.round(HX(x) + 6 + rnd() * (H - HX(x) - 12)); if (D.buf.mat[y * W + x]) continue; gem(x, y, 2 + Math.floor(rnd() * 3), "rgb"[i % 3]); }
     // sombra de contato sob cada pata/garra: 2–3 px escuros nas moedas logo abaixo
     const shadowPx = { g0: [], g1: [] };
@@ -1068,17 +1094,17 @@ function build(v) {
   rows("dragao", grid);
   if (gold) {
     const rg = new Array(W * H).fill(null);
-    const dark = { R6: "R4", R5: "R4", rim2: "R4", L6: "R4", L5: "R4", R4: "R3", rim1: "R3", L4: "R3", R3: "R2", F2: "R3", F1: "R2" };
-    for (let dy = 1; dy < 104; dy++) {
+    const dark = { R6: "R4", R5: "R4", rim2: "R4", L6: "R4", L5: "R4", R4: "R3", rim1: "R3", L4: "R3", R3: "R2", F2: "R3", F1: "R2", M5: "R2", M4: "R2", M3: "R1", M2: "R1", M1: "R1", M0: "R1" };
+    for (let dy = 1; dy < 112; dy++) {
       const y = SURF + dy; if (y >= H) break;
       // linhas com espaçamento variado (1–3 px), cada linha em segmentos deslocados 2–6 px; rareia longe da base
-      const hrow = vnoise(dy * 0.61, 3.3), keep = dy < 30 ? 0.3 : dy < 55 ? 0.48 : 0.7;
+      const hrow = vnoise(dy * 0.61, 3.3), keep = dy < 30 ? 0.3 : dy < 55 ? 0.45 : 0.55;
       if (hrow < keep) continue;
       const top = vnoise((dy - 1) * 0.61, 3.3) < keep;          // primeira linha de um grupo = crista
       for (let x = 0; x < W; x++) {
         if (vnoise(x / (10 + dy * 0.15) + dy * 0.37, dy * 1.7) < 0.3 + dy / 260) continue;   // segmentos curtos
         const wob = Math.round(Math.sin(dy * 0.7 + Math.floor(x / 23)) * 2 + Math.sin(dy * 0.23) * 3);
-        const sy = SURF - Math.round(dy * 1.05), sx = x + wob;
+        const sy = SURF - Math.round(dy * 1.05 + (dy > 30 ? (dy - 30) ** 2 / 20 : 0)), sx = x + wob;   // comprimido ao longe: as asas também refletem
         if (sy < 0 || sx < 0 || sx >= W) continue;
         const c = grid[sy * W + sx]; if (!c) continue;
         rg[y * W + x] = top && (c === "R6" || c === "R5" || c === "rim2") ? "L5" : dark[c] || "R1";
@@ -1176,9 +1202,11 @@ function build(v) {
     for (let x = 0; x <= W; x++) { const on = x < W && !!grid[(SURF - 1) * W + x]; if (on && st < 0) st = x; if (!on && st >= 0) { spans.push([st, x - 1]); st = -1; } }
     for (const [a, b] of spans) {
       const w = b - a + 1; if (w < 4) continue;
-      sh.push({ type: "ellipse", x: a - 14, y: SURF - 3, w: w + 28, h: 10, color: K("L2"), filled: false });
-      sh.push({ type: "ellipse", x: a - 6, y: SURF - 2, w: w + 12, h: 6, color: K("L6"), filled: false });
-      sh.push({ type: "line", x1: a - 3, y1: SURF + 1, x2: b + 3, y2: SURF + 1, color: K("L5") });
+      sh.push({ type: "ellipse", x: a - 18, y: SURF - 2, w: w + 36, h: 9, color: K("L6"), filled: false });   // onda concêntrica de 1 px
+      sh.push({ type: "ellipse", x: a - 6, y: SURF - 3, w: w + 12, h: 7, color: K("L5"), filled: true });     // menisco: o ouro sobe 2–3 px em volta da perna
+      sh.push({ type: "ellipse", x: a - 6, y: SURF - 3, w: w + 12, h: 7, color: K("L6"), filled: false });
+      sh.push({ type: "line", x1: a - 2, y1: SURF - 3, x2: b + 2, y2: SURF - 3, color: K("L6") });
+      sh.push({ type: "ellipse", x: b + 4, y: SURF - 9, w: 2, h: 3, color: K("L5"), filled: true }, { type: "pixels", points: [[a - 4, SURF - 7], [b + 6, SURF - 13]], color: K("L6") });   // respingo
       // coroa de respingo: pontas finas subindo em volta da perna
       for (let i = 0; i < 4; i++) { const xx = i < 2 ? a - 3 - i * 4 : b + 3 + (i - 2) * 4, h = 4 + ((xx * 7) % 5); sh.push({ type: "polygon", points: [[xx - 1, SURF], [xx, SURF - h], [xx + 1, SURF]], color: K("L6") }); sh.push({ type: "pixels", points: [[xx, SURF - h - 2]], color: K("L5") }); }
     }
