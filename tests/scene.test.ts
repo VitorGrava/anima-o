@@ -368,3 +368,20 @@ describe("coordenadas com casas decimais", () => {
     expect(r.ok).toBe(true);
   });
 });
+
+describe("only_camada", () => {
+  it("gradient com only_camada não pinta sobre a mesma cor de outra camada", () => {
+    const p = createProject({ width: 20, height: 10 });
+    runCommand(p, "set_palette", { colors: [{ key: "a", hex: "#aa8800", name: "ouro" }, { key: "b", hex: "#ffffff", name: "claro" }] });
+    runCommand(p, "add_layer", { name: "fundo" });
+    runCommand(p, "draw_shapes", { layer: "fundo", shapes: [{ type: "rect", x: 0, y: 0, w: 10, h: 10, color: "a", filled: true }] });
+    runCommand(p, "add_layer", { name: "frente" });
+    runCommand(p, "draw_shapes", { layer: "frente", shapes: [{ type: "rect", x: 10, y: 0, w: 10, h: 10, color: "a", filled: true }] });
+    const r = runCommand(p, "draw_shapes", { layer: "frente", shapes: [{ type: "gradient", x: 0, y: 0, w: 20, h: 10, colors: ["b", "b"], only: "a", only_camada: true }] });
+    expect(r.ok, r.text).toBe(true);
+    const fr = p.layers.find((l) => l.name === "frente")!;
+    const cel = p.frames[0].cels[fr.id];
+    expect(cel[5 * 20 + 3]).toBe(0); // área do fundo: nada pintado na frente
+    expect(cel[5 * 20 + 15]).not.toBe(0);
+  });
+});
