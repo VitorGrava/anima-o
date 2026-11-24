@@ -133,7 +133,7 @@ function catmull(pts, step = 0.8) {
 // buffer do dragão
 function makeBuf() {
   const N = W * H;
-  return { fuse: [], toSpine: new Map(), fz: new Map(), joined: new Set(), noScale: new Uint8Array(N), hornLen: new Map(), blocos: new Set(), z: new Float32Array(N).fill(-1e9), nx: new Float32Array(N), ny: new Float32Array(N), nz: new Float32Array(N), mat: new Uint8Array(N), part: new Uint8Array(N), u: new Float32Array(N), s: new Float32Array(N), r: new Float32Array(N), flag: new Uint8Array(N) };
+  return { prims: [], groups: 0, fuse: [], toSpine: new Map(), fz: new Map(), joined: new Set(), noScale: new Uint8Array(N), hornLen: new Map(), blocos: new Set(), z: new Float32Array(N).fill(-1e9), nx: new Float32Array(N), ny: new Float32Array(N), nz: new Float32Array(N), mat: new Uint8Array(N), part: new Uint8Array(N), u: new Float32Array(N), s: new Float32Array(N), r: new Float32Array(N), flag: new Uint8Array(N) };
 }
 const MAT = { pele: 1, barriga: 2, chifre: 3, membrana: 4, boca: 5, garra: 6 };
 let PART = 0;
@@ -151,6 +151,19 @@ function tube(buf, pts, mat, opt = {}) {
     let tx = b[0] - a[0], ty = b[1] - a[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
     if (i > 0) u += Math.hypot(S[i][0] - S[i - 1][0], S[i][1] - S[i - 1][1]);
     samples.push({ x: S[i][0], y: S[i][1], z: S[i][2], r: S[i][3] * (opt.scale || 1), tx, ty, u });
+  }
+  if (mat === MAT.pele && !opt.flag && opt.sdf !== false) {
+    // CAMPO ÚNICO: esferas ao longo do eixo (espaçamento ~12% do raio; dentro do tubo: mínimo duro, sem inchar)
+    const g = buf.groups++; let acc = 1e9;
+    for (let i = 0; i < samples.length; i++) {
+      const sm = samples[i]; if (sm.r < 0.5) continue;
+      if (i > 0) acc += Math.hypot(sm.x - samples[i - 1].x, sm.y - samples[i - 1].y);
+      if (acc < clamp(sm.r * 0.12, 0.7, 6) && i < samples.length - 1) continue;
+      acc = 0;
+      buf.prims.push({ t: 0, g, part, x: sm.x, y: sm.y, z: sm.z, r: sm.r, f: opt.flat || 1, u: sm.u, tx: sm.tx, ty: sm.ty, R2: sm.r + 18 });
+    }
+    samples.part = part;
+    return samples;
   }
   for (const sm of samples) {
     const R = sm.r; if (R < 0.5) continue;
@@ -176,6 +189,10 @@ function ellipsoid(buf, e, mat, opt = {}) {
   const part = opt.part || ++PART;
   const fz = partZ(buf, part, mat);
   const c = Math.cos(e.rot || 0), s = Math.sin(e.rot || 0), M = Math.max(e.rx, e.ry);
+  if (mat === MAT.pele && !opt.flag && opt.sdf !== false) {
+    buf.prims.push({ t: 1, g: buf.groups++, part, x: e.cx, y: e.cy, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz, c, s, u0: opt.u0 || 0, R2: M + 18 });
+    return part;
+  }
   for (let y = Math.floor(e.cy - M); y <= Math.ceil(e.cy + M); y++) for (let x = Math.floor(e.cx - M); x <= Math.ceil(e.cx + M); x++) {
     if (x < 0 || y < 0 || x >= W || y >= H) continue;
     const dx = x + 0.5 - e.cx, dy = y + 0.5 - e.cy;
@@ -262,6 +279,88 @@ function fuseParts(buf) {
       buf.z[k] = z; buf.nx[k] = nx; buf.ny[k] = ny; buf.nz[k] = nz; buf.mat[k] = MAT.pele;
       buf.part[k] = da < db ? a : b; buf.u[k] = buf.u[src]; buf.s[k] = buf.s[src]; buf.r[k] = buf.r[src]; buf.flag[k] = 0;
     }
+  }
+}
+// ======== CAMPO DE DISTÂNCIA 3D DO CORPO ========
+// f(p) = min( mínimo duro entre partes, smin(dA, dB, k) de cada par unido ); dentro de uma parte, os grupos
+// (tubo, elipsoides) se unem com smin k=6; dentro de um tubo, mínimo duro das esferas.
+// Por pixel: marcha de raio em z (frente -> trás) + bissecção; normal = gradiente numérico; parte = a mais próxima.
+function smin(a, b, k) { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - (h * h * k) / 4; }
+function renderSDF(buf) {
+  const prims = buf.prims, CELL = 16, GW = Math.ceil(W / CELL), GH = Math.ceil(H / CELL);
+  const cells = Array.from({ length: GW * GH }, () => []);
+  for (const p of prims) {
+    const x0 = Math.max(0, Math.floor((p.x - p.R2) / CELL)), x1 = Math.min(GW - 1, Math.floor((p.x + p.R2) / CELL));
+    const y0 = Math.max(0, Math.floor((p.y - p.R2) / CELL)), y1 = Math.min(GH - 1, Math.floor((p.y + p.R2) / CELL));
+    for (let gy = y0; gy <= y1; gy++) for (let gx = x0; gx <= x1; gx++) cells[gy * GW + gx].push(p);
+  }
+  const pairs = buf.fuse; for (const [a, b] of pairs) buf.joined.add(jkey(a, b));
+  const dPart = new Float64Array(256).fill(1e9), dGroup = new Float64Array(buf.groups + 1).fill(1e9);
+  const usedParts = [], usedGroups = [];
+  let cand = [];
+  const groupPart = new Int32Array(buf.groups + 1);
+  for (const p of prims) groupPart[p.g] = p.part;
+  const F = (px, py, pz, out) => {
+    for (const g of usedGroups) dGroup[g] = 1e9; usedGroups.length = 0;
+    for (const q of usedParts) dPart[q] = 1e9; usedParts.length = 0;
+    for (const p of cand) {
+      let d;
+      if (p.t === 0) { const dx = px - p.x, dy = py - p.y, dz = (pz - p.z) / p.f; d = Math.sqrt(dx * dx + dy * dy + dz * dz) - p.r; }
+      else {
+        const dx = px - p.x, dy = py - p.y, qx = dx * p.c + dy * p.s, qy = -dx * p.s + dy * p.c, qz = pz - p.z;
+        const k0 = Math.hypot(qx / p.rx, qy / p.ry, qz / p.rz), k1 = Math.hypot(qx / (p.rx * p.rx), qy / (p.ry * p.ry), qz / (p.rz * p.rz)) || 1e-6;
+        d = (k0 * (k0 - 1)) / k1;
+      }
+      const g = p.g;
+      if (dGroup[g] === 1e9) usedGroups.push(g);
+      if (d < dGroup[g]) { dGroup[g] = d; if (out) out.gp[g] = p; }
+    }
+    for (const g of usedGroups) {
+      const q = groupPart[g];
+      if (dPart[q] === 1e9) { usedParts.push(q); dPart[q] = dGroup[g]; } else dPart[q] = smin(dPart[q], dGroup[g], 6);
+    }
+    let f = 1e9, bp = -1;
+    for (const q of usedParts) if (dPart[q] < f) { f = dPart[q]; bp = q; }
+    for (const [a, b, k] of pairs) { const da = dPart[a], db = dPart[b]; if (da < 1e8 && db < 1e8) { const v = smin(da, db, k); if (v < f) f = v; } }
+    if (out) out.part = bp;
+    return f;
+  };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const list = cells[Math.floor(y / CELL) * GW + Math.floor(x / CELL)];
+    if (!list.length) continue;
+    const px = x + 0.5, py = y + 0.5;
+    cand = [];
+    let zTop = -1e9, zBot = 1e9;
+    for (const p of list) {
+      const dxy = Math.hypot(px - p.x, py - p.y);
+      const rr = p.t === 0 ? p.r : Math.max(p.rx, p.ry);
+      if (dxy > rr + 16) continue;
+      cand.push(p);
+      const rz = p.t === 0 ? p.r * p.f : p.rz;
+      zTop = Math.max(zTop, p.z + rz + 8); zBot = Math.min(zBot, p.z - rz - 8);
+    }
+    if (!cand.length) continue;
+    let z = zTop, hit = false, prevZ = z;
+    for (let it = 0; it < 160 && z > zBot; it++) {
+      const f = F(px, py, z);
+      if (f < 0.05) { hit = true; break; }
+      prevZ = z; z -= Math.max(0.5, f * 0.85);
+    }
+    if (!hit) continue;
+    let lo = z, hi = prevZ;                                    // f(lo) < 0 <= f(hi)
+    for (let i = 0; i < 8; i++) { const m = (lo + hi) / 2; if (F(px, py, m) < 0) lo = m; else hi = m; }
+    const zs = (lo + hi) / 2, k = y * W + x;
+    if (zs <= buf.z[k]) continue;                              // algo carimbado (membrana, chifre...) está na frente
+    const e = 0.6, gx = F(px + e, py, zs) - F(px - e, py, zs), gy = F(px, py + e, zs) - F(px, py - e, zs), gz = F(px, py, zs + e) - F(px, py, zs - e);
+    const out = { gp: {}, part: -1 };
+    F(px, py, zs, out);
+    const [nx, ny, nz] = norm3(gx, gy, gz);
+    // coordenadas de escama: esfera mais próxima da parte vencedora
+    let bp = null, bd = 1e9;
+    for (const g in out.gp) { const p = out.gp[g]; if (p.part !== out.part) continue; const d = p.t === 0 ? Math.hypot(px - p.x, py - p.y) - p.r : 0; if (d < bd) { bd = d; bp = p; } }
+    buf.z[k] = zs; buf.nx[k] = nx; buf.ny[k] = ny; buf.nz[k] = Math.max(0, nz); buf.mat[k] = MAT.pele; buf.part[k] = out.part; buf.flag[k] = 0;
+    if (bp && bp.t === 0) { buf.u[k] = bp.u; buf.s[k] = clamp(((px - bp.x) * -bp.ty + (py - bp.y) * bp.tx) / bp.r, -1, 1); buf.r[k] = bp.r; }
+    else if (bp) { const dx = px - bp.x, dy = py - bp.y; buf.u[k] = dx * bp.c + dy * bp.s + bp.u0; buf.s[k] = clamp((-dx * bp.s + dy * bp.c) / bp.ry, -1, 1); buf.r[k] = bp.ry; }
   }
 }
 const jkey = (a, b) => (a < b ? a + "," + b : b + "," + a);
@@ -381,7 +480,7 @@ function buildDragon(v) {
   }
   // ---- ombro/peito (massa) ----
   const omb = ellipsoid(buf, { cx: 258, cy: 290, rx: 44, ry: 34, rot: -0.6, z: 24, rz: 34 }, MAT.pele, { u0: 1100 });   // ombro: fundido ao peito pelo filete
-  buried.add(omb); buf.toSpine.set(omb, 1);
+  buried.add(omb);
   // ---- coxa e canela traseiras: coxa (massa), canela para trás até o jarrete, metatarso, pé com dedos ----
   const coxa = ellipsoid(buf, { cx: 386, cy: 318, rx: 58, ry: 40, rot: -0.8, z: 20, rz: 42 }, MAT.pele, { u0: 600 });
   buried.add(coxa); buf.blocos.add(coxa);
@@ -395,7 +494,7 @@ function buildDragon(v) {
 
   // ---- perna da frente (perto): úmero grosso, cotovelo PARA TRÁS, antebraço afinando, pulso, mão com dedos ----
   const hum = tube(buf, [[252, 300, 40, 28], [262, 328, 42, 24], [272, 350, 44, 20]], MAT.pele, { u0: 1200 }).part;
-  buf.toSpine.set(hum, 0.8);   // fundido ao peito (só valor, sem contorno)            // úmero
+   // fundido ao peito (só valor, sem contorno)            // úmero
   // bíceps: sem forma própria; a luz em cima e a sombra que entra no membro vêm do próprio tubo do úmero
   const ante = tube(buf, [[272, 350, 50, 17], [254, 366, 51, 14], [234, 384, 53, 10]], MAT.pele, { u0: 1270 }).part;
   ellipsoid(buf, { cx: 274, cy: 350, rx: 13, ry: 12, rot: 0, z: 52, rz: 10 }, MAT.pele, { u0: 1260, part: ante });   // cotovelo  // antebraço: grosso em cima, afinando
@@ -425,7 +524,7 @@ function buildDragon(v) {
     for (const d of dedos) {
       const mx = (pulso[0] + d[0]) / 2, my = (pulso[1] + d[1]) / 2, L = Math.hypot(d[0] - pulso[0], d[1] - pulso[1]);
       const bx = -(d[1] - pulso[1]) / L, by = (d[0] - pulso[0]) / L;      // perpendicular: o dedo curva para o bordo de ataque
-      tube(buf, [[...pulso, zw + 12, 5.5], [mx - bx * L * 0.07, my - by * L * 0.07, zw + 12, 3.8], [...d, zw + 12, 1.3]], MAT.pele, { u0: 1700 });
+      tube(buf, [[...pulso, zw + 12, 5.5], [mx - bx * L * 0.07, my - by * L * 0.07, zw + 12, 3.8], [...d, zw + 12, 1.3]], MAT.pele, { u0: 1700, sdf: false });
       wingInfo.bones.push([pulso, [mx - bx * L * 0.07, my - by * L * 0.07], false], [[mx - bx * L * 0.07, my - by * L * 0.07], d, false]);
     }
     spike(buf, [pulso[0] - 3, pulso[1] - 4], [pulso[0] - 14, pulso[1] - 24], 4, zw + 20, MAT.garra);
@@ -440,7 +539,7 @@ function buildDragon(v) {
     const jp = tube(buf, jaw, MAT.pele, { u0: 2000, flat: 0.65 }).part;
     ellipsoid(buf, { cx: 206, cy: 154, rx: 11, ry: 9, rot: 0.3, z: 28, rz: 9 }, MAT.pele, { u0: 2050, part: jp });   // articulação da mandíbula
     const hp = tube(buf, HEAD.focinho, MAT.pele, { u0: 2100, flat: 0.7 }).part;
-    buf.fuse.push([spine.part, hp, 12]); buf.joined.add(jkey(jp, hp)); buf.joined.add(jkey(spine.part, jp));
+    buf.fuse.push([spine.part, hp, 12], [jp, hp, 4], [spine.part, jp, 6]);
     ellipsoid(buf, HEAD.bochecha, MAT.pele, { u0: 2400, part: hp });
     ellipsoid(buf, HEAD.sobrancelha, MAT.pele, { u0: 2300, part: hp });     // crista da sobrancelha FUNDIDA ao crânio (sem linha)
     ellipsoid(buf, { cx: 121, cy: 131, rx: 10, ry: 7, rot: 0.3, z: 36, rz: 5 }, MAT.pele, { u0: 2350, part: hp }); // narina saliente
@@ -458,9 +557,10 @@ function buildDragon(v) {
     // dentes
 
   }
-  fuseParts(buf);
-  smoothNormals(buf, 5);
+  renderSDF(buf);
+  smoothNormals(buf, 1);
   spineCoords(buf, spine);
+  if (process.env.DBG) console.log("PART max", PART, "prims", buf.prims.length, "grupos", buf.groups);
   return { buf, wingInfo, spine, buried };
 }
 
