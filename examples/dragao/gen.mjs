@@ -133,7 +133,7 @@ function catmull(pts, step = 0.8) {
 // buffer do dragão
 function makeBuf() {
   const N = W * H;
-  return { noSpec: new Set(), prims: [], groups: 0, fuse: [], toSpine: new Map(), fz: new Map(), joined: new Set(), noScale: new Uint8Array(N), hornLen: new Map(), blocos: new Set(), z: new Float32Array(N).fill(-1e9), nx: new Float32Array(N), ny: new Float32Array(N), nz: new Float32Array(N), mat: new Uint8Array(N), part: new Uint8Array(N), u: new Float32Array(N), s: new Float32Array(N), r: new Float32Array(N), flag: new Uint8Array(N) };
+  return { knuckles: [], noSpec: new Set(), prims: [], groups: 0, fuse: [], toSpine: new Map(), fz: new Map(), joined: new Set(), noScale: new Uint8Array(N), hornLen: new Map(), blocos: new Set(), z: new Float32Array(N).fill(-1e9), nx: new Float32Array(N), ny: new Float32Array(N), nz: new Float32Array(N), mat: new Uint8Array(N), part: new Uint8Array(N), u: new Float32Array(N), s: new Float32Array(N), r: new Float32Array(N), flag: new Uint8Array(N) };
 }
 const MAT = { pele: 1, barriga: 2, chifre: 3, membrana: 4, boca: 5, garra: 6 };
 let PART = 0;
@@ -182,7 +182,7 @@ function tube(buf, pts, mat, opt = {}) {
     }
   }
   samples.part = part;
-  if (mat === MAT.chifre) buf.hornLen.set(part, u);
+  if (mat === MAT.chifre || mat === MAT.garra) buf.hornLen.set(part, u);
   return samples;
 }
 function ellipsoid(buf, e, mat, opt = {}) {
@@ -417,8 +417,21 @@ function spineCoords(buf, spine) {
 }
 
 // mão/pé: palma + dedos com nós (3–4 px) + garras cravadas para baixo
-function foot(buf, cx, cy, z, dir, n, wide = 1) {
+// garra curva em gancho (tubo afinando), tamanho variável
+function claw(buf, x, y, dir, len, z, flag) {
+  tube(buf, [[x, y, z, 2.4], [x + dir * len * 0.45, y + len * 0.45, z + 1, 1.8], [x + dir * len * 0.6, y + len * 0.95, z + 1, 0.6]], MAT.garra, flag ? { flag } : {});
+}
+function foot(buf, cx, cy, z, dir, n, wide = 1, v = "dourado") {
   const palm = ellipsoid(buf, { cx, cy, rx: 13 * wide, ry: 7 * Math.sqrt(wide), rot: 0, z, rz: 8 }, MAT.pele, { u0: 1300 });
+  if (v === "normal") {   // 3 dedos com nó claro e garras em gancho de tamanhos diferentes (a do meio maior)
+    for (let i = 0; i < 3; i++) {
+      const bx = cx - 8 * wide + i * 8 * wide, by = cy + 2, tx = bx + dir * (6 + (i === 1 ? 2 : 0)), ty = cy + 9 + (i === 1 ? 1 : 0);
+      tube(buf, [[bx, by, z + 6, 4.3], [(bx + tx) / 2, (by + ty) / 2 - 1, z + 8, 4.6], [tx, ty, z + 8, 3.2]], MAT.pele, { u0: 1310 + i * 10 });
+      buf.knuckles.push([Math.round((bx + tx) / 2) - 1, Math.round((by + ty) / 2) - 3]);
+      claw(buf, tx + dir, ty + 1, dir, i === 1 ? 11 : i === 0 ? 8 : 7, z + 12);
+    }
+    return palm;
+  }
   for (let i = 0; i < n; i++) {
     const bx = cx - 9 * wide + i * (18 * wide / (n - 1)), by = cy + 2;
     const tx = bx + dir * (9 - i * 1.5), ty = cy + 9 + (i % 2);
@@ -455,9 +468,12 @@ function buildDragon(v) {
   // pata dianteira de LONGE: sai atrás da primeira, mais escura, pulso e 3 garras (não fica enterrada)
   tube(buf, [[270, 362, -20, 11], [260, 388, -18, 8.5], [252, 397, -16, 7]], MAT.pele, { flag: 3 });
   ellipsoid(buf, { cx: 250, cy: 401, rx: 11, ry: 6, rot: 0, z: -16, rz: 6 }, MAT.pele, { flag: 3 });
-  for (let i = 0; i < 3; i++) spike(buf, [243 + i * 7, 404], [239 + i * 7, 413], 2.4, -10, MAT.garra);
+  if (v === "normal") for (let i = 0; i < 3; i++) claw(buf, 242 + i * 7, 404, -1, i === 1 ? 9 : 6, -10, 3);
+  else for (let i = 0; i < 3; i++) spike(buf, [243 + i * 7, 404], [239 + i * 7, 413], 2.4, -10, MAT.garra);
   // ---- espinha: pescoço + tronco + cauda (um tubo só) ----
-  const spine = tube(buf, SPINE, MAT.pele, { scale: 1 });
+  const SP = v === "normal" ? SPINE.slice(0, -4).concat([[236, 470, 60, 9], [206, 465, 58, 7.5], [180, 454, 58, 5], [160, 449, 56, 3], [146, 447, 56, 1.6]]) : SPINE;
+  const spine = tube(buf, SP, MAT.pele, { scale: 1 });
+  if (v === "normal") { spike(buf, [156, 448], [134, 444], 7, 58, MAT.pele); spike(buf, [151, 446], [142, 438], 2.5, 57, MAT.chifre, { flag: 4 }); spike(buf, [151, 450], [142, 457], 2.5, 57, MAT.chifre, { flag: 4 }); }   // pá/leque na ponta
   buried.add(spine.part);
   // espinhos dorsais: do lado oposto à barriga, diminuindo para a cauda e para a cabeça
   {
@@ -469,7 +485,8 @@ function buildDragon(v) {
       const h = t < 170 ? Math.max(5 + 6 * (t / 170), t > 90 ? 8.5 : 0) : clamp(sm.r * 0.5, 3, 20);   // pescoço: 5 -> 11 px, crescendo para o dorso   // pescoço: 4 -> 9 px, crescendo para o dorso
       next = t + Math.max(6, h * 1.05);
       if (sm.x > 300 && sm.x < 440 && sm.y < 320) continue;          // coberto pela asa / raiz da asa
-      const px = sm.ty, py = -sm.tx; // dorso
+      const flipT = v === "normal" && t > 560;                        // cauda da frente: dorso para CIMA (espinhos em cima, barriga embaixo)
+      const px = flipT ? -sm.ty : sm.ty, py = flipT ? sm.tx : -sm.tx; // dorso
       const bx = sm.x + px * sm.r * 0.95, by = sm.y + py * sm.r * 0.95;
       const ang = (Math.sin(t * 12.9898) * 43758.5453 % 1) * 0.17;      // ±10° de variação
       const dxs = px * (sm.r + h) - sm.tx * h * 0.55, dys = py * (sm.r + h) - sm.ty * h * 0.55;
@@ -477,7 +494,9 @@ function buildDragon(v) {
       const tip = [sm.x + ox + (dxs - ox) * ca - (dys - oy) * sa, sm.y + oy + (dxs - ox) * sa + (dys - oy) * ca];
       if (tips.some(([tx, ty]) => Math.hypot(tx - tip[0], ty - tip[1]) < h * 0.75)) continue;   // curva côncava: não amontoar em leque
       tips.push(tip);
-      spike(buf, [bx, by], tip, Math.max(1.6, h * 0.42), sm.z - 4, MAT.chifre, { flag: 4 });
+      const hv = v === "normal" ? 0.8 + 0.4 * ((Math.sin(t * 7.13) * 43758.5) % 1 + 1) / 2 : 1;   // tamanhos variados
+      const tipV = hv === 1 ? tip : [bx + (tip[0] - bx) * hv, by + (tip[1] - by) * hv];
+      spike(buf, [bx, by], tipV, Math.max(1.6, h * 0.42 * hv), sm.z - 4, MAT.chifre, { flag: 4 });
     }
   }
   // ---- ombro/peito (massa) ----
@@ -493,7 +512,7 @@ function buildDragon(v) {
   buf.noSpec.add(can);   // sem faixa especular na canela (na ponta da esfera virava anel)
   tube(buf, [[410, 344, 36, 14], [424, 370, 38, 11]], MAT.pele, { u0: 930, part: can });
   tube(buf, [[424, 370, 38, 9.5], [416, 398, 42, 8]], MAT.pele, { u0: 960, part: can });   // metatarso
-  const pe2 = foot(buf, 412, 404, 46, -1, 3, 1.35);
+  const pe2 = foot(buf, 412, 404, 46, -1, 3, 1.35, v);
 
   // ---- perna da frente (perto): úmero grosso, cotovelo PARA TRÁS, antebraço afinando, pulso, mão com dedos ----
   const hum = tube(buf, [[252, 300, 40, 28], [262, 328, 42, 24], [272, 350, 44, 20]], MAT.pele, { u0: 1200 }).part;
@@ -503,7 +522,7 @@ function buildDragon(v) {
   ellipsoid(buf, { cx: 274, cy: 350, rx: 13, ry: 12, rot: 0, z: 52, rz: 10 }, MAT.pele, { u0: 1260, part: ante });   // cotovelo  // antebraço: grosso em cima, afinando
   tube(buf, [[234, 384, 53, 7], [216, 389, 55, 6]], MAT.pele, { u0: 1295, part: ante });                        // pulso: o membro muda de direção
   ellipsoid(buf, { cx: 226, cy: 390, rx: 9, ry: 8, rot: 0, z: 58, rz: 7 }, MAT.pele, { u0: 1290, part: ante });   // pulso (mesmo volume do antebraço, sem contorno próprio)
-  const pe1 = foot(buf, 212, 398, 60, -1, 4);
+  const pe1 = foot(buf, 212, 398, 60, -1, 4, 1, v);
   buf.fuse.push([spine.part, omb, 14], [spine.part, hum, 12], [omb, hum, 10], [hum, ante, 4], [ante, pe1, 4], [spine.part, coxa, 14], [coxa, can, 9], [can, pe2, 4]);
   // ---- asa de PERTO ----
   {
@@ -699,12 +718,18 @@ function shadeDragon(D, v) {
       continue;
     }
     const ub = buf.u[k], bthr = ub < 360 ? 0.62 : ub < 400 ? 0.62 + 0.4 * (ub - 360) / 40 : ub < 540 ? 2 : ub < 600 ? 1.02 - 0.4 * (ub - 540) / 60 : 0.62;   // sem faixa onde a cauda mergulha   // afina até zero sob a coxa
-    const isBelly = m === MAT.pele && R > 8 && ub < 1100 && s > bthr && !buf.flag[k] && (buf.part[k] === D.spine.part || ub < 150);
+    const isBelly = m === MAT.pele && R > 8 && ub < 1100 && (v === "normal" && ub > 560 && buf.part[k] === D.spine.part ? -s : s) > bthr && !buf.flag[k] && (buf.part[k] === D.spine.part || ub < 150);
     if (isBelly) matName = "barriga";
-    let tone = clamp(Math.floor(val * 5), 0, 4);
+    let tone = clamp(Math.floor(val * 5), 0, 4), midT = null, frac = val * 5 - Math.floor(val * 5);
     const capped = v === "normal" && tone === 4 && (val < 0.95 || ny > -0.4);
-    if (capped) tone = 3;   // o tom mais claro só numa faixa no topo do volume (sem manchas soltas)   // o tom mais claro só numa faixa no topo do volume
-    const tone0 = tone, frac = val * 5 - Math.floor(val * 5);
+    if (capped) tone = 3;
+    if (v === "normal" && m === MAT.pele && buf.u[k] < 2000) {
+      // 3 MASSAS: sombra / meia-luz / luz, com 1 tom de transição só onde a forma vira
+      tone = val < 0.3 ? 1 : val < 0.64 ? 2 : 3;
+      if (Math.abs(val - 0.3) < 0.03) midT = "Rb"; else if (Math.abs(val - 0.64) < 0.03) midT = "Rc";
+      frac = midT ? 0 : 0.5;
+    }
+    const tone0 = tone;
     if (v === "normal" && buf.part[k] === D.spine.part && ((buf.u[k] > 150 && buf.u[k] < 440) || (buf.u[k] >= 1200 && buf.u[k] < 1300))) {   // oclusão sob o ventre e atrás do cotovelo
       let occ = 0;
       for (const [dx, dy] of [[6, 0], [-6, 0], [0, 6], [0, -6], [5, 5], [-5, 5], [11, 0], [-11, 0], [0, 11], [8, 8], [-8, 8]]) {
@@ -717,7 +742,7 @@ function shadeDragon(D, v) {
 
     // oclusão sob a barriga/peito e dentro das dobras: o tronco ganha volume em vez de faixas
     if (v === "normal" && m === MAT.pele && !buf.flag[k] && ny > 0.4 && y > 300 && y < 380) tone = Math.max(0, tone - 1);
-    const scaleOn = v === "normal" ? tone >= 2 && tone <= 3 && frac >= 0.35 && frac <= 0.8 && ny < 0.05 && !(buf.part[k] === D.spine.part && y > 306 && buf.u[k] < 440) : nz < 0.45 && tone >= 1;   // escamas só na meia-luz   // dourado: a grade some sob o ouro (só sugere nas bordas)
+    const scaleOn = v === "normal" ? tone === 2 && !midT && ny < 0.05 && !(buf.part[k] === D.spine.part && y > 306 && buf.u[k] < 440) : nz < 0.45 && tone >= 1;   // escamas só na meia-luz   // dourado: a grade some sob o ouro (só sugere nas bordas)
     if (matName === "pele" && R > 5 && scaleOn && !buf.noScale[k]) {
       let ss = buf.u[k] >= 2000 ? 3.5 : clamp(R * 0.17, 3, 8);
       if (buf.part[k] === D.spine.part && buf.u[k] > 150 && buf.u[k] < 1000) ss *= 1 - 0.32 * clamp((buf.u[k] - 220) / 200, 0, 1) - 0.15 * clamp((buf.u[k] - 420) / 300, 0, 1);   // ~30% menores perto do quadril/cauda
@@ -731,6 +756,9 @@ function shadeDragon(D, v) {
       const dist = Math.abs(fy - edgeY) * ss;
       if (dist < 0.55) tone -= 1;
       else if (fy < 0.3 && Math.abs(fx) < 0.22 && tone >= 3 && spec > 0.25) tone = Math.min(4, tone + 1);
+    }
+    if (m === MAT.garra && buf.hornLen.has(buf.part[k])) {   // garra em gancho: base escura, ponta clara
+      const Lh = buf.hornLen.get(buf.part[k]); tone = buf.u[k] > Lh * 0.5 ? (ny < 0.3 ? 4 : 3) : 1;
     }
     if ((m === MAT.chifre) && buf.hornLen.has(buf.part[k])) {
       const Lh = buf.hornLen.get(buf.part[k]), uh = buf.u[k];
@@ -756,7 +784,8 @@ function shadeDragon(D, v) {
     let name = ramp[matName][tone];
     if (beamMid && matName === "pele") name = ["Ra", "Rb", "Rc", "Rd"][tone];
     // 1 tom intermediário SÓLIDO na borda de cada placa de luz (sem dither)
-    if (v === "normal" && matName === "pele" && tone === tone0 && !capped && tone >= 1 && frac < 0.12) name = ["Ra", "Rb", "Rc", "Rd"][tone - 1];
+    if (v === "normal" && matName === "pele" && tone === tone0 && midT) name = midT;
+    else if (v === "normal" && matName === "pele" && buf.u[k] >= 2000 && tone === tone0 && !capped && tone >= 1 && frac < 0.12) name = ["Ra", "Rb", "Rc", "Rd"][tone - 1];
     if (matName === "pele") {
       if (bounce > 0.55 && tone <= 2 && nz < 0.5 && R >= 8 && buf.u[k] < 2000 && !(buf.part[k] === D.spine.part && buf.u[k] > 380 && buf.u[k] < 540)) name = bounce > 0.8 || nz < 0.2 ? "rim2" : "rim1";
     } else if (bounce > 0.75 && tone <= 0 && matName === "barriga") name = "B2";
@@ -838,6 +867,7 @@ function shadeDragon(D, v) {
   }
   wedge([[421, 368], [428, 369], [424, 373]]);       // jarrete: cunha curta dentro da perna (joelho só pela quebra do contorno)
   wedge([[222, 388], [242, 385], [232, 400]]);       // pulso (embaixo da dobra)
+  if (v === "normal") for (const [kx, ky] of buf.knuckles) for (const [dx, dy] of [[0, 0], [1, 0]]) { const q = (ky + dy) * W + kx + dx; if (res[q] && buf.mat[q] === MAT.pele) res[q] = "R5"; }   // calo claro em cada nó
   // olho: amêndoa grande sob a sobrancelha, íris amarelo->laranja, pupila em fenda, brilho, contorno escuro
   const [ex, ey] = HEAD.olho;
   // olho ~12x7: pálpebra/sombra da sobrancelha cobrindo o terço de cima (olhar ameaçador), íris amarela->laranja,
@@ -974,6 +1004,19 @@ function build(v) {
   colRow("colunas_meio", [[116, 30, 0, 384, "dir"], [478, 30, 0, 384, "esq"]]);
   tf("colunas_meio", { op: "haze", color: K(gold ? "bg5" : "bg4"), quantidade: 0.22 });
   colRow("colunas_perto", [[24, 66, 0, 512, "dir"]]);
+  if (!gold) {
+    // faixas ornamentais anãs no pilar da frente (a cada ~60 px): banda escura com losangos de 2 tons
+    const orn = [];
+    for (let y = 150; y < 470; y += 60) {
+      orn.push({ type: "rect", x: 0, y, w: 57, h: 7, color: K("st1"), filled: true }, { type: "line", x1: 0, y1: y, x2: 56, y2: y, color: K("st3") });
+      for (let x = 3; x < 56; x += 8) orn.push({ type: "polygon", points: [[x, y + 3], [x + 3, y], [x + 6, y + 3], [x + 3, y + 6]], color: K(x % 16 === 3 ? "st3" : "st2") });
+    }
+    // braseiro apagado à esquerda (tigela de bronze sobre tripé, cinza fria)
+    orn.push({ type: "line", x1: 84, y1: 340, x2: 92, y2: 318, color: K("st1") }, { type: "line", x1: 112, y1: 340, x2: 104, y2: 318, color: K("st1") }, { type: "line", x1: 98, y1: 342, x2: 98, y2: 320, color: K("st1") });
+    orn.push({ type: "polygon", points: [[84, 308], [114, 308], [108, 320], [90, 320]], color: K("st3") }, { type: "line", x1: 84, y1: 308, x2: 113, y2: 308, color: K("st5") }, { type: "polygon", points: [[103, 308], [114, 308], [108, 320], [104, 320]], color: K("st2") });
+    orn.push({ type: "ellipse", x: 88, y: 305, w: 22, h: 5, color: K("bg2"), filled: true }, { type: "pixels", points: [[96, 306], [101, 307]], color: K("st4") });
+    draw("colunas_perto", orn);
+  }
   // o ouro ilumina a base das colunas (luz quente de baixo)
   for (const l of ["colunas_meio", "colunas_perto"]) draw(l, [{ type: "gradient", x: 0, y: 250, w: W, h: 262, colors: [K("st2"), K("st3"), K("st4"), K("st5")], direction: "vertical", dither: "nenhum", suavidade: 0.7, only: K("st3") }]);   // sem dither: "only" olha a imagem composta e o xadrez vazava para a coluna de trás
   tf("colunas_perto", { op: "haze", color: K("bg0"), quantidade: 0.35 });
@@ -1048,7 +1091,7 @@ function build(v) {
       return l;
     };
     const coins = [];
-    for (let i = 0; i < 5200; i++) {
+    for (let i = 0; i < 7600; i++) {
       const x = Math.floor(rnd() * W), top = HX(x);
       const y = Math.floor(top - 2 + Math.pow(rnd(), 1.3) * (H - top + 6));
       coins.push([x, y]);
@@ -1056,7 +1099,7 @@ function build(v) {
     coins.sort((a, b) => a[1] - b[1]);
     const sh = [];
     for (const [x, y] of coins) {
-      const scale = 0.7 + (y - 330) / 300;
+      const scale = 0.4 + (y - 330) / 140;   // pequenas no topo do monte (2–3 px), grandes na frente (5–7 px de altura)
       const w = Math.max(5, Math.round((7 + rnd() * 4) * scale)), h = Math.max(3, Math.round(w * (0.42 + rnd() * 0.1)));
       const t = clamp(Math.round(light(x, y) * 6 + (rnd() - 0.5) * 1.4), 1, 5);
       if (rnd() < 0) { // moeda em pé (de lado) — desligado: virava "grama"
@@ -1114,13 +1157,16 @@ function build(v) {
       obj.push({ type: "pixels", points: P([[-3, -7], [3, -7], [-6, -2], [-5, -2]]), color: K("spark") });
       obj.push({ type: "rect", x: Math.round(cx - 1 * s), y: Math.round(cy + 1 * s), w: Math.max(2, Math.round(2 * s)), h: Math.max(2, Math.round(2 * s)), color: K("ruby1"), filled: true });
     };
-    crown(264, 432, 1.4); crown(446, 494, 1.3);
+    crown(264, 432, 1.4); crown(446, 494, 1.0);
+    // moedas em pé / rolando na frente
+    for (const [cx, cy] of [[150, 486], [372, 500]]) { obj.push({ type: "ellipse", x: cx, y: cy - 8, w: 4, h: 9, color: K("g2"), filled: true }, { type: "ellipse", x: cx + 1, y: cy - 8, w: 3, h: 9, color: K("g4"), filled: true }, { type: "line", x1: cx + 2, y1: cy - 6, x2: cx + 2, y2: cy - 2, color: K("g6") }, { type: "pixels", points: [[cx + 2, cy - 7]], color: K("spark") }); }
     // elmo de anão: cúpula, aba, protetor de nariz, chifrinhos
     // elmo de ferro (contrasta com o ouro): cúpula, luz em cima-esquerda, sombra à direita
-    obj.push({ type: "ellipse", x: 80, y: 458, w: 22, h: 18, color: K("H2"), filled: true });
-    obj.push({ type: "ellipse", x: 90, y: 462, w: 11, h: 11, color: K("H1"), filled: true });
-    obj.push({ type: "ellipse", x: 83, y: 460, w: 9, h: 7, color: K("H3"), filled: true });
-    obj.push({ type: "pixels", points: [[85, 461], [86, 461], [86, 460]], color: K("spark") });
+    obj.push({ type: "ellipse", x: 80, y: 458, w: 22, h: 18, color: K("H1"), filled: true });
+    obj.push({ type: "ellipse", x: 82, y: 459, w: 14, h: 12, color: K("H2"), filled: true });
+    obj.push({ type: "ellipse", x: 83, y: 460, w: 8, h: 6, color: K("H4"), filled: true });
+    obj.push({ type: "ellipse", x: 92, y: 463, w: 9, h: 9, color: K("H0"), filled: true });
+    obj.push({ type: "pixels", points: [[85, 461], [86, 461], [86, 460], [85, 460]], color: K("spark") });
     obj.push({ type: "rect", x: 78, y: 468, w: 26, h: 3, color: K("g4"), filled: true });
     obj.push({ type: "line", x1: 78, y1: 468, x2: 103, y2: 468, color: K("g6") });
     obj.push({ type: "rect", x: 90, y: 468, w: 3, h: 8, color: K("H1"), filled: true });
@@ -1486,6 +1532,14 @@ function build(v) {
       if (c < 0.86) vg[y * W + x] = "bg0"; else if (c < 1) vg[y * W + x] = vg[y * W + x] || "bg1";
     }
     rows("vinheta", vg);
+    // entalhe geométrico anão na rocha do canto: losangos e runas de 1 px (2 tons), aresta acesa pelo feixe
+    const ent = [];
+    for (let y = 14; y < 96; y += 14) for (let x = 6 + ((y / 14) % 2) * 7; x < 96 - y * 0.55; x += 14) {
+      ent.push({ type: "polygon", points: [[x, y + 5], [x + 5, y], [x + 10, y + 5], [x + 5, y + 10]], color: K("bg2") });
+      ent.push({ type: "line", x1: x + 5, y1: y, x2: x + 10, y2: y + 5, color: K("st3") });
+    }
+    for (let x = 8; x < 70; x += 9) ent.push({ type: "line", x1: x, y1: 104, x2: x + 3, y2: 100, color: K("bg3") }, { type: "line", x1: x + 3, y1: 100, x2: x + 5, y2: 104, color: K("bg3") });   // runas
+    draw("vinheta", ent);
   } else
   draw("vinheta", [{ type: "gradient", x: 0, y: 0, w: W, h: gold ? SURF : H, direction: "radial", cx: 290, cy: 290, r: 380, colors: [".", ".", ".", ".", K("bg0")], dither: "bayer4", suavidade: 0.6 }]);
   cmds.push({ name: "update_layer", input: { layer: "Base", delete: true } });
