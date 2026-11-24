@@ -1334,8 +1334,8 @@ const shape = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("capsule"),
     x1: z.number().int(), y1: z.number().int(), x2: z.number().int(), y2: z.number().int(),
-    r1: z.number().min(0.5).max(40).describe("raio no ponto 1 (px)"),
-    r2: z.number().min(0.5).max(40).optional().describe("raio no ponto 2 (padrão: igual ao r1)"),
+    r1: z.number().min(0.5).max(128).describe("raio no ponto 1 (px)"),
+    r2: z.number().min(0.5).max(128).optional().describe("raio no ponto 2 (padrão: igual ao r1)"),
     outline: colorRef, base: colorRef, light: colorRef, shadow: colorRef,
   }).describe("Segmento grosso (membro, tronco, cauda, antena) entre dois pontos, com raios, contorno escuro de 1 px e luz de cima-esquerda. Para braço, perna, rabo: não precisa escrever um gerador."),
   z.object({
@@ -1386,8 +1386,8 @@ const shape = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("curve"),
     points: z.array(z.array(z.number()).length(2)).min(2).max(64).describe("pontos [x, y] por onde a curva passa (spline suave)"),
-    r1: z.number().min(0.5).max(40).describe("raio no início (px)"),
-    r2: z.number().min(0.5).max(40).optional().describe("raio no fim (padrão: igual ao r1)"),
+    r1: z.number().min(0.5).max(128).describe("raio no início (px)"),
+    r2: z.number().min(0.5).max(128).optional().describe("raio no fim (padrão: igual ao r1)"),
     color: colorRef,
   }).describe("CURVA de espessura variável (rabo, tentáculo, corda, cabelo, cobra): passa pelos pontos com raio de r1 a r2. Cor chapada; contorne depois com draw_rows contorno=seletivo ou transform outline mode=seletivo."),
   z.object({
@@ -2376,7 +2376,20 @@ export function runCommand(p: Project, name: string, input: unknown): CommandRes
   if (!cmd) return { ok: false, changed: false, text: `Comando desconhecido: ${name}` };
   const unknown = unknownKeys(cmd.schema, input);
   if (unknown) return { ok: false, changed: false, text: `Entrada inválida para ${name}: ${unknown}` };
-  const parsed = cmd.schema.safeParse(input ?? {});
+  let parsed = cmd.schema.safeParse(input ?? {});
+  let arredondou = 0;
+  // coordenadas quebradas (196.5) em campos inteiros: arredonda e segue, em vez de derrubar o lote inteiro
+  if (!parsed.success && parsed.error.issues.length && parsed.error.issues.every((i) => /expected int/.test(i.message))) {
+    const fixed = structuredClone(input) as Record<string, unknown>;
+    for (const i of parsed.error.issues) {
+      let o: any = fixed;
+      for (const k of i.path.slice(0, -1)) o = o?.[k as any];
+      const last = i.path[i.path.length - 1] as any;
+      if (o && typeof o[last] === "number") { o[last] = Math.round(o[last]); arredondou++; }
+    }
+    const again = cmd.schema.safeParse(fixed);
+    if (again.success) parsed = again;
+  }
   if (!parsed.success) {
     return { ok: false, changed: false, text: describeIssues(name, parsed.error, input) };
   }
@@ -2399,6 +2412,7 @@ export function runCommand(p: Project, name: string, input: unknown): CommandRes
       }
     }
     if (result.changed) Object.assign(p, work);
+    if (arredondou) result.text = `(${arredondou} coordenada(s) com casas decimais arredondada(s) para inteiro)\n` + (result.text ?? "");
     return { ok: true, ...result };
   } catch (e) {
     return { ok: false, changed: false, text: `Erro em ${name}: ${(e as Error).message}` };

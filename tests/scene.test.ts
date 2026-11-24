@@ -352,3 +352,19 @@ describe("terrain com vale", () => {
     expect(com.b).toBe(sem.b);                                // fora do vale não mexe
   });
 });
+
+describe("coordenadas com casas decimais", () => {
+  it("arredonda em vez de derrubar o lote e avisa", () => {
+    const p = createProject({ width: 16, height: 16 });
+    runCommand(p, "set_palette", { colors: [{ key: "a", hex: "#ff0000", name: "vermelho" }] });
+    const r = runCommand(p, "draw_shapes", { shapes: [{ type: "line", x1: 1.5, y1: 2, x2: 10.2, y2: 2, color: "a" }] });
+    expect(r.ok).toBe(true);
+    expect(r.text).toMatch(/arredondada/);
+  });
+  it("aceita raio grande em curve", () => {
+    const p = createProject({ width: 256, height: 256 });
+    runCommand(p, "set_palette", { colors: [{ key: "a", hex: "#ff0000", name: "vermelho" }] });
+    const r = runCommand(p, "draw_shapes", { shapes: [{ type: "curve", points: [[40, 128], [128, 100], [216, 128]], r1: 60, r2: 30, color: "a" }] });
+    expect(r.ok).toBe(true);
+  });
+});

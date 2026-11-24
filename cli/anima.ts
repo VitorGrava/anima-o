@@ -96,6 +96,7 @@ const USAGE = `anima — engine de animação pixel art
   anima show <projeto> [frame|all] [--png saida.png] [--check cinza|luz_sombra|silhueta]
              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--bones] [--scale N]
   anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--max-cores N] [--sem codigo,codigo] [--png saida.png]
+  anima avaliar <projeto>                                   nota 0-100 de beleza (paradigmas, cor, forma, composição) com o comando que conserta cada achado
                                          defeitos da arte e da animação (--max-cores: limite de cores do estilo, ex. 16 para retrô) (--efeito: brilho, chama, fumaça; --tipo rotacao: moeda girando)
   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N] [--fundo #hex] [--margem N] [--sombra] [--vai-e-volta] [--meta]   (.gif = animação; .png = folha de todos os frames; .png com --frame N = só esse frame; sem --scale a escala é automática)
@@ -255,6 +256,15 @@ export async function main(argv: string[]): Promise<number> {
       const r = runCommand(store.project, "check", { symmetric, tipo: efeito ? "efeito" : tipoFlag === "efeito" || tipoFlag === "rotacao" ? tipoFlag : "personagem", ignore_layers: ignorar ? ignorar.split(",") : undefined, max_cores: maxCores ? Number(maxCores) : undefined, ignore_codes: semCodigos ? semCodigos.split(",") : undefined });
       console.log(r.text);
       if (png) await saveImages(store.project, r, png);
+      return r.ok ? 0 : 1;
+    }
+    case "avaliar": {
+      rejectUnknownFlags(args, "avaliar");
+      const [file] = args;
+      if (!file) break;
+      await store.open(file);
+      const r = runCommand(store.project, "avaliar", {});
+      console.log(r.text);
       return r.ok ? 0 : 1;
     }
     case "reference": {
