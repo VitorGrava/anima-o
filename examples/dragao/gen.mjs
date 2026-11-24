@@ -504,7 +504,7 @@ function buildDragon(v) {
   tube(buf, [[234, 384, 53, 7], [216, 389, 55, 6]], MAT.pele, { u0: 1295, part: ante });                        // pulso: o membro muda de direção
   ellipsoid(buf, { cx: 226, cy: 390, rx: 9, ry: 8, rot: 0, z: 58, rz: 7 }, MAT.pele, { u0: 1290, part: ante });   // pulso (mesmo volume do antebraço, sem contorno próprio)
   const pe1 = foot(buf, 212, 398, 60, -1, 4);
-  buf.fuse.push([spine.part, omb, 14], [spine.part, hum, 12], [omb, hum, 10], [hum, ante, 4], [ante, pe1, 4], [spine.part, coxa, 14], [coxa, can, 4], [can, pe2, 4]);
+  buf.fuse.push([spine.part, omb, 14], [spine.part, hum, 12], [omb, hum, 10], [hum, ante, 4], [ante, pe1, 4], [spine.part, coxa, 14], [coxa, can, 9], [can, pe2, 4]);
   // ---- asa de PERTO ----
   {
     const { ombro, cotovelo, pulso, dedos, raiz } = WING;
@@ -522,7 +522,7 @@ function buildDragon(v) {
     const esc = ellipsoid(buf, { cx: 314, cy: 240, rx: 26, ry: 15, rot: -0.6, z: 22, rz: 22 }, MAT.pele, { u0: 1480 });   // escápula
     const wh = tube(buf, [[...ombro, 6, 23], [322, 232, 22, 17], [350, 212, 38, 12.5], [...cotovelo, zw + 14, 10]], MAT.pele, { u0: 1500 }).part;   // cresce de dentro do dorso
     tube(buf, [[...cotovelo, zw + 14, 10], [378, 140, zw + 14, 7.5], [...pulso, zw + 14, 5.5]], MAT.pele, { u0: 1600, part: wh });
-    buf.fuse.push([spine.part, esc, 10], [esc, wh, 8], [spine.part, wh, 8]);
+    buf.fuse.push([spine.part, esc, 10], [esc, wh, 8], [spine.part, wh, 8]); buf.wingArm = wh;
     ellipsoid(buf, { cx: pulso[0], cy: pulso[1], rx: 9, ry: 8, rot: 0, z: zw + 18, rz: 6 }, MAT.pele, { u0: 1650 });   // nó do pulso
     for (const d of dedos) {
       const mx = (pulso[0] + d[0]) / 2, my = (pulso[1] + d[1]) / 2, L = Math.hypot(d[0] - pulso[0], d[1] - pulso[1]);
@@ -561,7 +561,7 @@ function buildDragon(v) {
 
   }
   renderSDF(buf);
-  smoothNormals(buf, 2);
+  smoothNormals(buf, 3);
   spineCoords(buf, spine);
   if (process.env.DBG) console.log("PART max", PART, "prims", buf.prims.length, "grupos", buf.groups);
   return { buf, wingInfo, spine, buried };
@@ -671,7 +671,7 @@ function shadeDragon(D, v) {
         if (occ >= 2) { nm = null; tg = Math.min(tg ?? 3, occ >= 4 ? 1 : 2); }
       }
       if (buf.flag[k] === 3) { tg = (tg ?? 2) >= 2 ? 2 : 1; nm = null; }                  // perna de longe: ouro escurecido ~40%
-      if (buf.noSpec.has(buf.part[k]) && !nm) tg = Math.max(tg ?? 2, 2);              // canela: ouro sólido, continua a coxa
+      if (buf.noSpec.has(buf.part[k])) { nm = Math.abs(nx + 0.42) < 0.07 && ny < 0.4 ? "R5" : null; tg = 1; }   // canela: 1 tom abaixo da coxa + especular curvo na frente              // canela: ouro sólido, continua a coxa
       if (buf.flag[k] === 2) { tg = Math.max(0, (tg ?? 3) - 1); nm = null; }
       if (nz < 0.3 && ny > -0.15 && buf.flag[k] !== 2) nm = buf.flag[k] === 3 ? "rim1" : "rim2";    // contraluz do rio na silhueta
       // lado de baixo do TRONCO: curva escura (de costas para o teto, ofuscada); contraluz laranja só nos 2–3 px de baixo
@@ -698,10 +698,12 @@ function shadeDragon(D, v) {
       out[k] = nm || gr[clamp(tg, 0, 4)];
       continue;
     }
-    const ub = buf.u[k], bthr = ub < 360 ? 0.62 : ub < 410 ? 0.62 + 0.4 * (ub - 360) / 50 : ub < 490 ? 1.02 - 0.4 * (ub - 410) / 80 : 0.62;   // afina até zero sob a coxa
+    const ub = buf.u[k], bthr = ub < 360 ? 0.62 : ub < 400 ? 0.62 + 0.4 * (ub - 360) / 40 : ub < 540 ? 2 : ub < 600 ? 1.02 - 0.4 * (ub - 540) / 60 : 0.62;   // sem faixa onde a cauda mergulha   // afina até zero sob a coxa
     const isBelly = m === MAT.pele && R > 8 && ub < 1100 && s > bthr && !buf.flag[k] && (buf.part[k] === D.spine.part || ub < 150);
     if (isBelly) matName = "barriga";
     let tone = clamp(Math.floor(val * 5), 0, 4);
+    const capped = v === "normal" && tone === 4 && (val < 0.95 || ny > -0.4);
+    if (capped) tone = 3;   // o tom mais claro só numa faixa no topo do volume (sem manchas soltas)   // o tom mais claro só numa faixa no topo do volume
     const tone0 = tone, frac = val * 5 - Math.floor(val * 5);
     if (v === "normal" && buf.part[k] === D.spine.part && ((buf.u[k] > 150 && buf.u[k] < 440) || (buf.u[k] >= 1200 && buf.u[k] < 1300))) {   // oclusão sob o ventre e atrás do cotovelo
       let occ = 0;
@@ -754,9 +756,9 @@ function shadeDragon(D, v) {
     let name = ramp[matName][tone];
     if (beamMid && matName === "pele") name = ["Ra", "Rb", "Rc", "Rd"][tone];
     // 1 tom intermediário SÓLIDO na borda de cada placa de luz (sem dither)
-    if (v === "normal" && matName === "pele" && tone === tone0 && tone >= 1 && frac < 0.12) name = ["Ra", "Rb", "Rc", "Rd"][tone - 1];
+    if (v === "normal" && matName === "pele" && tone === tone0 && !capped && tone >= 1 && frac < 0.12) name = ["Ra", "Rb", "Rc", "Rd"][tone - 1];
     if (matName === "pele") {
-      if (bounce > 0.55 && tone <= 2 && nz < 0.5 && R >= 8 && buf.u[k] < 2000) name = bounce > 0.8 || nz < 0.2 ? "rim2" : "rim1";
+      if (bounce > 0.55 && tone <= 2 && nz < 0.5 && R >= 8 && buf.u[k] < 2000 && !(buf.part[k] === D.spine.part && buf.u[k] > 380 && buf.u[k] < 540)) name = bounce > 0.8 || nz < 0.2 ? "rim2" : "rim1";
     } else if (bounce > 0.75 && tone <= 0 && matName === "barriga") name = "B2";
     out[k] = name;
   }
@@ -804,7 +806,8 @@ function shadeDragon(D, v) {
       const bothSkin = buf.mat[q] === MAT.pele && buf.mat[k] === MAT.pele;
       // par unido: nenhuma linha; só o braço da asa, LONGE da raiz, ganha contorno onde passa à frente das costas
       const farArm = Math.hypot(x - WING.ombro[0], y - WING.ombro[1]) > 46;
-      const thr = bothSkin ? (buf.joined.has(jkey(buf.part[q], buf.part[k])) ? (farArm ? 28 : 1e9) : 12) : 6;   // inserção unida: nenhuma linha
+      const isArm = buf.part[q] === buf.wingArm || buf.part[k] === buf.wingArm;
+      const thr = bothSkin ? (buf.joined.has(jkey(buf.part[q], buf.part[k])) ? (farArm && isArm ? 28 : 1e9) : 12) : 6;   // inserção unida: nenhuma linha
       if (buf.mat[q] && buf.part[q] !== buf.part[k] && buf.z[q] > buf.z[k] + thr) {
         res[k] = buf.mat[k] === MAT.membrana ? "M0" : buf.mat[k] === MAT.chifre || buf.mat[k] === MAT.garra ? "H0" : "R0";
         break;
@@ -823,7 +826,7 @@ function shadeDragon(D, v) {
     }
   }
   // quebra de ângulo no joelho e no pulso: sombra em CUNHA no lado de dentro da dobra
-  const wedge = (pts) => { const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]); for (let y = Math.min(...ys); y <= Math.max(...ys); y++) for (let x = Math.min(...xs); x <= Math.max(...xs); x++) if (inPoly(x + 0.5, y + 0.5, pts) && res[y * W + x] && buf.mat[y * W + x] === MAT.pele) res[y * W + x] = v === "dourado" ? "R0" : "R1";
+  const wedge = (pts) => { const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]); for (let y = Math.min(...ys); y <= Math.max(...ys); y++) for (let x = Math.min(...xs); x <= Math.max(...xs); x++) if (inPoly(x + 0.5, y + 0.5, pts) && res[y * W + x] && buf.mat[y * W + x] === MAT.pele && !buf.flag[y * W + x]) res[y * W + x] = "R1";
     if (false) {   // (aresta acesa removida: no joelho lia como anel solto)
       const [[x0, y0], [x1, y1]] = pts, n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
       for (let i = 0; i <= n; i++) { const xx = Math.round(x0 + ((x1 - x0) * i) / n), yy = Math.round(y0 + ((y1 - y0) * i) / n) - 1; if (res[yy * W + xx] && buf.mat[yy * W + xx] === MAT.pele) res[yy * W + xx] = "R5"; }
@@ -833,8 +836,7 @@ function shadeDragon(D, v) {
     if (buf.mat[k] !== MAT.chifre || buf.hornLen.has(buf.part[k]) || !res[k] || (buf.flag[k] === 4 && y0of(k) < 250)) continue;
     if ([k - 1, k + 1, k - W, k + W].some((q) => buf.mat[q] === MAT.pele && buf.part[q] !== buf.part[k] && buf.z[q] > buf.z[k] - 30)) res[k] = v === "dourado" ? "R1" : "H1";   // espinho: 1 px de sombra na base
   }
-  wedge([[404, 347], [414, 348], [409, 356]]);       // joelho: cunha curta atrás da dobra
-  wedge([[419, 367], [429, 368], [424, 376]]);       // jarrete
+  wedge([[421, 368], [428, 369], [424, 373]]);       // jarrete: cunha curta dentro da perna (joelho só pela quebra do contorno)
   wedge([[222, 388], [242, 385], [232, 400]]);       // pulso (embaixo da dobra)
   // olho: amêndoa grande sob a sobrancelha, íris amarelo->laranja, pupila em fenda, brilho, contorno escuro
   const [ex, ey] = HEAD.olho;
