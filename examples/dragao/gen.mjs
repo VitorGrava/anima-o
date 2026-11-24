@@ -418,6 +418,13 @@ function shadeDragon(D, v) {
         db = Math.min(db, Math.hypot(x - w0[0] - vx * tt, y - w0[1] - vy * tt));
       }
       if (db < 9) t += (v === "dourado" ? -0.2 : -0.12) * (1 - db / 9);
+      if (v === "dourado" && !(p && p.far)) {
+        // película de ouro escorrendo dos ossos para dentro do painel: manchas verticais, mais claras junto ao osso
+        const f = vnoise(x / 2.6 + 11, y / 40);
+        if (db < 6 + 18 * f && f > 0.5) t += 0.32 * (1 - db / 26);
+        // especular fino na borda livre (painéis 0–2)
+        if (p && p.i <= 2 && buf.mat[k + W] !== MAT.membrana && buf.mat[k + W] !== MAT.pele) { out[k] = "R5"; continue; }
+      }
       if (v === "normal" && !(p && p.far)) {
         t += 0.22 * clamp((db - 10) / 30, 0, 1);                                     // borda livre mais clara/quente
         const bd = Math.abs((x - 0.55 * y) - 372);                                  // um feixe de luz cruza 1–2 painéis
@@ -527,12 +534,16 @@ function shadeDragon(D, v) {
       const f = buf.u[k] / bs - Math.floor(buf.u[k] / bs);
       if (f * bs < 1 && tone >= 1) tone -= 1;
     }
+    let beamMid = false;
     if (v === "normal" && tone < 4 && lam > 0.25) {              // o raio da janela acende o que ele cruza (cabeça e peito)
       const t = y / 430, xl = 70 + 120 * t, xr = 150 + 230 * t;
-      const neckOrHead = buf.u[k] >= 2000 || (buf.part[k] === D.spine.part && buf.u[k] < 140);
-      if (neckOrHead && x > xl + 6 && x < xr - 6) tone += 1;   // só cabeça e pescoço, pela parte (sem emenda reta)
+      const bnd = 112 + 14 * buf.s[k];                                   // limite curvo, seguindo o ombro
+      const head = buf.u[k] >= 2000, neck = buf.part[k] === D.spine.part && buf.u[k] < bnd;
+      const edgeBand = buf.part[k] === D.spine.part && buf.u[k] >= bnd && buf.u[k] < bnd + 3;
+      if (x > xl + 6 && x < xr - 6) { if (head || neck) tone += 1; else if (edgeBand && tone < 4) beamMid = true; }   // só cabeça e pescoço, pela parte (sem emenda reta)
     }
     let name = ramp[matName][tone];
+    if (beamMid && matName === "pele") name = ["Ra", "Rb", "Rc", "Rd"][tone];
     // 1 tom intermediário SÓLIDO na borda de cada placa de luz (sem dither)
     if (v === "normal" && matName === "pele" && tone === tone0 && tone >= 1 && frac < 0.12) name = ["Ra", "Rb", "Rc", "Rd"][tone - 1];
     if (matName === "pele") {
@@ -588,29 +599,31 @@ function shadeDragon(D, v) {
     }
   }
   // quebra de ângulo no joelho e no pulso: sombra em CUNHA no lado de dentro da dobra
-  const wedge = (pts) => { const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]); for (let y = Math.min(...ys); y <= Math.max(...ys); y++) for (let x = Math.min(...xs); x <= Math.max(...xs); x++) if (inPoly(x + 0.5, y + 0.5, pts) && res[y * W + x] && buf.mat[y * W + x] === MAT.pele) res[y * W + x] = "R1"; };
+  const wedge = (pts) => { const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]); for (let y = Math.min(...ys); y <= Math.max(...ys); y++) for (let x = Math.min(...xs); x <= Math.max(...xs); x++) if (inPoly(x + 0.5, y + 0.5, pts) && res[y * W + x] && buf.mat[y * W + x] === MAT.pele) res[y * W + x] = v === "dourado" ? "R0" : "R1";
+    if (v === "dourado") {   // no metal escuro a cunha só aparece com a aresta da dobra acesa
+      const [[x0, y0], [x1, y1]] = pts, n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+      for (let i = 0; i <= n; i++) { const xx = Math.round(x0 + ((x1 - x0) * i) / n), yy = Math.round(y0 + ((y1 - y0) * i) / n) - 1; if (res[yy * W + xx] && buf.mat[yy * W + xx] === MAT.pele) res[yy * W + xx] = "R5"; }
+    }
+  };
   wedge([[402, 346], [416, 348], [408, 360]]);       // joelho (dentro da dobra)
   wedge([[418, 366], [432, 368], [424, 380]]);       // jarrete
   wedge([[224, 389], [240, 386], [232, 398]]);       // pulso (embaixo da dobra)
   // olho: amêndoa grande sob a sobrancelha, íris amarelo->laranja, pupila em fenda, brilho, contorno escuro
   const [ex, ey] = HEAD.olho;
-  const EW = 19, EH = 9;
-  for (let j = 0; j < EH; j++) for (let i = 0; i < EW; i++) {
-    const u = (i + 0.5) / EW * 2 - 1, w = (j + 0.5) / EH * 2 - 1;
-    // amêndoa: canto da frente pontudo, de trás arredondado, inclinada (olhar feroz)
-    const top = -1 + 0.9 * (1 - u * u), bot = 1 - 1.1 * (1 - u * u) * 0.9;
-    const inside = w > -0.95 + 1.9 * Math.pow(Math.abs(u), 2.2) * 0.5 - 0.05 && Math.abs(u) < 1 && Math.abs(w) < 1 - Math.pow(Math.abs(u), 1.6) * 0.85;
-    void top; void bot;
-    const x = ex - Math.floor(EW / 2) + i, y = ey - Math.floor(EH / 2) + j - Math.round(u * 1.5);
-    if (!inside) continue;
-    const edge = Math.abs(w) > 0.98 - Math.pow(Math.abs(u), 1.6) * 0.85 - 0.3;
-    let c = w < -0.1 ? "E2" : "E1";
-    if (u < -0.2 && w < 0.2) c = "E2";
-    if (Math.abs(u - 0.08) < 0.1) c = "R0";             // pupila em fenda
-    if (edge) c = "R0";
-    res[y * W + x] = c;
-  }
-  res[(ey - 2) * W + ex - 4] = "E3"; res[(ey - 2) * W + ex - 3] = "E3"; res[(ey - 1) * W + ex - 4] = "E3";
+  // olho ~12x7: pálpebra/sombra da sobrancelha cobrindo o terço de cima (olhar ameaçador), íris amarela->laranja,
+  // pupila em FENDA vertical, 1 px de brilho
+  const EYE = [
+    "...RRRRRR...",
+    ".RRLLLLLLRR.",
+    "RLLLLLPLLLLR",
+    "RaEEEEPEEEER",
+    ".REEEEPEEER.",
+    "..RFFFPFFR..",
+    "....RRRR....",
+  ];
+  const EK = { R: "R0", L: "R1", P: "R0", a: "E3", E: "E2", F: "E1" };
+  EYE.forEach((row, jj) => [...row].forEach((c, ii) => { if (c !== ".") res[(ey - 3 + jj) * W + ex - 6 + ii] = EK[c]; }));
+  for (let ii = 1; ii < 11; ii++) { const q = (ey - 4) * W + ex - 6 + ii; if (res[q] && buf.mat[q] === MAT.pele) res[q] = "R1"; }   // sombra da crista
   // dentes: de cima descem da borda do focinho, de baixo sobem da mandíbula (marfim, luz à esquerda)
   const tooth = (x, y0, len, dir) => { const w0 = len >= 8 ? 4 : 3; for (let j = 0; j < len; j++) { const wdt = j < len * 0.5 ? w0 : j < len * 0.8 ? w0 - 1 : 1; for (let i = 0; i < wdt; i++) { const k = (y0 + dir * j) * W + x + i; res[k] = i === 0 ? "H4" : i < wdt - 1 ? "H3" : "H2"; } } };
   for (const [x, len] of [[123, 6], [131, 5], [140, 11], [151, 5], [161, 6], [171, 4], [185, 9], [194, 4]]) {
@@ -726,8 +739,21 @@ function build(v) {
     const mound = (cx, top, w, base) => { const pts = []; for (let i = 0; i <= 48; i++) { const t = i / 48, x = cx - w / 2 + t * w; pts.push([Math.round(x), Math.round(base - (base - top) * Math.pow(Math.sin(t * Math.PI), 0.7) + Math.sin(t * 19) * 4 + Math.sin(t * 7 + cx) * 6 + (rnd() - 0.5) * 4)]); } return { type: "polygon", points: [...pts, [cx + w / 2, base + 30], [cx - w / 2, base + 30]], color: K("g3") }; };
     sh.push(mound(92, 352, 110, 400), mound(150, 326, 90, 400), mound(206, 346, 100, 400), mound(120, 368, 70, 400), mound(420, 340, 240, 392), mound(300, 358, 200, 400));
     draw("ouro_longe", sh);
-    draw("ouro_longe", [{ type: "gradient", x: 0, y: 320, w: W, h: 90, colors: [K("g3"), K("g2"), K("g1")], direction: "vertical", dither: "bayer4", suavidade: 0.6, only: K("g3") }]);
-    draw("ouro_longe", [{ type: "scatter", x: 0, y: 320, w: W, h: 90, colors: [K("g5"), K("g6"), K("g2")], densidade: 0.08, forma: "onda", distancia: 2, seed: 3, only: [K("g3"), K("g4"), K("g2")] }]);
+    // 2 tons sólidos (sem dither): faixa de cima g3, corpo g2; 2–3 fileiras de moedas na crista com brilho só no topo
+    const crest = [];
+    for (const m of sh) {
+      const top = m.points.slice(0, 49);
+      crest.push({ type: "polygon", points: [...top.map(([x, y]) => [x, y + 12]), ...top.slice().reverse()], color: K("g3") });
+      const body = { type: "polygon", points: [...top.map(([x, y]) => [x, y + 12]), [top[48][0], 430], [top[0][0], 430]], color: K("g2") };
+      crest.push(body);
+      for (let r = 0; r < 3; r++) for (let q = 1; q < 48; q += 2) {
+        const [cx, cy] = top[q]; const yy = cy + 1 + r * 4 + ((q + r) % 2);
+        crest.push({ type: "ellipse", x: cx - 3 + (r % 2) * 2, y: yy, w: 7, h: 3, color: K(r === 0 ? "g4" : "g3"), filled: true });
+        crest.push({ type: "line", x1: cx - 2 + (r % 2) * 2, y1: yy + 2, x2: cx + 2 + (r % 2) * 2, y2: yy + 2, color: K("g2") });
+        if (r === 0 && q % 4 === 1) crest.push({ type: "pixels", points: [[cx - 1, yy]], color: K("g6") });
+      }
+    }
+    draw("ouro_longe", crest);
     tf("ouro_longe", { op: "haze", color: K("bg5"), quantidade: 0.3 });
   }
 
@@ -1012,14 +1038,16 @@ function build(v) {
     const dark = { R6: "R4", R5: "R4", rim2: "R4", L6: "R4", L5: "R4", R4: "R3", rim1: "R3", L4: "R3", R3: "R2", F2: "R3", F1: "R2" };
     for (let dy = 1; dy < 104; dy++) {
       const y = SURF + dy; if (y >= H) break;
-      if (dy % 3 === 0) continue;                              // faixas de 2 px, o laranja do rio aparece entre elas
-      if (dy > 60 && dy % 6 >= 4) continue;                    // mais esparso ao longe
-      const wob = Math.round(Math.sin(dy * 0.9) * 1.5);
+      // linhas com espaçamento variado (1–3 px), cada linha em segmentos deslocados 2–6 px; rareia longe da base
+      const hrow = vnoise(dy * 0.61, 3.3), keep = dy < 30 ? 0.3 : dy < 55 ? 0.48 : 0.7;
+      if (hrow < keep) continue;
+      const top = vnoise((dy - 1) * 0.61, 3.3) < keep;          // primeira linha de um grupo = crista
       for (let x = 0; x < W; x++) {
+        if (vnoise(x / (10 + dy * 0.15) + dy * 0.37, dy * 1.7) < 0.3 + dy / 260) continue;   // segmentos curtos
+        const wob = Math.round(Math.sin(dy * 0.7 + Math.floor(x / 23)) * 2 + Math.sin(dy * 0.23) * 3);
         const sy = SURF - Math.round(dy * 1.05), sx = x + wob;
         if (sy < 0 || sx < 0 || sx >= W) continue;
         const c = grid[sy * W + sx]; if (!c) continue;
-        const top = dy % 3 === 1;
         rg[y * W + x] = top && (c === "R6" || c === "R5" || c === "rim2") ? "L5" : dark[c] || "R1";
       }
     }
