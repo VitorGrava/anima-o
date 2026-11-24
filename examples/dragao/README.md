@@ -9,7 +9,7 @@ Para gerar: `node examples/dragao/gen.mjs [normal|dourado|ambos]`. O script recr
 ## Como é feito
 - Fundo, colunas, portal, pilhas de ouro, moedas, joias, taças, rio de ouro, cascatas e brilhos usam `draw_shapes` (gradient, polygon, ellipse, rect, terrain, scatter) e `transform` (haze por plano, outline seletivo, reflect no ouro líquido).
 - Dragão: geometria própria no script, com tubos de esferas ao longo de splines (pescoço, tronco e cauda formam um tubo só), elipsoides (ombro, coxa) e polígonos (membrana, espinhos, garras). Cada parte tem profundidade z e normal. Cada pixel recebe a rampa do seu material. As escamas seguem as coordenadas u/v do tubo e as placas da barriga ficam do lado ventral. Onde uma parte da frente encosta numa de trás, sai uma linha escura. O resultado vai para a engine por `draw_rows`, que depois aplica `outline seletivo` e `clean`.
-- Versão dourada: a geometria é a mesma, com a paleta trocada por ouro e uma luz de "metal" (normal para baixo reflete o rio claro, normal para cima reflete o teto escuro). Tem filetes que escorrem pela pele, gotas nos pontos mais baixos, faixa incandescente onde o corpo entra no ouro, reflexo, vapor e fumaça feitos com ruído e dither.
+- Versão dourada: a geometria é a mesma, mas o material é METAL POR REFLEXÃO. O vetor refletido define o tom: para baixo reflete o rio (amarelo-branco ou laranja), para os lados reflete as paredes escuras, e no topo das formas aparece uma faixa especular fina e dura. A silhueta tem contraluz do rio. Rampa de 5 tons de alto contraste, escamas só sugeridas nas bordas e fundo escuro e frio. O ouro forma lençóis que cobrem a borda de baixo de cada volume, e há 14 gotas só nos pontos mais baixos. Também tem menisco em volta de cada perna, reflexo escurecido, cadinho despejando o filete e fumaça em 3 tons.
 
 ## Referências estudadas (só localmente, nada copiado nem redistribuído)
 - pixie.haus, "Dragon perched on gold hoard": pose e asas como moldura. https://pixie.haus/pixelart/146844/dragon-perched-on-gold-hoard-fantasy
@@ -30,7 +30,7 @@ Arte 1 (normal):
 
 Arte 2 (dourada):
 1. Mesma silhueta e mesma pose. A parte de baixo some sob a superfície do ouro derretido.
-2. Luz forte de baixo: as faces viradas para baixo ficam quase brancas e o dorso fica bronze escuro, como metal.
-3. Ouro líquido em filetes que engrossam e terminam em gota, com pingos concentrados no queixo, nas pontas das asas e na barriga.
+2. Metal polido: faces de baixo refletem o rio (amarelo-branco/laranja), laterais escuras, faixa especular dura no topo das formas e contraluz na silhueta.
+3. Ouro líquido em lençóis na borda de baixo de cada volume e em poucas gotas grossas com bulbo, só nos pontos mais baixos (queixo, pontas, barriga).
 4. Rio com núcleo amarelo-branco, bordas laranja e veias de crosta escura, mais reflexo do dragão, respingos e vapor aceso.
-5. Acento: olho vermelho-laranja contra o ouro, e cascatas de ouro saindo da parede da forja.
+5. Acento: olho vermelho-laranja contra o ouro e um cadinho despejando um filete de ouro (núcleo branco-amarelo, borda vermelha) que respinga no rio.
