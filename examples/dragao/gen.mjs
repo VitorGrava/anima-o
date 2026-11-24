@@ -85,7 +85,7 @@ function palette(v) {
 // pontos [x, y, z, r]; z cresce em direção ao espectador
 const SPINE = [
   [210, 126, 10, 19], [222, 160, 8, 22], [211, 200, 6, 25], [205, 238, 4, 31], [222, 274, 2, 43],
-  [262, 298, 0, 57], [320, 304, 0, 61], [380, 300, -2, 55], [430, 306, -6, 43], [466, 332, 0, 33],
+  [262, 298, 0, 57], [320, 306, 0, 64], [380, 300, -2, 55], [430, 306, -6, 43], [466, 332, 0, 33],
   [482, 376, 15, 29], [470, 420, 35, 25], [430, 450, 50, 21], [370, 470, 60, 17], [302, 478, 62, 13],
   [236, 470, 60, 9.5], [206, 466, 58, 7], [180, 453, 58, 5], [150, 449, 56, 2.5],
 ];
@@ -133,7 +133,7 @@ function catmull(pts, step = 0.8) {
 // buffer do dragão
 function makeBuf() {
   const N = W * H;
-  return { prims: [], groups: 0, fuse: [], toSpine: new Map(), fz: new Map(), joined: new Set(), noScale: new Uint8Array(N), hornLen: new Map(), blocos: new Set(), z: new Float32Array(N).fill(-1e9), nx: new Float32Array(N), ny: new Float32Array(N), nz: new Float32Array(N), mat: new Uint8Array(N), part: new Uint8Array(N), u: new Float32Array(N), s: new Float32Array(N), r: new Float32Array(N), flag: new Uint8Array(N) };
+  return { noSpec: new Set(), prims: [], groups: 0, fuse: [], toSpine: new Map(), fz: new Map(), joined: new Set(), noScale: new Uint8Array(N), hornLen: new Map(), blocos: new Set(), z: new Float32Array(N).fill(-1e9), nx: new Float32Array(N), ny: new Float32Array(N), nz: new Float32Array(N), mat: new Uint8Array(N), part: new Uint8Array(N), u: new Float32Array(N), s: new Float32Array(N), r: new Float32Array(N), flag: new Uint8Array(N) };
 }
 const MAT = { pele: 1, barriga: 2, chifre: 3, membrana: 4, boca: 5, garra: 6 };
 let PART = 0;
@@ -450,6 +450,8 @@ function buildDragon(v) {
   ellipsoid(buf, { cx: 296, cy: 400, rx: 18, ry: 9, rot: 0, z: -40, rz: 10 }, MAT.pele, { flag: 3 });
   for (let i = 0; i < 3; i++) spike(buf, [282 + i * 8, 404], [276 + i * 8, 414], 3, -30, MAT.garra);
   for (let p = p0 + 1; p <= PART; p++) buried.add(p);
+  // perna traseira de LONGE, no vão entre a perna e a cauda (escura, fica atrás)
+  { const pl = PART; tube(buf, [[430, 330, -30, 18], [438, 362, -30, 15], [432, 394, -28, 11]], MAT.pele, { flag: 3 }); ellipsoid(buf, { cx: 436, cy: 398, rx: 12, ry: 6, rot: 0, z: -26, rz: 6 }, MAT.pele, { flag: 3 }); for (let p = pl + 1; p <= PART; p++) buried.add(p); }
   // pata dianteira de LONGE: sai atrás da primeira, mais escura, pulso e 3 garras (não fica enterrada)
   tube(buf, [[270, 362, -20, 11], [260, 388, -18, 8.5], [252, 397, -16, 7]], MAT.pele, { flag: 3 });
   ellipsoid(buf, { cx: 250, cy: 401, rx: 11, ry: 6, rot: 0, z: -16, rz: 6 }, MAT.pele, { flag: 3 });
@@ -487,9 +489,10 @@ function buildDragon(v) {
   ellipsoid(buf, { cx: 382, cy: 298, rx: 42, ry: 26, rot: -0.3, z: 22, rz: 38 }, MAT.pele, { u0: 640, part: coxa });   // massa do quadril
   // joelho = QUEBRA angulosa: dois segmentos retos (a canela muda de direção), sem esfera colada; afunila até o tornozelo
   // joelho ~34° e jarrete ~44° de mudança de direção (segmentos retos), canela e pé mais grossos
-  const can = tube(buf, [[384, 330, 34, 21], [410, 344, 36, 18]], MAT.pele, { u0: 900 }).part;
-  tube(buf, [[410, 344, 36, 18], [424, 370, 38, 13]], MAT.pele, { u0: 930, part: can });
-  tube(buf, [[424, 370, 38, 8.5], [416, 398, 42, 6.5]], MAT.pele, { u0: 960, part: can });   // metatarso
+  const can = tube(buf, [[390, 330, 34, 16], [410, 344, 36, 14]], MAT.pele, { u0: 900 }).part;
+  buf.noSpec.add(can);   // sem faixa especular na canela (na ponta da esfera virava anel)
+  tube(buf, [[410, 344, 36, 14], [424, 370, 38, 11]], MAT.pele, { u0: 930, part: can });
+  tube(buf, [[424, 370, 38, 9.5], [416, 398, 42, 8]], MAT.pele, { u0: 960, part: can });   // metatarso
   const pe2 = foot(buf, 412, 404, 46, -1, 3, 1.35);
 
   // ---- perna da frente (perto): úmero grosso, cotovelo PARA TRÁS, antebraço afinando, pulso, mão com dedos ----
@@ -517,7 +520,7 @@ function buildDragon(v) {
     panelDefs.forEach((pts, i) => { const p = polygon(buf, pts, MAT.membrana, zw - i * 0.1, normals[i], { flag: 1 }); wingInfo.panels.push({ part: p, far: false, i }); });
     // úmero nasce do ombro (grosso), cotovelo para trás, antebraço sobe até o pulso; dedos em ARCO
     const esc = ellipsoid(buf, { cx: 314, cy: 240, rx: 26, ry: 15, rot: -0.6, z: 22, rz: 22 }, MAT.pele, { u0: 1480 });   // escápula
-    const wh = tube(buf, [[...ombro, zw + 14, 23], [322, 232, zw + 14, 17], [350, 212, zw + 14, 12.5], [...cotovelo, zw + 14, 10]], MAT.pele, { u0: 1500 }).part;
+    const wh = tube(buf, [[...ombro, 6, 23], [322, 232, 22, 17], [350, 212, 38, 12.5], [...cotovelo, zw + 14, 10]], MAT.pele, { u0: 1500 }).part;   // cresce de dentro do dorso
     tube(buf, [[...cotovelo, zw + 14, 10], [378, 140, zw + 14, 7.5], [...pulso, zw + 14, 5.5]], MAT.pele, { u0: 1600, part: wh });
     buf.fuse.push([spine.part, esc, 10], [esc, wh, 8], [spine.part, wh, 8]);
     ellipsoid(buf, { cx: pulso[0], cy: pulso[1], rx: 9, ry: 8, rot: 0, z: zw + 18, rz: 6 }, MAT.pele, { u0: 1650 });   // nó do pulso
@@ -625,7 +628,7 @@ function shadeDragon(D, v) {
       }
       if (p && p.far) t = 0.12 + 0.2 * lam + (v === "dourado" ? clamp((y - 100) / 500, 0, 0.2) : 0.16 * clamp((130 - y) / 110, 0, 1));
       if (p && p.far) t = 0.12 + 0.2 * lam + (v === "normal" ? 0.18 * (Math.hypot(x - 330, y - 20) < 95 ? 1 : 0) : 0);   // 2 tons sólidos com divisa curva
-      const tone = clamp(Math.floor(t * 5 + (p && p.far ? 0 : (bayer(x, y) - 0.5) * 0.5)), 0, 4);
+      const tone = clamp(Math.floor(t * 5), 0, 4);   // sem dither (o xadrez lia como ruído em volta da raiz)
       out[k] = ramp.membrana[tone];
       continue;
     }
@@ -644,16 +647,16 @@ function shadeDragon(D, v) {
       const arcUp = buf.part[k] === D.spine.part ? 0.14 * Math.exp(-(((x - 330) / 60) ** 2)) : 0;   // no dorso a faixa sobe ~4 px no meio (arco)
       const sC = -0.47 - arcUp + (isTorso ? 0 : 0.09 * Math.sin(buf.u[k] / 38 + buf.part[k])), sW = isTorso ? 0.05 : 0.03 + 0.07 * nb;   // faixa que ondula com o arco e varia de 1 a 3 px
       const sLo = sC - sW, sHi = sC + sW;
-      const sOn = isTorso ? true : buf.part[k] % 2 ? seg > 0.38 && nb > 0.2 : seg > 0.8;     // metade dos tubos: faixa em 2–3 segmentos; outra metade: só um ponto de brilho
+      const sOn = buf.noSpec.has(buf.part[k]) ? false : isTorso ? true : buf.part[k] % 2 ? seg > 0.38 && nb > 0.2 : seg > 0.8;     // metade dos tubos: faixa em 2–3 segmentos; outra metade: só um ponto de brilho
       // 3 zonas largas: topo (dourado médio) -> UMA sombra que cresce para baixo -> reflexo do rio na borda de baixo
       if (ry > 0.5) {   // o rio só aparece junto à borda de baixo de cada volume (sem "adesivo" oval no meio)
         let gp = 0; for (let dd = 1; dd <= 5; dd++) { const q = (y + dd) * W + x; if (y + dd >= H || !buf.mat[q] || buf.part[q] !== buf.part[k]) { gp = dd; break; } }
         if (gp === 1) nm = "rim2"; else if (gp === 2 || gp === 3) nm = "rim1"; else if (gp) tg = 3; else tg = 0;
       }
-      else if (ry > 0.22) tg = 0;
-      else if (ry > 0.14) nm = "Rg1";                           // 1 tom de transição (sem dither)
-      else if (ry > -0.08) tg = 1;
-      else if (ry > -0.16) nm = "Rg2";
+      else if (ry > 0.25) tg = 0;
+      else if (ry > 0.11) nm = "Rg1";                           // 1 tom de transição (sem dither), mais largo
+      else if (ry > -0.05) tg = 1;
+      else if (ry > -0.19) nm = "Rg2";
       else if (ry > sHi || ry < sLo || !sOn) tg = 2;
       else nm = R > 6 ? "R6" : "R5";                          // especular: segmento curvo de 1–3 px
       if (!nm && tg <= 2 && rx > 0.35 && ry < 0.5) tg = Math.max(0, tg - 1);      // lado direito (oposto à forja): sombra contínua
@@ -668,7 +671,7 @@ function shadeDragon(D, v) {
       }
       if (buf.flag[k] === 3) tg = Math.min(tg ?? 1, 1), nm = null;
       if (buf.flag[k] === 2) { tg = Math.max(0, (tg ?? 3) - 1); nm = null; }
-      if (nz < 0.3 && ny > -0.15 && !buf.flag[k]) nm = "rim2";    // contraluz do rio na silhueta
+      if (nz < 0.3 && ny > -0.15 && buf.flag[k] !== 2) nm = buf.flag[k] === 3 ? "rim1" : "rim2";    // contraluz do rio na silhueta
       // lado de baixo do TRONCO: curva escura (de costas para o teto, ofuscada); contraluz laranja só nos 2–3 px de baixo
       if (buf.part[k] === D.spine.part && buf.u[k] > 150 && buf.u[k] < 440 && ny > 0.12) {
         let gap = 0; for (let dd = 1; dd <= 4; dd++) { const q = (y + dd) * W + x; if (y + dd >= H || !buf.mat[q] || buf.part[q] !== buf.part[k]) { gap = dd; break; } }
@@ -693,7 +696,8 @@ function shadeDragon(D, v) {
       out[k] = nm || gr[clamp(tg, 0, 4)];
       continue;
     }
-    const isBelly = m === MAT.pele && R > 8 && buf.u[k] < 1100 && s > 0.62 && !buf.flag[k] && (buf.part[k] === D.spine.part || buf.u[k] < 150);
+    const ub = buf.u[k], bthr = ub < 360 ? 0.62 : ub < 410 ? 0.62 + 0.4 * (ub - 360) / 50 : ub < 490 ? 1.02 - 0.4 * (ub - 410) / 80 : 0.62;   // afina até zero sob a coxa
+    const isBelly = m === MAT.pele && R > 8 && ub < 1100 && s > bthr && !buf.flag[k] && (buf.part[k] === D.spine.part || ub < 150);
     if (isBelly) matName = "barriga";
     let tone = clamp(Math.floor(val * 5), 0, 4);
     const tone0 = tone, frac = val * 5 - Math.floor(val * 5);
@@ -817,7 +821,7 @@ function shadeDragon(D, v) {
   }
   // quebra de ângulo no joelho e no pulso: sombra em CUNHA no lado de dentro da dobra
   const wedge = (pts) => { const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]); for (let y = Math.min(...ys); y <= Math.max(...ys); y++) for (let x = Math.min(...xs); x <= Math.max(...xs); x++) if (inPoly(x + 0.5, y + 0.5, pts) && res[y * W + x] && buf.mat[y * W + x] === MAT.pele) res[y * W + x] = v === "dourado" ? "R0" : "R1";
-    if (v === "dourado") {   // no metal escuro a cunha só aparece com a aresta da dobra acesa
+    if (false) {   // (aresta acesa removida: no joelho lia como anel solto)
       const [[x0, y0], [x1, y1]] = pts, n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
       for (let i = 0; i <= n; i++) { const xx = Math.round(x0 + ((x1 - x0) * i) / n), yy = Math.round(y0 + ((y1 - y0) * i) / n) - 1; if (res[yy * W + xx] && buf.mat[yy * W + xx] === MAT.pele) res[yy * W + xx] = "R5"; }
     }
@@ -826,8 +830,8 @@ function shadeDragon(D, v) {
     if (buf.mat[k] !== MAT.chifre || buf.hornLen.has(buf.part[k]) || !res[k] || (buf.flag[k] === 4 && y0of(k) < 250)) continue;
     if ([k - 1, k + 1, k - W, k + W].some((q) => buf.mat[q] === MAT.pele && buf.part[q] !== buf.part[k] && buf.z[q] > buf.z[k] - 30)) res[k] = v === "dourado" ? "R1" : "H1";   // espinho: 1 px de sombra na base
   }
-  wedge([[400, 345], [418, 347], [409, 362]]);       // joelho (dentro da dobra)
-  wedge([[416, 365], [434, 367], [425, 383]]);       // jarrete
+  wedge([[404, 347], [414, 348], [409, 356]]);       // joelho: cunha curta atrás da dobra
+  wedge([[419, 367], [429, 368], [424, 376]]);       // jarrete
   wedge([[222, 388], [242, 385], [232, 400]]);       // pulso (embaixo da dobra)
   // olho: amêndoa grande sob a sobrancelha, íris amarelo->laranja, pupila em fenda, brilho, contorno escuro
   const [ex, ey] = HEAD.olho;
@@ -863,6 +867,8 @@ function shadeDragon(D, v) {
       const x = Math.round(206 + Math.cos(a) * 11), y = Math.round(148 + Math.sin(a) * 9), k = y * W + x;
       if (buf.mat[k] === MAT.pele && buf.u[k] >= 2000) { res[k] = "R6"; if (a > 3.8 && a < 4.5 && res[k + W]) res[k + W] = "R5"; }
     }
+    // escorrido de ouro ligando o braço da asa ao dorso
+    for (let j = 0; j < 16; j++) { const x = 316 + Math.round(j * 0.15), y = 248 + j, k = y * W + x; if (!buf.mat[k]) continue; res[k] = "R5"; res[k + 1] = "R4"; res[k + 2] = "R2"; res[k - 1] = j > 3 ? "R6" : res[k - 1]; }
     // escorrido grosso pendurado no queixo
     let yb = -1; for (let y = 150; y < 200; y++) if (buf.mat[y * W + 150] === MAT.pele && !buf.mat[(y + 1) * W + 150]) { yb = y; break; }
     if (yb > 0) {
@@ -1256,14 +1262,14 @@ function build(v) {
     }
     cand.sort((a, b) => b[2] - a[2] || a[0] - b[0]);
     const picked = [];
-    for (let x = 282; x <= 350; x += 17) { let yb = -1; for (let y = 300; y < SURF - 12; y++) if (grid[y * W + x] && !grid[(y + 1) * W + x]) { yb = y; break; } if (yb > 0) picked.push([x, yb, 99]); }   // ouro acumulado na borda da barriga
+    for (let x = 286; x <= 346; x += 30) { let yb = -1; for (let y = 300; y < SURF - 12; y++) if (grid[y * W + x] && !grid[(y + 1) * W + x]) { yb = y; break; } if (yb > 0) picked.push([x, yb, 99]); }   // ouro acumulado na borda da barriga
     for (const c of cand) { if (picked.length >= 18) break; if (picked.every(([px, py]) => Math.hypot(px - c[0], py - c[1]) > 22)) picked.push(c); }
     for (const [x, y, sc] of picked) {
-      let len = sc === 99 ? 7 + ((x * 3) % 7) : 12 + ((x * 7 + y * 3) % 26);
+      let len = sc === 99 ? 11 + ((x * 3) % 5) : 12 + ((x * 7 + y * 3) % 26);
       for (let j = 1; j < len; j++) if (grid[(y + j) * W + x] || y + j >= SURF - 4) { len = j - 1; break; }
       if (len < 6) continue;
       for (let j = 1; j <= len; j++) {
-        const w = j < len * 0.4 ? 3 : j < len * 0.7 ? 2 : 1, k = (y + j) * W + x - 1;
+        const w = j < len * (sc === 99 ? 0.7 : 0.4) ? 3 : j < len * 0.85 ? 2 : 1, k = (y + j) * W + x - 1;
         if (w === 3) { grid[k] = "R5"; grid[k + 1] = "R4"; grid[k + 2] = "R2"; }
         else if (w === 2) { grid[k + 1] = "R5"; grid[k + 2] = "R3"; }
         else grid[k + 1] = "R4";
