@@ -49,6 +49,7 @@ function palette(v) {
     g0: "#2e1210", g1: "#58241a", g2: "#8a401c", g3: "#bf6a1e", g4: "#e39a2a", g5: "#f8c94a", g6: "#fff09a",
     // dragão: rampa vermelha (sombra roxa -> luz laranja)
     R0: "#1e0818", R1: "#3c0d24", R2: "#64142c", R3: "#901f2e", R4: "#b8362e", R5: "#dc5f34", R6: "#f79a52",
+    Ra: "#501029", Rb: "#7a1a2d", Rc: "#a42b2e", Rd: "#ca4a31",
     rim1: "#d2622a", rim2: "#f4a040",
     B0: "#3a1418", B1: "#6e3424", B2: "#a8602e", B3: "#d6964a", B4: "#f4cc78",
     H0: "#24161a", H1: "#4a3634", H2: "#7a6252", H3: "#b29a7a", H4: "#e8dcbc",
@@ -284,7 +285,7 @@ function buildDragon(v) {
   tube(buf, [[436, 380, 38, 11], [428, 392, 40, 9.5], [420, 401, 42, 9]], MAT.pele, { u0: 960 });             // metatarso
   foot(buf, 414, 404, 46, -1, 3);
   // ---- perna da frente (perto): úmero grosso, cotovelo PARA TRÁS, antebraço afinando, pulso, mão com dedos ----
-  const hum = tube(buf, [[252, 300, 40, 28], [262, 328, 42, 24], [272, 350, 44, 20]], MAT.pele, { u0: 1200 }).part;            // úmero
+  const hum = tube(buf, [[252, 300, 40, 28], [262, 328, 42, 24], [272, 350, 44, 20]], MAT.pele, { u0: 1200, part: spine.part }).part;   // fundido ao peito (só valor, sem contorno)            // úmero
   ellipsoid(buf, { cx: 250, cy: 326, rx: 26, ry: 16, rot: 1.2, z: 54, rz: 14 }, MAT.pele, { u0: 1250, part: hum });      // bíceps (bloco de luz)
   ellipsoid(buf, { cx: 274, cy: 350, rx: 13, ry: 12, rot: 0, z: 52, rz: 10 }, MAT.pele, { u0: 1260 });       // cotovelo
   tube(buf, [[272, 352, 50, 14], [250, 372, 52, 11.5], [228, 389, 54, 9]], MAT.pele, { u0: 1270 });            // antebraço afinando 14 -> 9
@@ -304,8 +305,8 @@ function buildDragon(v) {
     const normals = [[-0.35, -0.5, 0.8], [0.1, -0.1, 1], [0.45, 0.15, 0.88], [0.2, 0.35, 0.92], [-0.6, -0.4, 0.7]];
     panelDefs.forEach((pts, i) => { const p = polygon(buf, pts, MAT.membrana, zw - i * 0.1, normals[i], { flag: 1 }); wingInfo.panels.push({ part: p, far: false, i }); });
     // úmero nasce do ombro (grosso), cotovelo para trás, antebraço sobe até o pulso; dedos em ARCO
-    tube(buf, [[...ombro, zw + 14, 19], [330, 226, zw + 14, 14], [350, 212, zw + 14, 11.5], [...cotovelo, zw + 14, 9.5]], MAT.pele, { u0: 1500 });
-    tube(buf, [[...cotovelo, zw + 14, 9.5], [378, 140, zw + 14, 7.5], [...pulso, zw + 14, 7]], MAT.pele, { u0: 1600 });
+    tube(buf, [[...ombro, zw + 14, 23], [322, 232, zw + 14, 17], [350, 212, zw + 14, 12.5], [...cotovelo, zw + 14, 10]], MAT.pele, { u0: 1500 });
+    tube(buf, [[...cotovelo, zw + 14, 10], [378, 140, zw + 14, 7.5], [...pulso, zw + 14, 5.5]], MAT.pele, { u0: 1600 });
     ellipsoid(buf, { cx: pulso[0], cy: pulso[1], rx: 9, ry: 8, rot: 0, z: zw + 18, rz: 6 }, MAT.pele, { u0: 1650 });   // nó do pulso
     for (const d of dedos) {
       const mx = (pulso[0] + d[0]) / 2, my = (pulso[1] + d[1]) / 2, L = Math.hypot(d[0] - pulso[0], d[1] - pulso[1]);
@@ -415,7 +416,7 @@ function shadeDragon(D, v) {
       else if (ry + d > 0.62) tg = 3;
       else if (ry + d > 0.42) nm = "rim1";
       else if (ry + d > 0.2) tg = 2;
-      else if (ry + d > sHi) tg = rx + d < -0.35 ? 2 : 1;          // faces voltadas para o filete/forja à esquerda pegam meio-tom dourado
+      else if (ry + d > sHi) tg = rx + d < -0.35 ? 2 : ry > -0.08 ? 0 : 1;   // de frente reflete o salão escuro: quase preto (contraste de metal)          // faces voltadas para o filete/forja à esquerda pegam meio-tom dourado
       else if (ry + d > sLo && sOn) nm = R > 6 ? "R6" : "R5";     // faixa especular curva no topo das formas
       else tg = ry + d > sLo ? 2 : 1;
       // oclusão: perto de uma parte que está NA FRENTE (pata junto à barriga), escurece
@@ -426,17 +427,6 @@ function shadeDragon(D, v) {
           const q = yy * W + xx; if (buf.mat[q] && buf.part[q] !== buf.part[k] && buf.z[q] > buf.z[k] + 8) occ++;
         }
         if (occ >= 2) { nm = null; tg = Math.min(tg ?? 3, occ >= 4 ? 1 : 2); }
-        // ventre: escurece em degradê arredondado perto das patas e da coxa (oclusão larga), em vez de painel em caixa
-        if (ry > 0.2 && buf.part[k] === D.spine.part) {
-          let near = 0;
-          for (let a = 0; a < 12; a++) for (const r of [8, 16, 24]) {
-            const xx = Math.round(x + Math.cos(a * 0.5236) * r), yy = Math.round(y + Math.sin(a * 0.5236) * r);
-            if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
-            const q = yy * W + xx; if (buf.mat[q] && buf.part[q] !== buf.part[k] && !buf.flag[q]) near += r === 8 ? 2 : 1;
-          }
-          const drop = near + (bayer(x, y) - 0.5) * 3 > 14 ? 2 : near + (bayer(x, y) - 0.5) * 3 > 6 ? 1 : 0;
-          if (drop) { if (nm === "rim1") { nm = null; tg = 2; } tg = Math.max(1, (tg ?? 2) - drop); }
-        }
       }
       if (buf.flag[k] === 3) tg = Math.min(tg ?? 1, 1), nm = null;
       if (buf.flag[k] === 2) { tg = Math.max(0, (tg ?? 3) - 1); nm = null; }
@@ -445,10 +435,16 @@ function shadeDragon(D, v) {
       if (buf.part[k] === D.spine.part && buf.u[k] > 150 && buf.u[k] < 440 && ny > 0.12) {
         let gap = 0; for (let dd = 1; dd <= 3; dd++) { const q = (y + dd) * W + x; if (y + dd >= H || !buf.mat[q] || buf.part[q] !== buf.part[k]) { gap = dd; break; } }
         if (gap === 1) nm = "rim2"; else if (gap >= 2) nm = "rim1";
-        else { nm = null; tg = ny > 0.55 ? 1 : 2; if (ny > 0.35 && ny <= 0.55 && bayer(x, y) < 0.5) tg = 1; }
+        else {
+          const wv = 0.05 * Math.sin(x / 7) + 0.04 * Math.sin(x / 3.3);   // borda ondulada: o reflexo não forma faixa reta
+          if (ny < 0.4 + wv) { nm = null; tg = 0; }             // sombra quase preta
+          else if (ny < 0.52 + wv) { nm = null; tg = 2; }       // meio-tom metálico
+          else nm = "rim1";                                      // reflexo laranja da piscina subindo pela metade de baixo
+        }                                    // reflexo laranja da piscina subindo pela metade de baixo
       }
       // escamas em 1 tom só na meia-luz (e sugeridas nas bordas)
-      if (!nm && m === MAT.pele && R > 9 && (tg === 2 || nz < 0.5) && tg >= 1) {
+      const torso = buf.part[k] === D.spine.part && buf.u[k] > 150 && buf.u[k] < 440;
+      if (!nm && !torso && m === MAT.pele && R > 9 && (tg === 2 || nz < 0.5) && tg >= 1) {
         const ss = clamp(R * 0.17, 3, 8), arc = Math.asin(clamp(s, -1, 1)) * R;
         const a = buf.u[k] / ss, j = Math.floor(a), fy = a - j, b = arc / ss + (j & 1) * 0.5, fx = b - Math.floor(b) - 0.5;
         if (Math.abs(fy - (0.5 + 0.5 * Math.sqrt(Math.max(0, 1 - 4 * fx * fx)))) * ss < 0.55) tg -= 1;
@@ -459,20 +455,21 @@ function shadeDragon(D, v) {
     }
     const isBelly = m === MAT.pele && R > 8 && buf.u[k] < 1100 && s > 0.62 && !buf.flag[k];
     if (isBelly) matName = "barriga";
-    let tone = clamp(Math.floor(val * 5 + (bayer(x, y) - 0.5) * (R > 30 ? 0.55 : 0.18)), 0, 4);
-    if (v === "normal" && buf.part[k] === D.spine.part && buf.u[k] > 150 && buf.u[k] < 440) {   // oclusão sob o ventre e atrás do cotovelo
+    let tone = clamp(Math.floor(val * 5), 0, 4);
+    const tone0 = tone, frac = val * 5 - Math.floor(val * 5);
+    if (v === "normal" && buf.part[k] === D.spine.part && ((buf.u[k] > 150 && buf.u[k] < 440) || (buf.u[k] >= 1200 && buf.u[k] < 1300))) {   // oclusão sob o ventre e atrás do cotovelo
       let occ = 0;
       for (const [dx, dy] of [[6, 0], [-6, 0], [0, 6], [0, -6], [5, 5], [-5, 5], [11, 0], [-11, 0], [0, 11], [8, 8], [-8, 8]]) {
         const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
         const q = yy * W + xx; if (buf.mat[q] && buf.part[q] !== buf.part[k] && buf.z[q] > buf.z[k] + 6 && !buf.flag[q]) occ++;
       }
-      if (occ + (bayer(x, y) - 0.5) * 2 >= 2) tone = Math.max(0, tone - (occ >= 5 ? 2 : 1));
+      if (occ >= 2) tone = Math.max(0, tone - (occ >= 5 ? 2 : 1));
     }
     // escamas que seguem o volume (tubo: linhas = ao longo do comprimento; colunas = em volta)
     if (v === "normal" && buf.blocos.has(buf.part[k])) tone = (ny < -0.15 && nx < 0.3 ? 4 : ny < 0.3 ? 2 : 1) - (nx > 0.55 ? 1 : 0);   // coxa em BLOCOS: luz em cima, sombra embaixo
     // oclusão sob a barriga/peito e dentro das dobras: o tronco ganha volume em vez de faixas
     if (v === "normal" && m === MAT.pele && !buf.flag[k] && ny > 0.4 && y > 300 && y < 380) tone = Math.max(0, tone - 1);
-    const scaleOn = v === "normal" ? tone >= 1 && tone <= 3 : nz < 0.45 && tone >= 1;   // dourado: a grade some sob o ouro (só sugere nas bordas)
+    const scaleOn = v === "normal" ? tone >= 2 && tone <= 3 && frac >= 0.2 : nz < 0.45 && tone >= 1;   // escamas só na meia-luz   // dourado: a grade some sob o ouro (só sugere nas bordas)
     if (matName === "pele" && R > 5 && scaleOn) {
       const ss = buf.u[k] >= 2000 ? 3.5 : clamp(R * 0.17, 3, 8);
       const arc = Math.asin(clamp(s, -1, 1)) * R;
@@ -480,7 +477,7 @@ function shadeDragon(D, v) {
       const b = arc / ss + (j & 1) * 0.5, fx = b - Math.floor(b) - 0.5;
       const edgeY = 0.5 + 0.5 * Math.sqrt(Math.max(0, 1 - 4 * fx * fx));
       const dist = Math.abs(fy - edgeY) * ss;
-      if (dist < 0.55 && !(tone === 1 && (x + y) % 2)) tone -= 1;
+      if (dist < 0.55) tone -= 1;
       else if (fy < 0.3 && Math.abs(fx) < 0.22 && tone >= 3 && spec > 0.25) tone = Math.min(4, tone + 1);
     }
     if (matName === "barriga") {
@@ -493,6 +490,8 @@ function shadeDragon(D, v) {
       if (y < 430 && x > xl + 6 && x < xr - 6) tone += 1;
     }
     let name = ramp[matName][tone];
+    // 1 tom intermediário SÓLIDO na borda de cada placa de luz (sem dither)
+    if (v === "normal" && matName === "pele" && tone === tone0 && tone >= 1 && frac < 0.2) name = ["Ra", "Rb", "Rc", "Rd"][tone - 1];
     if (matName === "pele") {
       if (bounce > 0.55 && tone <= 2 && nz < 0.5 && R >= 8 && buf.u[k] < 2000) name = bounce > 0.8 || nz < 0.2 ? "rim2" : "rim1";
     } else if (bounce > 0.75 && tone <= 0 && matName === "barriga") name = "B2";
@@ -836,7 +835,7 @@ function build(v) {
       // filete: 12 px na boca do cadinho afinando a 5 px embaixo; borda vermelha, corpo laranja, núcleo branco
       const L = [], Rr = [], CL = [], CR = [], IL = [], IR = [];
       for (let yy = top; yy <= SURF; yy += 4) {
-        const t = (yy - top) / (SURF - top), wob = Math.sin(yy / 11 + fx) * 1.2, ww = 12 - 7 * t, cx = fx + 6 + wob;
+        const t = (yy - top) / (SURF - top), wob = Math.sin(yy / 11 + fx) * 1.2, ww = 16 - 11 * t, cx = fx + 6 + wob;
         L.push([cx - ww / 2, yy]); Rr.push([cx + ww / 2, yy]); IL.push([cx - ww / 2 + 1.2, yy]); IR.push([cx + ww / 2 - 1.2, yy]);
         CL.push([cx - ww * 0.18 - 0.5, yy]); CR.push([cx + ww * 0.18 + 0.5, yy]);
       }
@@ -844,7 +843,10 @@ function build(v) {
       falls.push({ type: "polygon", points: [...IL, ...IR.reverse()], color: K("L3") });
       falls.push({ type: "polygon", points: [...CL, ...CR.reverse()], color: K("L6") });
       // coroa de respingo na entrada
-      for (const [dx, h] of [[-8, 7], [-4, 11], [0, 6], [16, 10], [20, 6], [12, 13]]) falls.push({ type: "polygon", points: [[fx + dx - 1, SURF], [fx + dx, SURF - h], [fx + dx + 2, SURF]], color: K("L5") });
+      // coroa de respingo + anel de luz, na camada da frente (o vapor não cobre)
+      const crown = [{ type: "ellipse", x: fx - 16, y: SURF - 3, w: 44, h: 7, color: K("L6"), filled: false }];
+      for (const [dx, h] of [[-9, 8], [-5, 13], [-1, 7], [14, 11], [18, 7], [10, 15], [4, 9]]) crown.push({ type: "polygon", points: [[fx + dx - 1, SURF], [fx + dx, SURF - h], [fx + dx + 2, SURF]], color: K("L6") }, { type: "ellipse", x: fx + dx - 1, y: SURF - h - 5, w: 3, h: 3, color: K("L5"), filled: true });
+      draw("ouro_frente", crown);
       // anel de luz e respingo onde o filete bate no rio
       falls.push({ type: "gradient", x: fx - 40, y: SURF - 28, w: fw + 80, h: 40, direction: "radial", cx: fx + fw / 2, cy: SURF, r: 34, colors: [K("L6"), K("L5"), K("L4"), "."], dither: "bayer4", suavidade: 0.6 });
       falls.push({ type: "ellipse", x: fx - 22, y: SURF - 3, w: fw + 44, h: 8, color: K("L6"), filled: false });
@@ -871,6 +873,19 @@ function build(v) {
       // a perna da frente e a cauda emergem: só o que está acima de uma linha ondulada
       const wave = SURF + 2 + Math.sin(x * 0.12) * 1.5;
       if (y > wave) grid[k] = null;
+    }
+    // "MEIA" de ouro acumulado nas patas logo acima do líquido: mais escura, borda de cima ondulada, 1 brilho por pata
+    const sock = []; let s0 = -1;
+    for (let x = 0; x <= W; x++) { const on = x < W && !!grid[(SURF - 1) * W + x]; if (on && s0 < 0) s0 = x; if (!on && s0 >= 0) { sock.push([s0, x - 1]); s0 = -1; } }
+    for (const [a, b] of sock) {
+      for (let x = a - 2; x <= b + 2; x++) for (let y = SURF - 18; y < SURF; y++) {
+        const k = y * W + x; if (!grid[k]) continue;
+        if (D.buf.part[k] === D.spine.part && D.buf.u[k] < 440) continue;
+        const top = SURF - 13 + Math.round(Math.sin(x / 4) * 1.5 + Math.sin(x / 9 + a) * 1.5);
+        if (y === top) grid[k] = "R4"; else if (y > top) grid[k] = y > SURF - 5 ? "R3" : "R2";
+      }
+      const hx = Math.round(a + (b - a) * 0.35);
+      for (const [dx, dy, c] of [[0, -10, "R6"], [1, -10, "R5"], [0, -9, "R5"]]) if (grid[(SURF + dy) * W + hx + dx]) grid[(SURF + dy) * W + hx + dx] = c;
     }
     // onde o corpo encosta no ouro: faixa limpa de 2 px de ouro incandescente subindo pela pele
     for (let x = 0; x < W; x++) for (let y = SURF - 4; y <= SURF + 3; y++) {
