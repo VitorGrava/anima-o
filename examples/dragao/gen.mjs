@@ -133,7 +133,7 @@ function catmull(pts, step = 0.8) {
 // buffer do dragão
 function makeBuf() {
   const N = W * H;
-  return { hornLen: new Map(), blocos: new Set(), z: new Float32Array(N).fill(-1e9), nx: new Float32Array(N), ny: new Float32Array(N), nz: new Float32Array(N), mat: new Uint8Array(N), part: new Uint8Array(N), u: new Float32Array(N), s: new Float32Array(N), r: new Float32Array(N), flag: new Uint8Array(N) };
+  return { joined: new Set(), noScale: new Uint8Array(N), hornLen: new Map(), blocos: new Set(), z: new Float32Array(N).fill(-1e9), nx: new Float32Array(N), ny: new Float32Array(N), nz: new Float32Array(N), mat: new Uint8Array(N), part: new Uint8Array(N), u: new Float32Array(N), s: new Float32Array(N), r: new Float32Array(N), flag: new Uint8Array(N) };
 }
 const MAT = { pele: 1, barriga: 2, chifre: 3, membrana: 4, boca: 5, garra: 6 };
 let PART = 0;
@@ -224,14 +224,22 @@ function scallop(a, b, w, depth, n = 6) {
 
 // suaviza as normais dentro de cada parte (caixa 7x7): nas junções das esferas/elipsoides a luz passa a CURVAR
 // em vez de formar facetas retas ("low-poly")
+const jkey = (a, b) => (a < b ? a + "," + b : b + "," + a);
+// UNIÃO SUAVE: a normal de cada pixel é a média das normais vizinhas de QUALQUER parte da pele cuja superfície
+// é contínua com a dele (degrau de profundidade pequeno; nas inserções unidas — ombro, quadril, cotovelo, joelho,
+// pescoço/cabeça, braço da asa — aceita degrau maior). Assim a luz corre de uma parte para a outra sem emenda;
+// onde uma parte passa NA FRENTE de outra (degrau grande, partes não unidas), não mistura.
 function smoothNormals(buf, r) {
-  const nx = buf.nx.slice(), ny = buf.ny.slice(), nz = buf.nz.slice();
+  const nx = buf.nx.slice(), ny = buf.ny.slice(), nz = buf.nz.slice(), z = buf.z;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const k = y * W + x; if (buf.mat[k] !== MAT.pele) continue;
     let sx = 0, sy = 0, sz = 0, c = 0;
     for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
       const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
-      const q = yy * W + xx; if (buf.part[q] !== buf.part[k] || buf.mat[q] !== MAT.pele) continue;
+      const q = yy * W + xx; if (buf.mat[q] !== MAT.pele || buf.flag[q] !== buf.flag[k]) continue;
+      const dz = Math.abs(z[q] - z[k]);
+      const ok = buf.part[q] === buf.part[k] ? dz < 16 : buf.joined.has(jkey(buf.part[q], buf.part[k])) ? dz < 34 : dz < 7;
+      if (!ok) continue;
       sx += nx[q]; sy += ny[q]; sz += nz[q]; c++;
     }
     const [a, b, cc] = norm3(sx, sy, sz);
@@ -241,15 +249,37 @@ function smoothNormals(buf, r) {
   }
 }
 
+// escamas e placas ventrais com coordenadas CONTÍNUAS: todo pixel de pele perto da espinha (ombro, quadril,
+// raiz dos membros) usa o u/s do ponto mais próximo do eixo da espinha; numa faixa de transição para os membros
+// não há escama (o padrão não "recomeça" numa emenda)
+function spineCoords(buf, spine) {
+  const cell = 24, grid = new Map();
+  for (const sm of spine) { const key = Math.floor(sm.x / cell) + "," + Math.floor(sm.y / cell); if (!grid.has(key)) grid.set(key, []); grid.get(key).push(sm); }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const k = y * W + x; if (buf.mat[k] !== MAT.pele || buf.flag[k] || buf.u[k] >= 1500) continue;
+    let best = null, bd = 1e9;
+    const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
+    for (let gy = cy - 3; gy <= cy + 3; gy++) for (let gx = cx - 3; gx <= cx + 3; gx++) {
+      const list = grid.get(gx + "," + gy); if (!list) continue;
+      for (const sm of list) { const d = (sm.x - x - 0.5) ** 2 + (sm.y - y - 0.5) ** 2; if (d < bd) { bd = d; best = sm; } }
+    }
+    if (!best) { if (buf.part[k] !== spine.part) continue; buf.noScale[k] = 1; continue; }
+    const rel = Math.sqrt(bd) / best.r;
+    if (rel < 1.12) { buf.u[k] = best.u; buf.s[k] = clamp(((x + 0.5 - best.x) * -best.ty + (y + 0.5 - best.y) * best.tx) / best.r, -1, 1); buf.r[k] = best.r; }
+    else if (rel < 1.6) buf.noScale[k] = 1;
+  }
+}
+
 // mão/pé: palma + dedos com nós (3–4 px) + garras cravadas para baixo
 function foot(buf, cx, cy, z, dir, n, wide = 1) {
-  ellipsoid(buf, { cx, cy, rx: 13 * wide, ry: 7 * Math.sqrt(wide), rot: 0, z, rz: 8 }, MAT.pele, { u0: 1300 });
+  const palm = ellipsoid(buf, { cx, cy, rx: 13 * wide, ry: 7 * Math.sqrt(wide), rot: 0, z, rz: 8 }, MAT.pele, { u0: 1300 });
   for (let i = 0; i < n; i++) {
     const bx = cx - 9 * wide + i * (18 * wide / (n - 1)), by = cy + 2;
     const tx = bx + dir * (9 - i * 1.5), ty = cy + 9 + (i % 2);
     tube(buf, [[bx, by, z + 6, 4], [(bx + tx) / 2, (by + ty) / 2 - 1, z + 8, 4.3], [tx, ty, z + 8, 3]], MAT.pele, { u0: 1310 + i * 10 });
     spike(buf, [tx + dir * 1, ty + 1], [tx + dir * 5, ty + 9], 2.6, z + 12, MAT.garra);
   }
+  return palm;
 }
 
 function buildDragon(v) {
@@ -313,7 +343,8 @@ function buildDragon(v) {
   const can = tube(buf, [[384, 330, 34, 21], [410, 344, 36, 18]], MAT.pele, { u0: 900 }).part;
   tube(buf, [[410, 344, 36, 18], [424, 370, 38, 13]], MAT.pele, { u0: 930, part: can });
   tube(buf, [[424, 370, 38, 8.5], [416, 398, 42, 6.5]], MAT.pele, { u0: 960, part: can });   // metatarso
-  foot(buf, 412, 404, 46, -1, 3, 1.35);
+  const pe2 = foot(buf, 412, 404, 46, -1, 3, 1.35);
+  buf.joined.add(jkey(spine.part, coxa)); buf.joined.add(jkey(coxa, can)); buf.joined.add(jkey(can, pe2));
   // ---- perna da frente (perto): úmero grosso, cotovelo PARA TRÁS, antebraço afinando, pulso, mão com dedos ----
   const hum = tube(buf, [[252, 300, 40, 28], [262, 328, 42, 24], [272, 350, 44, 20]], MAT.pele, { u0: 1200, part: spine.part }).part;   // fundido ao peito (só valor, sem contorno)            // úmero
   // bíceps: sem forma própria; a luz em cima e a sombra que entra no membro vêm do próprio tubo do úmero
@@ -321,7 +352,8 @@ function buildDragon(v) {
   const ante = tube(buf, [[272, 350, 50, 17], [254, 366, 51, 14], [234, 384, 53, 10]], MAT.pele, { u0: 1270 }).part;  // antebraço: grosso em cima, afinando
   tube(buf, [[234, 384, 53, 7], [216, 389, 55, 6]], MAT.pele, { u0: 1295, part: ante });                        // pulso: o membro muda de direção
   ellipsoid(buf, { cx: 226, cy: 390, rx: 9, ry: 8, rot: 0, z: 58, rz: 7 }, MAT.pele, { u0: 1290, part: ante });   // pulso (mesmo volume do antebraço, sem contorno próprio)
-  foot(buf, 212, 398, 60, -1, 4);
+  const pe1 = foot(buf, 212, 398, 60, -1, 4);
+  buf.joined.add(jkey(spine.part, ante)); buf.joined.add(jkey(ante, pe1));
   // ---- asa de PERTO ----
   {
     const { ombro, cotovelo, pulso, dedos, raiz } = WING;
@@ -336,8 +368,9 @@ function buildDragon(v) {
     const normals = [[-0.35, -0.5, 0.8], [0.1, -0.1, 1], [0.45, 0.15, 0.88], [0.2, 0.35, 0.92], [-0.6, -0.4, 0.7]];
     panelDefs.forEach((pts, i) => { const p = polygon(buf, pts, MAT.membrana, zw - i * 0.1, normals[i], { flag: 1 }); wingInfo.panels.push({ part: p, far: false, i }); });
     // úmero nasce do ombro (grosso), cotovelo para trás, antebraço sobe até o pulso; dedos em ARCO
-    tube(buf, [[...ombro, zw + 14, 23], [322, 232, zw + 14, 17], [350, 212, zw + 14, 12.5], [...cotovelo, zw + 14, 10]], MAT.pele, { u0: 1500 });
-    tube(buf, [[...cotovelo, zw + 14, 10], [378, 140, zw + 14, 7.5], [...pulso, zw + 14, 5.5]], MAT.pele, { u0: 1600 });
+    const wh = tube(buf, [[...ombro, zw + 14, 23], [322, 232, zw + 14, 17], [350, 212, zw + 14, 12.5], [...cotovelo, zw + 14, 10]], MAT.pele, { u0: 1500 }).part;
+    tube(buf, [[...cotovelo, zw + 14, 10], [378, 140, zw + 14, 7.5], [...pulso, zw + 14, 5.5]], MAT.pele, { u0: 1600, part: wh });
+    buf.joined.add(jkey(spine.part, wh));
     ellipsoid(buf, { cx: pulso[0], cy: pulso[1], rx: 9, ry: 8, rot: 0, z: zw + 18, rz: 6 }, MAT.pele, { u0: 1650 });   // nó do pulso
     for (const d of dedos) {
       const mx = (pulso[0] + d[0]) / 2, my = (pulso[1] + d[1]) / 2, L = Math.hypot(d[0] - pulso[0], d[1] - pulso[1]);
@@ -357,6 +390,7 @@ function buildDragon(v) {
     const jp = tube(buf, jaw, MAT.pele, { u0: 2000, flat: 0.65 }).part;
     ellipsoid(buf, { cx: 206, cy: 154, rx: 11, ry: 9, rot: 0.3, z: 28, rz: 9 }, MAT.pele, { u0: 2050, part: jp });   // articulação da mandíbula
     const hp = tube(buf, HEAD.focinho, MAT.pele, { u0: 2100, flat: 0.7 }).part;
+    buf.joined.add(jkey(spine.part, hp)); buf.joined.add(jkey(jp, hp)); buf.joined.add(jkey(spine.part, jp));
     ellipsoid(buf, HEAD.bochecha, MAT.pele, { u0: 2400, part: hp });
     ellipsoid(buf, HEAD.sobrancelha, MAT.pele, { u0: 2300, part: hp });     // crista da sobrancelha FUNDIDA ao crânio (sem linha)
     ellipsoid(buf, { cx: 121, cy: 131, rx: 10, ry: 7, rot: 0.3, z: 36, rz: 5 }, MAT.pele, { u0: 2350, part: hp }); // narina saliente
@@ -374,7 +408,8 @@ function buildDragon(v) {
     // dentes
 
   }
-  smoothNormals(buf, 3);
+  smoothNormals(buf, 5);
+  spineCoords(buf, spine);
   return { buf, wingInfo, spine, buried };
 }
 
@@ -507,7 +542,7 @@ function shadeDragon(D, v) {
       out[k] = nm || gr[clamp(tg, 0, 4)];
       continue;
     }
-    const isBelly = m === MAT.pele && R > 8 && buf.u[k] < 1100 && s > 0.62 && !buf.flag[k];
+    const isBelly = m === MAT.pele && R > 8 && buf.u[k] < 1100 && s > 0.62 && !buf.flag[k] && (buf.part[k] === D.spine.part || buf.u[k] < 150);
     if (isBelly) matName = "barriga";
     let tone = clamp(Math.floor(val * 5), 0, 4);
     const tone0 = tone, frac = val * 5 - Math.floor(val * 5);
@@ -524,7 +559,7 @@ function shadeDragon(D, v) {
     // oclusão sob a barriga/peito e dentro das dobras: o tronco ganha volume em vez de faixas
     if (v === "normal" && m === MAT.pele && !buf.flag[k] && ny > 0.4 && y > 300 && y < 380) tone = Math.max(0, tone - 1);
     const scaleOn = v === "normal" ? tone >= 2 && tone <= 3 && frac >= 0.2 && ny < 0.05 && !(buf.part[k] === D.spine.part && y > 306 && buf.u[k] < 440) : nz < 0.45 && tone >= 1;   // escamas só na meia-luz   // dourado: a grade some sob o ouro (só sugere nas bordas)
-    if (matName === "pele" && R > 5 && scaleOn) {
+    if (matName === "pele" && R > 5 && scaleOn && !buf.noScale[k]) {
       let ss = buf.u[k] >= 2000 ? 3.5 : clamp(R * 0.17, 3, 8);
       if (buf.part[k] === D.spine.part && buf.u[k] > 150 && buf.u[k] < 1000) ss *= 1 - 0.32 * clamp((buf.u[k] - 220) / 200, 0, 1) - 0.15 * clamp((buf.u[k] - 420) / 300, 0, 1);   // ~30% menores perto do quadril/cauda
       if (buf.blocos.has(buf.part[k])) ss *= 0.7;                                                                          // coxa: escamas menores
@@ -608,7 +643,9 @@ function shadeDragon(D, v) {
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
       const q = yy * W + xx;
-      if (buf.mat[q] && buf.part[q] !== buf.part[k] && buf.z[q] > buf.z[k] + 6) {
+      const bothSkin = buf.mat[q] === MAT.pele && buf.mat[k] === MAT.pele;
+      const thr = bothSkin ? (buf.joined.has(jkey(buf.part[q], buf.part[k])) ? 1e9 : 12) : 6;   // inserção unida: nenhuma linha
+      if (buf.mat[q] && buf.part[q] !== buf.part[k] && buf.z[q] > buf.z[k] + thr) {
         res[k] = buf.mat[k] === MAT.membrana ? "M0" : buf.mat[k] === MAT.chifre || buf.mat[k] === MAT.garra ? "H0" : "R0";
         break;
       }
