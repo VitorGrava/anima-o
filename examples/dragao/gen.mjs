@@ -85,7 +85,7 @@ function palette(v) {
 // pontos [x, y, z, r]; z cresce em direção ao espectador
 const SPINE = [
   [210, 126, 10, 19], [222, 160, 8, 22], [211, 200, 6, 25], [205, 238, 4, 31], [222, 274, 2, 43],
-  [262, 298, 0, 57], [320, 306, 0, 64], [380, 300, -2, 55], [430, 306, -6, 43], [466, 332, 0, 33],
+  [262, 298, 0, 57], [320, 311, 0, 66], [380, 300, -2, 55], [430, 306, -6, 43], [466, 332, 0, 33],
   [482, 376, 15, 29], [470, 420, 35, 25], [430, 450, 50, 21], [370, 470, 60, 17], [302, 478, 62, 13],
   [236, 470, 60, 9.5], [206, 466, 58, 7], [180, 453, 58, 5], [150, 449, 56, 2.5],
 ];
@@ -158,7 +158,7 @@ function tube(buf, pts, mat, opt = {}) {
     for (let i = 0; i < samples.length; i++) {
       const sm = samples[i]; if (sm.r < 0.5) continue;
       if (i > 0) acc += Math.hypot(sm.x - samples[i - 1].x, sm.y - samples[i - 1].y);
-      if (acc < clamp(sm.r * 0.12, 0.7, 6) && i < samples.length - 1) continue;
+      if (acc < clamp(sm.r * 0.05, 0.7, 2.5) && i < samples.length - 1) continue;   // espaçamento curto: sem "serra" de esferas na divisa de luz
       acc = 0;
       buf.prims.push({ t: 0, g, part, x: sm.x, y: sm.y, z: sm.z, r: sm.r, f: opt.flat || 1, u: sm.u, tx: sm.tx, ty: sm.ty, R2: sm.r + 18 });
     }
@@ -451,7 +451,7 @@ function buildDragon(v) {
   for (let i = 0; i < 3; i++) spike(buf, [282 + i * 8, 404], [276 + i * 8, 414], 3, -30, MAT.garra);
   for (let p = p0 + 1; p <= PART; p++) buried.add(p);
   // perna traseira de LONGE, no vão entre a perna e a cauda (escura, fica atrás)
-  { const pl = PART; tube(buf, [[430, 330, -30, 18], [438, 362, -30, 15], [432, 394, -28, 11]], MAT.pele, { flag: 3 }); ellipsoid(buf, { cx: 436, cy: 398, rx: 12, ry: 6, rot: 0, z: -26, rz: 6 }, MAT.pele, { flag: 3 }); for (let p = pl + 1; p <= PART; p++) buried.add(p); }
+  { const pl = PART; tube(buf, [[410, 326, -30, 24], [410, 360, -30, 21], [404, 394, -28, 16]], MAT.pele, { flag: 3 }); tube(buf, [[432, 330, -32, 16], [440, 362, -32, 14], [434, 394, -30, 10]], MAT.pele, { flag: 3 }); ellipsoid(buf, { cx: 412, cy: 398, rx: 16, ry: 7, rot: 0, z: -26, rz: 6 }, MAT.pele, { flag: 3 }); for (let p = pl + 1; p <= PART; p++) buried.add(p); }
   // pata dianteira de LONGE: sai atrás da primeira, mais escura, pulso e 3 garras (não fica enterrada)
   tube(buf, [[270, 362, -20, 11], [260, 388, -18, 8.5], [252, 397, -16, 7]], MAT.pele, { flag: 3 });
   ellipsoid(buf, { cx: 250, cy: 401, rx: 11, ry: 6, rot: 0, z: -16, rz: 6 }, MAT.pele, { flag: 3 });
@@ -561,7 +561,7 @@ function buildDragon(v) {
 
   }
   renderSDF(buf);
-  smoothNormals(buf, 1);
+  smoothNormals(buf, 2);
   spineCoords(buf, spine);
   if (process.env.DBG) console.log("PART max", PART, "prims", buf.prims.length, "grupos", buf.groups);
   return { buf, wingInfo, spine, buried };
@@ -616,6 +616,7 @@ function shadeDragon(D, v) {
         db = Math.min(db, Math.hypot(x - w0[0] - vx * tt, y - w0[1] - vy * tt));
       }
       if (db < 9) t += (v === "dourado" ? -0.2 : -0.12) * (1 - db / 9);
+      if (v === "dourado" && !buf.mat[k - W]) { out[k] = "rim1"; continue; }   // aro laranja da forja na borda de cima das asas
       if (v === "dourado" && !(p && p.far)) {
         // película de ouro escorrendo dos ossos para dentro do painel: manchas verticais, mais claras junto ao osso
         const f = vnoise(x / 2.6 + 11, y / 40);
@@ -669,7 +670,8 @@ function shadeDragon(D, v) {
         }
         if (occ >= 2) { nm = null; tg = Math.min(tg ?? 3, occ >= 4 ? 1 : 2); }
       }
-      if (buf.flag[k] === 3) tg = Math.min(tg ?? 1, 1), nm = null;
+      if (buf.flag[k] === 3) { tg = (tg ?? 2) >= 2 ? 2 : 1; nm = null; }                  // perna de longe: ouro escurecido ~40%
+      if (buf.noSpec.has(buf.part[k]) && !nm) tg = Math.max(tg ?? 2, 2);              // canela: ouro sólido, continua a coxa
       if (buf.flag[k] === 2) { tg = Math.max(0, (tg ?? 3) - 1); nm = null; }
       if (nz < 0.3 && ny > -0.15 && buf.flag[k] !== 2) nm = buf.flag[k] === 3 ? "rim1" : "rim2";    // contraluz do rio na silhueta
       // lado de baixo do TRONCO: curva escura (de costas para o teto, ofuscada); contraluz laranja só nos 2–3 px de baixo
@@ -713,7 +715,7 @@ function shadeDragon(D, v) {
 
     // oclusão sob a barriga/peito e dentro das dobras: o tronco ganha volume em vez de faixas
     if (v === "normal" && m === MAT.pele && !buf.flag[k] && ny > 0.4 && y > 300 && y < 380) tone = Math.max(0, tone - 1);
-    const scaleOn = v === "normal" ? tone >= 2 && tone <= 3 && frac >= 0.2 && ny < 0.05 && !(buf.part[k] === D.spine.part && y > 306 && buf.u[k] < 440) : nz < 0.45 && tone >= 1;   // escamas só na meia-luz   // dourado: a grade some sob o ouro (só sugere nas bordas)
+    const scaleOn = v === "normal" ? tone >= 2 && tone <= 3 && frac >= 0.35 && frac <= 0.8 && ny < 0.05 && !(buf.part[k] === D.spine.part && y > 306 && buf.u[k] < 440) : nz < 0.45 && tone >= 1;   // escamas só na meia-luz   // dourado: a grade some sob o ouro (só sugere nas bordas)
     if (matName === "pele" && R > 5 && scaleOn && !buf.noScale[k]) {
       let ss = buf.u[k] >= 2000 ? 3.5 : clamp(R * 0.17, 3, 8);
       if (buf.part[k] === D.spine.part && buf.u[k] > 150 && buf.u[k] < 1000) ss *= 1 - 0.32 * clamp((buf.u[k] - 220) / 200, 0, 1) - 0.15 * clamp((buf.u[k] - 420) / 300, 0, 1);   // ~30% menores perto do quadril/cauda
@@ -735,6 +737,7 @@ function shadeDragon(D, v) {
       if (uh < Lh * 0.3 && uh > 3 && Math.round(uh) % 4 === 0) tone = Math.max(1, tone - 2);   // anéis de 1 px na base
     }
     if (buf.flag[k] === 4 && v === "normal") tone = Math.max(2, Math.min(4, tone + 1));   // espinho da crista: 2 tons claros (creme + sombra bege), lê contra o fundo escuro
+    if (matName === "barriga" && buf.u[k] > 380 && buf.u[k] < 500) tone = Math.max(0, tone - 1);
     if (matName === "barriga") {
       const bs = clamp(R * 0.18, 4, 9);
       const f = buf.u[k] / bs - Math.floor(buf.u[k] / bs);
