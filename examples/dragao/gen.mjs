@@ -87,7 +87,7 @@ const SPINE = [
   [210, 126, 10, 19], [222, 160, 8, 22], [211, 200, 6, 25], [205, 238, 4, 31], [222, 274, 2, 43],
   [262, 298, 0, 57], [320, 304, 0, 61], [380, 300, -2, 55], [430, 306, -6, 43], [466, 332, 0, 33],
   [482, 376, 15, 29], [470, 420, 35, 25], [430, 450, 50, 21], [370, 470, 60, 17], [302, 478, 62, 13],
-  [238, 471, 60, 9.5], [188, 457, 58, 6], [150, 445, 56, 2.5],
+  [236, 470, 60, 9.5], [206, 466, 58, 7], [180, 453, 58, 5], [150, 449, 56, 2.5],
 ];
 const LEGS = {
   pernaFrente: [[250, 308, 40, 28], [262, 350, 44, 21], [232, 378, 50, 16], [206, 396, 52, 13]],
@@ -451,11 +451,11 @@ function shadeDragon(D, v) {
       // a faixa especular varia de espessura ao longo do corpo e é interrompida (não é um friso de cromo idêntico)
       const nb = vnoise(buf.u[k] / 22 + buf.part[k] * 3.7, buf.part[k] * 1.3);
       const seg = vnoise(buf.u[k] / 9 + buf.part[k] * 5.1, 0.5);
-      const arcUp = buf.part[k] === D.spine.part ? 0.14 * Math.exp(-(((x - 330) / 60) ** 2)) : 0;   // no dorso a faixa sobe ~4 px no meio (arco)
-      const sC = -0.47 - arcUp + 0.09 * Math.sin(buf.u[k] / 38 + buf.part[k]), sW = 0.03 + 0.07 * nb;   // faixa que ondula com o arco e varia de 1 a 3 px
-      const sLo = sC - sW, sHi = sC + sW;
       const isTorso = buf.part[k] === D.spine.part && buf.u[k] > 150 && buf.u[k] < 440;
-      const sOn = isTorso ? seg > 0.3 : buf.part[k] % 2 ? seg > 0.38 && nb > 0.2 : seg > 0.8;     // metade dos tubos: faixa em 2–3 segmentos; outra metade: só um ponto de brilho
+      const arcUp = buf.part[k] === D.spine.part ? 0.14 * Math.exp(-(((x - 330) / 60) ** 2)) : 0;   // no dorso a faixa sobe ~4 px no meio (arco)
+      const sC = -0.47 - arcUp + (isTorso ? 0 : 0.09 * Math.sin(buf.u[k] / 38 + buf.part[k])), sW = isTorso ? 0.05 : 0.03 + 0.07 * nb;   // faixa que ondula com o arco e varia de 1 a 3 px
+      const sLo = sC - sW, sHi = sC + sW;
+      const sOn = isTorso ? true : buf.part[k] % 2 ? seg > 0.38 && nb > 0.2 : seg > 0.8;     // metade dos tubos: faixa em 2–3 segmentos; outra metade: só um ponto de brilho
       // 3 zonas largas: topo (dourado médio) -> UMA sombra que cresce para baixo -> reflexo do rio na borda de baixo
       if (ry > 0.5) {   // o rio só aparece junto à borda de baixo de cada volume (sem "adesivo" oval no meio)
         let gp = 0; for (let dd = 1; dd <= 5; dd++) { const q = (y + dd) * W + x; if (y + dd >= H || !buf.mat[q] || buf.part[q] !== buf.part[k]) { gp = dd; break; } }
@@ -606,6 +606,17 @@ function shadeDragon(D, v) {
       }
     }
   }
+  if (v === "normal") {   // dentro do feixe: borda de 1–2 px laranja-clara no lado esquerdo do pescoço e no topo do focinho
+    for (let y = 60; y < 340; y++) {
+      const t = y / 430, xl = 70 + 120 * t, xr = 150 + 230 * t;
+      for (let x = Math.ceil(xl + 4); x < xr - 4; x++) {
+        const k = y * W + x; if (!res[k] || buf.mat[k] !== MAT.pele) continue;
+        const neckHead = buf.u[k] >= 2000 || (buf.part[k] === D.spine.part && buf.u[k] < 112);
+        if (!neckHead) continue;
+        if (!buf.mat[k - 1] || !buf.mat[k - 2] || !buf.mat[k - W]) res[k] = "R6";
+      }
+    }
+  }
   // quebra de ângulo no joelho e no pulso: sombra em CUNHA no lado de dentro da dobra
   const wedge = (pts) => { const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]); for (let y = Math.min(...ys); y <= Math.max(...ys); y++) for (let x = Math.min(...xs); x <= Math.max(...xs); x++) if (inPoly(x + 0.5, y + 0.5, pts) && res[y * W + x] && buf.mat[y * W + x] === MAT.pele) res[y * W + x] = v === "dourado" ? "R0" : "R1";
     if (v === "dourado") {   // no metal escuro a cunha só aparece com a aresta da dobra acesa
@@ -738,7 +749,7 @@ function build(v) {
   tf("colunas_meio", { op: "haze", color: K(gold ? "bg5" : "bg4"), quantidade: 0.22 });
   colRow("colunas_perto", [[24, 66, 0, 512, "dir"]]);
   // o ouro ilumina a base das colunas (luz quente de baixo)
-  for (const l of ["colunas_meio", "colunas_perto"]) draw(l, [{ type: "gradient", x: 0, y: 250, w: W, h: 262, colors: [K("st2"), K("st3"), K("st4"), K("st5")], direction: "vertical", dither: "bayer4", suavidade: 0.7, only: K("st3") }]);
+  for (const l of ["colunas_meio", "colunas_perto"]) draw(l, [{ type: "gradient", x: 0, y: 250, w: W, h: 262, colors: [K("st2"), K("st3"), K("st4"), K("st5")], direction: "vertical", dither: "nenhum", suavidade: 0.7, only: K("st3") }]);   // sem dither: "only" olha a imagem composta e o xadrez vazava para a coluna de trás
   tf("colunas_perto", { op: "haze", color: K("bg0"), quantidade: 0.35 });
 
   // ---------- pilhas de ouro ao longe ----------
@@ -798,7 +809,7 @@ function build(v) {
   if (!gold) {
     const pts = []; for (let x = 0; x <= W; x += 4) pts.push([x, Math.round(HX(x))]);
     draw("ouro", [{ type: "polygon", points: [...pts, [W, H], [0, H]], color: K("g2") }]);
-    draw("ouro", [{ type: "gradient", x: 0, y: 330, w: W, h: 182, colors: [K("g3"), K("g2"), K("g1")], direction: "vertical", dither: "bayer4", suavidade: 0.8, only: K("g2") }]);
+    // (sem gradient only:g2 aqui: a regra "only" olha a imagem composta e pintava xadrez também no monte do fundo)
     // moedas: de trás para frente; o tom depende da luz (raio de luz + sombra do dragão + borda escura)
     const G = ["g0", "g1", "g2", "g3", "g4", "g5", "g6"];
     const light = (x, y) => {
@@ -886,8 +897,17 @@ function build(v) {
     // rio de ouro derretido: superfície com rampa (mais quente perto), veias escuras de crosta, ondas
     draw("ouro", [
       { type: "rect", x: 0, y: SURF, w: W, h: H - SURF, color: K("L3"), filled: true },
-      { type: "gradient", x: 0, y: SURF, w: W, h: H - SURF, colors: [K("L4"), K("L3"), K("L2"), K("L3"), K("L4"), K("L5")], direction: "vertical", dither: "nenhum", suavidade: 0.6, ondas: 2 },
     ]);
+    {
+      // longe (junto à margem) escuro e saturado -> perto claro/amarelo; divisas com serrilhado ALEATÓRIO de até 2 px
+      const pg = new Array(W * H).fill(null), cuts = [418, 446, 478], tones = ["L2", "L3", "L4", "L5"];
+      const hsh = (a, b) => { let n = Math.imul(a, 374761393) + Math.imul(b, 668265263); n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
+      for (let x = 0; x < W; x++) {
+        const off = cuts.map((c, i) => c + Math.round((hsh(Math.floor((x + i * 5) / (2 + Math.floor(hsh((x + i * 5) >> 3, i) * 4))), i + 7) - 0.5) * 2.4));
+        for (let y = SURF; y < H; y++) { let t = 0; while (t < 3 && y >= off[t]) t++; pg[y * W + x] = tones[t]; }
+      }
+      rows("ouro", pg);
+    }
     const sh = [];
     const r2 = prng(5);
     for (let i = 0; i < 140; i++) {  // veias de crosta escura que boiam, alongadas na horizontal (perspectiva)
@@ -1111,7 +1131,7 @@ function build(v) {
     // montinho de moedas onde a cauda volta a sair do ouro (esconde o corte da cauda)
     const heap = [];
     for (let i = 0; i < 120; i++) { const a = rnd() * Math.PI, r = Math.sqrt(rnd()) * (0.75 + 0.45 * vnoise(a * 3, 7)); heap.push([304 + Math.cos(a) * 28 * r, 478 - Math.sin(a) * 15 * r + 4]); }
-    for (const [lx, ly] of [[262, 462], [338, 470], [356, 466]]) heap.push([lx, ly]);   // moedas soltas sobre a cauda
+    for (const [lx, ly] of [[262, 462], [338, 470], [356, 466], [212, 470], [218, 472], [224, 471]]) heap.push([lx, ly]);   // + moedas cobrindo 2–3 px da ponta da cauda   // moedas soltas sobre a cauda
     heap.sort((a, b) => a[1] - b[1]);
     for (const [cx, cy] of heap) {
       const w = 7 + Math.floor(rnd() * 4), h = Math.round(w * 0.45), edgeD = Math.hypot((cx - 304) / 28, (cy - 478) / 15);
