@@ -1,0 +1,885 @@
+// Dragão sobre o tesouro (512x512, estático) — duas versões do MESMO dragão:
+//   normal : vermelho-dourado deitado sobre a montanha de ouro num salão de anão
+//   dourado: o mesmo dragão coberto de ouro derretido, emergindo de um rio de ouro incandescente
+// Uso: node examples/dragao/gen.mjs [normal|dourado|ambos]
+// Gera cmds_<v>.json, recria <v>.anima.json e exporta o PNG em escala 2.
+//
+// Fundo, ouro, moedas, colunas e objetos: draw_shapes (gradient, polygon, ellipse, scatter) + transform haze/outline.
+// Dragão: geometria própria (tubos de esferas ao longo de splines + elipsoides + polígonos de membrana) com
+// profundidade z e normais; cada pixel recebe material + normal e é pintado numa RAMPA do material
+// (sombra fria/roxa, luz quente) com escamas que seguem o volume (coordenadas u/v do tubo). Sai em draw_rows e
+// recebe transform outline seletivo + clean da engine.
+import { writeFileSync, unlinkSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const DIR = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(DIR, "../..");
+const W = 512, H = 512;
+const MODE = process.argv[2] || "ambos";
+
+function prng(s) { let a = s | 0; return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const KEYS = [..."0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ#@$%&*+=-~^!?:;<>/|ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ"];
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
+const bayer = (x, y) => BAYER[(y & 3) * 4 + (x & 3)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function vnoise(x, y) { const h = (i, j) => { let n = Math.imul(i, 374761393) + Math.imul(j, 668265263); n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; }; const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j, sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy); return (h(i, j) * (1 - sx) + h(i + 1, j) * sx) * (1 - sy) + (h(i, j + 1) * (1 - sx) + h(i + 1, j + 1) * sx) * sy; }
+const norm3 = (x, y, z) => { const l = Math.hypot(x, y, z) || 1; return [x / l, y / l, z / l]; };
+
+// ======================================================================================
+// PALETAS
+// ======================================================================================
+function palette(v) {
+  const common = {
+    // gemas e prata (iguais nas duas)
+    ruby0: "#5a0f2a", ruby1: "#b01e3a", ruby2: "#ff5a6a", ruby3: "#ffd0d0",
+    emer0: "#0c3a34", emer1: "#1c8a5a", emer2: "#6ae08a",
+    saph0: "#141e5a", saph1: "#2a5ad0", saph2: "#8ac4ff",
+    spark: "#fff6d4",
+  };
+  if (v === "normal") return {
+    ...common,
+    // salão: escuro violeta-marrom em cima, ar quente embaixo (o ouro ilumina)
+    bg0: "#140c16", bg1: "#170d16", bg2: "#22121c", bg3: "#311a22", bg4: "#482526", bg5: "#6a3628", bg6: "#94502e", air: "#c77a3c",
+    // pedra das colunas
+    st0: "#1a1018", st1: "#2c1a22", st2: "#43282a", st3: "#5f3a30", st4: "#87583c", st5: "#b57e4c",
+    beam: "#e8b070", beam2: "#ffd89a", dust: "#fff0c0",
+    // ouro: sombra vermelho-marrom, luz amarela, brilho creme
+    g0: "#2e1210", g1: "#58241a", g2: "#8a401c", g3: "#bf6a1e", g4: "#e39a2a", g5: "#f8c94a", g6: "#fff09a",
+    // dragão: rampa vermelha (sombra roxa -> luz laranja)
+    R0: "#1e0818", R1: "#3c0d24", R2: "#64142c", R3: "#901f2e", R4: "#b8362e", R5: "#dc5f34", R6: "#f79a52",
+    rim1: "#d2622a", rim2: "#f4a040",
+    B0: "#3a1418", B1: "#6e3424", B2: "#a8602e", B3: "#d6964a", B4: "#f4cc78",
+    H0: "#24161a", H1: "#4a3634", H2: "#7a6252", H3: "#b29a7a", H4: "#e8dcbc",
+    M0: "#1a0614", M1: "#300a1e", M2: "#4e1226", M3: "#74202c", M4: "#a23a32", M5: "#d06638",
+    E1: "#ff8a10", E2: "#ffd23a", E3: "#fffbd8", F1: "#ff5a10", F2: "#ffb030",
+  };
+  return {
+    ...common,
+    // forja/salão: escuro com fumaça, luz amarelo-laranja vinda de baixo
+    bg0: "#140a0c", bg1: "#150a0c", bg2: "#22100e", bg3: "#341810", bg4: "#4e2412", bg5: "#743812", bg6: "#a85614", air: "#e08a1c",
+    st0: "#140a0c", st1: "#241210", st2: "#3a1e14", st3: "#5a3018", st4: "#8a4e1c", st5: "#c47c22",
+    beam: "#ffb030", beam2: "#ffe070", dust: "#fff4b0",
+    g0: "#2a0c06", g1: "#5a1c08", g2: "#9a3a0a", g3: "#d8680c", g4: "#ffa01a", g5: "#ffd84c", g6: "#fff4a0",
+    // dragão de ouro: sombra bronze-avermelhada, luz amarelo-branca
+    R0: "#1e0a06", R1: "#4a1e0a", R2: "#7c3c0c", R3: "#b0680e", R4: "#e0a01a", R5: "#ffd040", R6: "#fff6c0",
+    rim1: "#ffb020", rim2: "#fff080",
+    B0: "#2e1206", B1: "#6a3a0e", B2: "#a8701a", B3: "#e4b032", B4: "#fff0a0",
+    H0: "#221006", H1: "#583010", H2: "#946018", H3: "#d8a030", H4: "#fff0b0",
+    M0: "#160804", M1: "#3a1808", M2: "#64300c", M3: "#985010", M4: "#d08418", M5: "#f4b42a",
+    E1: "#ff3a10", E2: "#ff9a20", E3: "#fff2c4", F1: "#ff7a10", F2: "#ffe464",
+    // ouro derretido e fumaça
+    L0: "#4a1404", L1: "#8a2a04", L2: "#d45206", L3: "#ff8a10", L4: "#ffc030", L5: "#fff070", L6: "#fff8cc",
+    sm0: "#1c1210", sm1: "#2e1e18", sm2: "#4a3022",
+  };
+}
+
+// ======================================================================================
+// DRAGÃO: geometria (a mesma nas duas versões)
+// ======================================================================================
+// pontos [x, y, z, r]; z cresce em direção ao espectador
+const SPINE = [
+  [210, 126, 10, 19], [222, 160, 8, 22], [211, 200, 6, 25], [205, 238, 4, 31], [222, 274, 2, 43],
+  [262, 298, 0, 57], [320, 304, 0, 61], [380, 300, -2, 55], [430, 306, -6, 43], [466, 332, 0, 33],
+  [482, 376, 15, 27], [470, 420, 35, 22], [430, 450, 50, 17], [370, 470, 60, 13], [302, 478, 62, 10],
+  [238, 471, 60, 7], [188, 457, 58, 4.5], [152, 446, 56, 2],
+];
+const LEGS = {
+  pernaFrente: [[250, 308, 40, 28], [262, 350, 44, 21], [232, 378, 50, 16], [206, 396, 52, 13]],
+  pernaLonge: [[282, 330, -40, 24], [290, 368, -40, 18], [292, 394, -40, 14]],
+  canela: [[402, 344, 32, 24], [428, 378, 36, 17], [414, 402, 40, 14]],
+};
+const HEAD = {
+  cranio: { cx: 205, cy: 107, rx: 37, ry: 24, rot: 0.42, z: 38, rz: 13 },
+  focinho: [[230, 97, 30, 22], [206, 104, 32, 23], [180, 115, 32, 18], [152, 127, 32, 14.5], [128, 135, 32, 11.5], [114, 140, 30, 8.5]],
+  mandibula: [[216, 140, 18, 13], [186, 154, 20, 10], [156, 165, 20, 8], [131, 171, 18, 6]],
+  sobrancelha: { cx: 168, cy: 109, rx: 18, ry: 5, rot: 0.33, z: 43, rz: 6 },
+  bochecha: { cx: 214, cy: 134, rx: 19, ry: 13, rot: 0.4, z: 22, rz: 12 },
+  chifre: [[206, 94, 30, 10], [222, 74, 30, 8], [244, 60, 30, 6], [266, 56, 28, 3.6], [284, 63, 26, 1.2]],
+  chifreLonge: [[190, 90, 2, 7], [198, 66, 2, 5], [212, 48, 2, 3], [228, 40, 2, 1]],
+  chifreNariz: [[126, 138, 40, 4], [119, 127, 40, 2.4], [116, 119, 40, 0.9]],
+  boca: [[206, 138], [119, 146], [128, 172], [204, 152]],
+  olho: [161, 117],
+};
+const WING = {
+  ombro: [305, 258], cotovelo: [372, 178], pulso: [415, 88],
+  dedos: [[452, 22], [506, 94], [503, 190], [470, 262]],
+  raiz: [[432, 300], [330, 282]],
+};
+const WING_FAR = { ombro: [290, 252], cotovelo: [318, 160], pulso: [348, 58], dedos: [[300, 8], [256, 92], [262, 178]] };
+
+function catmull(pts, step = 0.8) {
+  const out = [];
+  const P = (i) => pts[clamp(i, 0, pts.length - 1)];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+    const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+    const n = Math.max(2, Math.ceil(len / step));
+    for (let k = 0; k < n; k++) {
+      const t = k / n, t2 = t * t, t3 = t2 * t;
+      out.push(p1.map((_, j) => 0.5 * (2 * p1[j] + (-p0[j] + p2[j]) * t + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t2 + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * t3)));
+    }
+  }
+  out.push(pts[pts.length - 1].slice());
+  return out;
+}
+
+// buffer do dragão
+function makeBuf() {
+  const N = W * H;
+  return { z: new Float32Array(N).fill(-1e9), nx: new Float32Array(N), ny: new Float32Array(N), nz: new Float32Array(N), mat: new Uint8Array(N), part: new Uint8Array(N), u: new Float32Array(N), s: new Float32Array(N), r: new Float32Array(N), flag: new Uint8Array(N) };
+}
+const MAT = { pele: 1, barriga: 2, chifre: 3, membrana: 4, boca: 5, garra: 6 };
+let PART = 0;
+
+// tubo: união de esferas ao longo da spline; u = comprimento, s = deslocamento lateral assinado (-1..1)
+function tube(buf, pts, mat, opt = {}) {
+  const part = ++PART;
+  const S = catmull(pts, 0.7);
+  let u = opt.u0 || 0;
+  const samples = [];
+  for (let i = 0; i < S.length; i++) {
+    const a = S[Math.max(0, i - 1)], b = S[Math.min(S.length - 1, i + 1)];
+    let tx = b[0] - a[0], ty = b[1] - a[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+    if (i > 0) u += Math.hypot(S[i][0] - S[i - 1][0], S[i][1] - S[i - 1][1]);
+    samples.push({ x: S[i][0], y: S[i][1], z: S[i][2], r: S[i][3] * (opt.scale || 1), tx, ty, u });
+  }
+  for (const sm of samples) {
+    const R = sm.r; if (R < 0.5) continue;
+    const px = -sm.ty, py = sm.tx; // lado "barriga"
+    for (let y = Math.floor(sm.y - R); y <= Math.ceil(sm.y + R); y++) for (let x = Math.floor(sm.x - R); x <= Math.ceil(sm.x + R); x++) {
+      if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      const dx = x + 0.5 - sm.x, dy = y + 0.5 - sm.y, d2 = dx * dx + dy * dy;
+      if (d2 > R * R) continue;
+      const dz = Math.sqrt(R * R - d2) * (opt.flat || 1);
+      const z = sm.z + dz, k = y * W + x;
+      if (z <= buf.z[k]) continue;
+      const [nx, ny, nz] = norm3(dx / R, dy / R, dz / R / (opt.flat || 1));
+      buf.z[k] = z; buf.nx[k] = nx; buf.ny[k] = ny; buf.nz[k] = nz; buf.mat[k] = mat; buf.part[k] = part;
+      buf.u[k] = sm.u; buf.s[k] = (dx * px + dy * py) / R; buf.r[k] = R; buf.flag[k] = opt.flag || 0;
+    }
+  }
+  samples.part = part;
+  return samples;
+}
+function ellipsoid(buf, e, mat, opt = {}) {
+  const part = ++PART;
+  const c = Math.cos(e.rot || 0), s = Math.sin(e.rot || 0), M = Math.max(e.rx, e.ry);
+  for (let y = Math.floor(e.cy - M); y <= Math.ceil(e.cy + M); y++) for (let x = Math.floor(e.cx - M); x <= Math.ceil(e.cx + M); x++) {
+    if (x < 0 || y < 0 || x >= W || y >= H) continue;
+    const dx = x + 0.5 - e.cx, dy = y + 0.5 - e.cy;
+    const qx = dx * c + dy * s, qy = -dx * s + dy * c;
+    const q = (qx / e.rx) ** 2 + (qy / e.ry) ** 2; if (q > 1) continue;
+    const h = Math.sqrt(1 - q), z = e.z + e.rz * h, k = y * W + x;
+    if (z <= buf.z[k]) continue;
+    const gx = qx / e.rx ** 2, gy = qy / e.ry ** 2, gz = (e.rz * h) / e.rz ** 2;
+    const [nx, ny, nz] = norm3(gx * c - gy * s, gx * s + gy * c, gz);
+    buf.z[k] = z; buf.nx[k] = nx; buf.ny[k] = ny; buf.nz[k] = nz; buf.mat[k] = mat; buf.part[k] = part;
+    buf.u[k] = qx + (opt.u0 || 0); buf.s[k] = qy / e.ry; buf.r[k] = e.ry; buf.flag[k] = opt.flag || 0;
+  }
+  return part;
+}
+function inPoly(x, y, pts) { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c; } return c; }
+function polygon(buf, pts, mat, z, n, opt = {}) {
+  const part = ++PART;
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const [nx, ny, nz] = norm3(...n);
+  for (let y = Math.floor(Math.min(...ys)); y <= Math.ceil(Math.max(...ys)); y++) for (let x = Math.floor(Math.min(...xs)); x <= Math.ceil(Math.max(...xs)); x++) {
+    if (x < 0 || y < 0 || x >= W || y >= H || !inPoly(x + 0.5, y + 0.5, pts)) continue;
+    const k = y * W + x, zz = typeof z === "function" ? z(x, y) : z;
+    if (zz <= buf.z[k]) continue;
+    buf.z[k] = zz; buf.nx[k] = nx; buf.ny[k] = ny; buf.nz[k] = nz; buf.mat[k] = mat; buf.part[k] = part; buf.u[k] = 0; buf.s[k] = 0; buf.r[k] = 0; buf.flag[k] = opt.flag || 0;
+  }
+  return part;
+}
+// espinho/garra: triângulo com metade clara e metade escura (luz de um lado)
+function spike(buf, base, tip, half, z, mat) {
+  const [bx, by] = base, [tx, ty] = tip;
+  const dx = tx - bx, dy = ty - by, L = Math.hypot(dx, dy) || 1, px = -dy / L, py = dx / L;
+  const a = [bx + px * half, by + py * half], b = [bx - px * half, by - py * half];
+  // lado com normal para cima-esquerda = claro
+  const lightA = px * -0.6 + py * -0.8 > 0;
+  polygon(buf, [a, tip, base], mat, z, lightA ? [-0.6, -0.7, 0.4] : [0.5, 0.6, 0.4]);
+  polygon(buf, [b, tip, base], mat, z, lightA ? [0.5, 0.6, 0.4] : [-0.6, -0.7, 0.4]);
+}
+
+function scallop(a, b, w, depth, n = 6) {
+  // borda recortada entre duas pontas de dedo: arco côncavo em direção ao pulso w
+  const out = [];
+  const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+  const dx = w[0] - mx, dy = w[1] - my, L = Math.hypot(dx, dy);
+  for (let i = 1; i < n; i++) {
+    const t = i / n, s = Math.sin(t * Math.PI) * depth;
+    out.push([a[0] + (b[0] - a[0]) * t + (dx / L) * s, a[1] + (b[1] - a[1]) * t + (dy / L) * s]);
+  }
+  return out;
+}
+
+function buildDragon(v) {
+  PART = 0;
+  const buf = makeBuf();
+  const wingInfo = { panels: [], bones: [] };
+  // ---- asa de LONGE (atrás de tudo) ----
+  {
+    const { ombro, cotovelo, pulso, dedos } = WING_FAR;
+    const zf = -90;
+    const pts = [pulso, dedos[0], ...scallop(dedos[0], dedos[1], pulso, 14), dedos[1], ...scallop(dedos[1], dedos[2], pulso, 12), dedos[2], ...scallop(dedos[2], [282, 246], pulso, 8), [282, 246], ombro, cotovelo];
+    const p = polygon(buf, pts, MAT.membrana, zf, [0.3, 0.3, 1], { flag: 2 });
+    wingInfo.panels.push({ part: p, far: true });
+    tube(buf, [[...ombro, zf + 10, 9], [...cotovelo, zf + 10, 7], [...pulso, zf + 10, 5]], MAT.pele, { flag: 2 });
+    for (const d of dedos) { tube(buf, [[...pulso, zf + 12, 4], [(pulso[0] + d[0]) / 2, (pulso[1] + d[1]) / 2, zf + 12, 3], [...d, zf + 12, 1.2]], MAT.pele, { flag: 2 }); wingInfo.bones.push([pulso, d, true]); }
+    spike(buf, [pulso[0] - 2, pulso[1] - 3], [pulso[0] - 12, pulso[1] - 18], 3, zf + 14, MAT.garra);
+  }
+  const buried = new Set();
+  // ---- pernas de longe ----
+  const p0 = PART;
+  tube(buf, LEGS.pernaLonge.map(([x, y, z, r]) => [x, y, z, r]), MAT.pele, { flag: 3 });
+  ellipsoid(buf, { cx: 296, cy: 400, rx: 18, ry: 9, rot: 0, z: -40, rz: 10 }, MAT.pele, { flag: 3 });
+  for (let i = 0; i < 3; i++) spike(buf, [282 + i * 8, 404], [276 + i * 8, 414], 3, -30, MAT.garra);
+  for (let p = p0 + 1; p <= PART; p++) buried.add(p);
+  // ---- espinha: pescoço + tronco + cauda (um tubo só) ----
+  const spine = tube(buf, SPINE, MAT.pele, { scale: 1 });
+  buried.add(spine.part);
+  // espinhos dorsais: do lado oposto à barriga, diminuindo para a cauda e para a cabeça
+  {
+    let next = 6;
+    const tips = [];
+    for (const sm of spine) {
+      if (sm.u < next) continue;
+      const t = sm.u;
+      const h = clamp(sm.r * 0.5, 3, 20) * (t < 60 ? 0.6 + t / 150 : 1);
+      next = t + Math.max(6, h * 1.05);
+      if (sm.x > 300 && sm.x < 440 && sm.y < 320) continue;          // coberto pela asa / raiz da asa
+      const px = sm.ty, py = -sm.tx; // dorso
+      const bx = sm.x + px * sm.r * 0.86, by = sm.y + py * sm.r * 0.86;
+      const tip = [sm.x + px * (sm.r + h) - sm.tx * h * 0.55, sm.y + py * (sm.r + h) - sm.ty * h * 0.55];
+      if (tips.some(([tx, ty]) => Math.hypot(tx - tip[0], ty - tip[1]) < h * 0.75)) continue;   // curva côncava: não amontoar em leque
+      tips.push(tip);
+      spike(buf, [bx, by], tip, Math.max(1.5, h * 0.42), sm.z - 4, MAT.chifre);
+    }
+  }
+  // ---- ombro/peito (massa) ----
+  buried.add(ellipsoid(buf, { cx: 258, cy: 290, rx: 44, ry: 34, rot: -0.6, z: 24, rz: 34 }, MAT.pele, { u0: 1100 }));
+  // ---- coxa e canela traseiras ----
+  buried.add(ellipsoid(buf, { cx: 386, cy: 318, rx: 58, ry: 40, rot: -0.8, z: 20, rz: 42 }, MAT.pele, { u0: 600 }));
+  tube(buf, LEGS.canela, MAT.pele, { u0: 900 });
+  ellipsoid(buf, { cx: 404, cy: 405, rx: 20, ry: 9, rot: 0, z: 42, rz: 12 }, MAT.pele);
+  for (let i = 0; i < 4; i++) spike(buf, [388 + i * 9, 408], [382 + i * 9 - 2, 419], 3.4, 56, MAT.garra);
+  // ---- perna da frente (perto) ----
+  tube(buf, LEGS.pernaFrente, MAT.pele, { u0: 1200 });
+  ellipsoid(buf, { cx: 250, cy: 330, rx: 30, ry: 20, rot: 1.25, z: 52, rz: 14 }, MAT.pele, { u0: 1250 });   // músculo do braço
+  ellipsoid(buf, { cx: 198, cy: 402, rx: 21, ry: 10, rot: -0.08, z: 58, rz: 12 }, MAT.pele);
+  for (let i = 0; i < 4; i++) spike(buf, [182 + i * 9, 404], [173 + i * 9, 416 - (i === 0 ? 2 : 0)], 3.6, 74, MAT.garra);
+  // ---- asa de PERTO ----
+  {
+    const { ombro, cotovelo, pulso, dedos, raiz } = WING;
+    const zw = 30;
+    const panelDefs = [
+      [pulso, dedos[0], ...scallop(dedos[0], dedos[1], pulso, 16), dedos[1]],
+      [pulso, dedos[1], ...scallop(dedos[1], dedos[2], pulso, 18), dedos[2]],
+      [pulso, dedos[2], ...scallop(dedos[2], dedos[3], pulso, 16), dedos[3]],
+      [pulso, dedos[3], ...scallop(dedos[3], raiz[0], pulso, 12), raiz[0], raiz[1], ombro, cotovelo],
+      [cotovelo, pulso, [392, 98], [360, 160], [330, 220], ombro], // propatágio (na frente do braço)
+    ];
+    const normals = [[-0.35, -0.5, 0.8], [0.1, -0.1, 1], [0.45, 0.15, 0.88], [0.2, 0.35, 0.92], [-0.6, -0.4, 0.7]];
+    panelDefs.forEach((pts, i) => { const p = polygon(buf, pts, MAT.membrana, zw - i * 0.1, normals[i], { flag: 1 }); wingInfo.panels.push({ part: p, far: false, i }); });
+    tube(buf, [[...ombro, zw + 14, 11], [340, 214, zw + 14, 9.5], [...cotovelo, zw + 14, 9]], MAT.pele, { u0: 1500 });
+    tube(buf, [[...cotovelo, zw + 14, 10.5], [396, 132, zw + 14, 8.5], [...pulso, zw + 14, 7]], MAT.pele, { u0: 1600 });
+    for (const d of dedos) { tube(buf, [[...pulso, zw + 12, 5.5], [(pulso[0] * 0.55 + d[0] * 0.45), (pulso[1] * 0.55 + d[1] * 0.45) - 4, zw + 12, 3.8], [...d, zw + 12, 1.3]], MAT.pele, { u0: 1700 }); wingInfo.bones.push([pulso, d, false]); }
+    spike(buf, [pulso[0] - 3, pulso[1] - 4], [pulso[0] - 14, pulso[1] - 24], 4, zw + 20, MAT.garra);
+    spike(buf, [cotovelo[0] + 6, cotovelo[1] - 2], [cotovelo[0] + 18, cotovelo[1] - 12], 3, zw + 20, MAT.garra);
+  }
+  // ---- cabeça ----
+  {
+    const jawDrop = v === "dourado" ? 6 : 0;
+    const jaw = HEAD.mandibula.map(([x, y, z, r], i) => [x, y + jawDrop * (i / 3), z, r]);
+    polygon(buf, HEAD.boca.map(([x, y], i) => [x, y + (i >= 2 ? jawDrop : 0)]), MAT.boca, 12, [0, 0, 1]);
+    tube(buf, HEAD.chifreLonge, MAT.chifre);
+    tube(buf, jaw, MAT.pele, { u0: 2000, flat: 0.65 });
+    tube(buf, HEAD.focinho, MAT.pele, { u0: 2100, flat: 0.7 });
+    ellipsoid(buf, HEAD.bochecha, MAT.pele, { u0: 2400 });
+    ellipsoid(buf, HEAD.sobrancelha, MAT.pele, { u0: 2300 });
+    tube(buf, HEAD.chifre, MAT.chifre);
+    tube(buf, HEAD.chifreNariz, MAT.chifre);
+    // espinhos da bochecha e do queixo, varrendo para trás
+    spike(buf, [216, 142], [250, 150], 5, 30, MAT.chifre);
+    spike(buf, [212, 150 + jawDrop], [240, 170 + jawDrop], 4.5, 30, MAT.chifre);
+    spike(buf, [198, 158 + jawDrop], [214, 180 + jawDrop], 3.5, 30, MAT.chifre);
+    spike(buf, [170, 166 + jawDrop], [178, 182 + jawDrop], 2.5, 28, MAT.chifre);
+    spike(buf, [236, 100], [264, 98], 4.5, 40, MAT.chifre);
+    spike(buf, [234, 108], [258, 114], 3.5, 40, MAT.chifre);
+    // dentes
+
+  }
+  return { buf, wingInfo, spine, buried };
+}
+
+// ---------- pintura do dragão ----------
+function shadeDragon(D, v) {
+  const { buf, wingInfo } = D;
+  const out = new Array(W * H).fill(null);
+  const L = v === "normal" ? norm3(-0.55, -0.7, 0.5) : norm3(-0.25, 0.75, 0.6);   // dourado: luz de BAIXO (o rio de ouro)
+  const B = v === "normal" ? norm3(0.1, 1, 0.2) : norm3(0.4, -0.6, 0.4);             // luz secundária: reflexo do ouro (normal) / brasa de cima (dourado)
+  const Hh = norm3(L[0], L[1], L[2] + 1);
+  const ramp = { pele: ["R1", "R2", "R3", "R4", "R5"], barriga: ["B1", "B2", "B3", "B3", "B4"], chifre: ["H1", "H2", "H3", "H4", "H4"], garra: ["H0", "H1", "H2", "H3", "H4"], membrana: ["M1", "M2", "M3", "M4", "M5"] };
+  const panelOf = new Map(wingInfo.panels.map((p) => [p.part, p]));
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const k = y * W + x; const m = buf.mat[k]; if (!m) continue;
+    const nx = buf.nx[k], ny = buf.ny[k], nz = buf.nz[k];
+    const lam = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
+    const bounce = Math.max(0, nx * B[0] + ny * B[1] + nz * B[2]);
+    const spec = Math.pow(Math.max(0, nx * Hh[0] + ny * Hh[1] + nz * Hh[2]), 40);
+    let val = Math.pow(lam, 1.25);                  // mais contraste: o lado de costas para a luz cai rápido para a sombra
+    if (v === "dourado") {
+      // METAL: reflete o ambiente. Normal para baixo = reflete o rio de ouro (claro); para cima = teto escuro;
+      // de frente = salão (meio-tom). Um brilho especular quente de baixo-esquerda.
+      val = clamp(0.47 + 0.6 * ny - 0.18 * nx + 0.1 * (1 - nz), 0, 1);
+    }
+    if (buf.flag[k] === 2) val *= 0.45;          // asa de longe: na sombra
+    if (buf.flag[k] === 3) val *= 0.55;          // pernas de longe
+    if (m === MAT.boca) {
+      // boca: garganta em brasa (mais quente no fundo, à direita), céu da boca escuro, língua avermelhada embaixo
+      const t = (x - 118) / 90 + (bayer(x, y) - 0.5) * 0.25;
+      let up = 0; for (let d = 1; d <= 3; d++) if (buf.mat[(y - d) * W + x] !== MAT.boca) { up = d; break; }
+      out[k] = up === 1 ? "R0" : up === 2 ? "R1" : t > 0.62 ? "F2" : t > 0.3 ? "F1" : "R3";
+      continue;
+    }
+    if (m === MAT.membrana) {
+      const p = panelOf.get(buf.part[k]);
+      // membrana translúcida: tom do painel + mais clara perto do bordo de fuga (a luz do ouro atravessa)
+      // translúcida: clareia para o bordo de fuga, longe do pulso (a luz do salão atravessa a pele fina)
+      const dw = Math.hypot(x - WING.pulso[0], y - WING.pulso[1]) / 220;
+      let t = 0.1 + 0.6 * lam + 0.22 * clamp(dw, 0, 1);
+      if (v === "dourado") t = 0.08 + 0.4 * lam + clamp((y - 120) / 380, 0, 0.3);
+      // distância ao osso de dedo mais próximo: perto do osso a membrana é mais grossa (normal: escurece) ou reflete (dourado: clareia)
+      let db = 99;
+      for (const [w0, d0, far] of wingInfo.bones) {
+        if (!!far !== !!(p && p.far)) continue;
+        const vx = d0[0] - w0[0], vy = d0[1] - w0[1], L2 = vx * vx + vy * vy;
+        const tt = clamp(((x - w0[0]) * vx + (y - w0[1]) * vy) / L2, 0, 1);
+        db = Math.min(db, Math.hypot(x - w0[0] - vx * tt, y - w0[1] - vy * tt));
+      }
+      if (db < 9) t += (v === "dourado" ? 0.22 : -0.12) * (1 - db / 9);
+      if (p && p.far) t = 0.12 + 0.2 * lam + (v === "dourado" ? clamp((y - 100) / 500, 0, 0.2) : 0);
+      const tone = clamp(Math.floor(t * 5 + (bayer(x, y) - 0.5) * 0.5), 0, 4);
+      out[k] = ramp.membrana[tone];
+      continue;
+    }
+    let matName = m === MAT.chifre ? "chifre" : m === MAT.garra ? "garra" : "pele";
+    const s = buf.s[k], R = buf.r[k];
+    const isBelly = m === MAT.pele && R > 8 && buf.u[k] < 1100 && s > 0.62 && !buf.flag[k];
+    if (isBelly) matName = "barriga";
+    let tone = clamp(Math.floor(val * 5 + (bayer(x, y) - 0.5) * 0.18), 0, 4);
+    // escamas que seguem o volume (tubo: linhas = ao longo do comprimento; colunas = em volta)
+    if (matName === "pele" && R > 5) {
+      const ss = buf.u[k] >= 2000 ? 4.5 : clamp(R * 0.2, 3.5, 8);
+      const arc = Math.asin(clamp(s, -1, 1)) * R;
+      const a = buf.u[k] / ss, j = Math.floor(a), fy = a - j;
+      const b = arc / ss + (j & 1) * 0.5, fx = b - Math.floor(b) - 0.5;
+      const edgeY = 0.5 + 0.5 * Math.sqrt(Math.max(0, 1 - 4 * fx * fx));
+      const dist = Math.abs(fy - edgeY) * ss;
+      if (dist < 0.55 && tone >= 1 && (v === "normal" || (tone <= 3 && ((buf.u[k] / ss) | 0) % 2 === 0))) tone -= 1;
+      else if (fy < 0.3 && Math.abs(fx) < 0.22 && tone >= 3 && spec > 0.25) tone = Math.min(4, tone + 1);
+    }
+    if (matName === "barriga") {
+      const bs = clamp(R * 0.18, 4, 9);
+      const f = buf.u[k] / bs - Math.floor(buf.u[k] / bs);
+      if (f * bs < 1 && tone >= 1) tone -= 1;
+    }
+    if (v === "normal" && tone < 4 && lam > 0.25) {              // o raio da janela acende o que ele cruza (cabeça e peito)
+      const t = y / 430, xl = 70 + 120 * t, xr = 150 + 230 * t;
+      if (y < 430 && x > xl + 6 && x < xr - 6) tone += 1;
+    }
+    let name = ramp[matName][tone];
+    if (matName === "pele") {
+      if (bounce > 0.55 && tone <= 2 && nz < 0.5 && R >= 8) name = bounce > 0.8 || nz < 0.2 ? "rim2" : "rim1";
+    } else if (bounce > 0.75 && tone <= 0 && matName === "barriga") name = "B2";
+    out[k] = name;
+  }
+  // nervuras da asa (linhas finas da membrana, do pulso para o bordo)
+  for (const [w, d] of wingInfo.bones) {
+    // nervuras secundárias entre os dedos: amostras ao longo do osso desviando para os lados
+    for (const off of [-0.18, 0.18]) {
+      const steps = 120;
+      for (let i = 10; i < steps; i++) {
+        const t = i / steps;
+        const x = Math.round(w[0] + (d[0] - w[0]) * t + -(d[1] - w[1]) * off * t * 0.5);
+        const y = Math.round(w[1] + (d[1] - w[1]) * t + (d[0] - w[0]) * off * t * 0.5);
+        if (x < 0 || y < 0 || x >= W || y >= H) continue;
+        const k = y * W + x;
+        if (buf.mat[k] === MAT.membrana) out[k] = buf.flag[k] === 2 ? "M0" : "M1";
+      }
+    }
+  }
+  // linhas internas: onde uma parte da FRENTE encosta numa de trás, a de trás ganha uma linha escura
+  const res = out.slice();
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const k = y * W + x; if (!out[k]) continue;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+      const q = yy * W + xx;
+      if (buf.mat[q] && buf.part[q] !== buf.part[k] && buf.z[q] > buf.z[k] + 6) {
+        res[k] = buf.mat[k] === MAT.membrana ? "M0" : buf.mat[k] === MAT.chifre || buf.mat[k] === MAT.garra ? "H0" : "R0";
+        break;
+      }
+    }
+  }
+  // olho: amêndoa grande sob a sobrancelha, íris amarelo->laranja, pupila em fenda, brilho, contorno escuro
+  const [ex, ey] = HEAD.olho;
+  const EW = 17, EH = 8;
+  for (let j = 0; j < EH; j++) for (let i = 0; i < EW; i++) {
+    const u = (i + 0.5) / EW * 2 - 1, w = (j + 0.5) / EH * 2 - 1;
+    // amêndoa: canto da frente pontudo, de trás arredondado, inclinada (olhar feroz)
+    const top = -1 + 0.9 * (1 - u * u), bot = 1 - 1.1 * (1 - u * u) * 0.9;
+    const inside = w > -0.95 + 1.9 * Math.pow(Math.abs(u), 2.2) * 0.5 - 0.05 && Math.abs(u) < 1 && Math.abs(w) < 1 - Math.pow(Math.abs(u), 1.6) * 0.85;
+    void top; void bot;
+    const x = ex - Math.floor(EW / 2) + i, y = ey - Math.floor(EH / 2) + j - Math.round(u * 1.5);
+    if (!inside) continue;
+    const edge = Math.abs(w) > 0.98 - Math.pow(Math.abs(u), 1.6) * 0.85 - 0.3;
+    let c = w < -0.1 ? "E2" : "E1";
+    if (u < -0.2 && w < 0.2) c = "E2";
+    if (Math.abs(u - 0.08) < 0.1) c = "R0";             // pupila em fenda
+    if (edge) c = "R0";
+    res[y * W + x] = c;
+  }
+  res[(ey - 2) * W + ex - 4] = "E3"; res[(ey - 2) * W + ex - 3] = "E3"; res[(ey - 1) * W + ex - 4] = "E3";
+  // dentes: de cima descem da borda do focinho, de baixo sobem da mandíbula (marfim, luz à esquerda)
+  const tooth = (x, y0, len, dir) => { for (let j = 0; j < len; j++) { const wdt = j < len * 0.35 ? 3 : j < len * 0.7 ? 2 : 1; for (let i = 0; i < wdt; i++) { const k = (y0 + dir * j) * W + x + i; res[k] = i === 0 ? "H4" : i === 1 ? "H3" : "H2"; } } };
+  for (const [x, len] of [[126, 8], [137, 6], [150, 7], [163, 5], [176, 5], [189, 4]]) {
+    let yt = -1; for (let y = 120; y < 185; y++) if (D.buf.mat[y * W + x] === MAT.boca) { yt = y; break; }
+    if (yt >= 0) tooth(x, yt, len, 1);
+  }
+  for (const [x, len] of [[132, 6], [157, 6], [181, 4]]) {
+    let yb = -1; for (let y = 185; y > 120; y--) if (D.buf.mat[y * W + x] === MAT.boca) { yb = y; break; }
+    if (yb >= 0) tooth(x, yb, len, -1);
+  }
+  // narina
+  for (const [x, y] of [[124, 141], [125, 141], [126, 142]]) res[y * W + x] = "R0";
+  return res;
+}
+
+// ======================================================================================
+// CENA
+// ======================================================================================
+function build(v) {
+  const P = palette(v);
+  const names = Object.keys(P);
+  const K = (n) => { if (n === ".") return "."; const i = names.indexOf(n); if (i < 0) throw new Error("cor desconhecida: " + n); return KEYS[i]; };
+  const cmds = [];
+  for (let i = 0; i < names.length; i += 60) cmds.push({ name: "set_palette", input: { colors: names.slice(i, i + 60).map((n, j) => ({ key: KEYS[i + j], hex: P[n], name: n })) } });
+  const LAYERS = ["fundo", "parede", "colunas_longe", "colunas_meio", "ouro_longe", "raio", "colunas_perto", "ouro", "reflexo", "objetos", "fumaca_tras", "dragao", "ouro_frente", "brilhos", "fumaca", "vinheta"];
+  for (const l of LAYERS) cmds.push({ name: "add_layer", input: { name: l } });
+  const INT = ["x", "y", "w", "h", "x1", "y1", "x2", "y2"];
+  const fix = (sh) => { const o = { ...sh }; for (const k of INT) if (typeof o[k] === "number") o[k] = Math.round(o[k]); if (o.w !== undefined) o.w = Math.max(1, o.w); if (o.h !== undefined) o.h = Math.max(1, o.h); if (o.points && o.type !== "curve") o.points = o.points.map(([a, b]) => [Math.round(a), Math.round(b)]); return o; };
+  const draw = (layer, shapes) => { shapes = shapes.map(fix); for (let i = 0; i < shapes.length; i += 200) cmds.push({ name: "draw_shapes", input: { layer, shapes: shapes.slice(i, i + 200), preview: false } }); };
+  const tf = (layer, input) => cmds.push({ name: "transform", input: { frames: 0, layer, preview: false, ...input } });
+  const rows = (layer, grid) => {
+    // grid: array W*H de nomes (ou null) -> draw_rows em blocos de linhas
+    let y0 = -1; const lines = [];
+    const flush = () => { if (lines.length) cmds.push({ name: "draw_rows", input: { layer, x: 0, y: y0, rows: lines.splice(0), dot_is_transparent: false, preview: false } }); };
+    for (let y = 0; y < H; y++) {
+      let any = false, line = "";
+      for (let x = 0; x < W; x++) { const c = grid[y * W + x]; if (c) { any = true; line += K(c); } else line += " "; }
+      if (!any) { flush(); y0 = -1; continue; }
+      if (y0 < 0) y0 = y;
+      lines.push(line);
+      if (lines.length >= 64) { flush(); y0 = y + 1; }
+    }
+    flush();
+  };
+  const gold = v === "dourado";
+  const rnd = prng(gold ? 77 : 11);
+
+  // ---------- fundo: ar do salão ----------
+  draw("fundo", [
+    { type: "gradient", x: 0, y: 0, w: W, h: H, colors: ["bg0", "bg1", "bg2", "bg3", "bg4", "bg5", "bg6"].map(K), direction: "vertical", dither: "bayer4", suavidade: 0.7, ondas: 3 },
+    { type: "gradient", x: 0, y: 140, w: W, h: 372, direction: "radial", cx: 300, cy: 420, r: 260, colors: [K("air"), K("bg6"), K("bg5"), K("bg4"), "."], dither: "bayer4", suavidade: 0.8 },
+  ]);
+  // parede do fundo: grande portal de anão (arco de pedra com degraus) no ponto de fuga
+  const VX = 300, VY = 330;
+  {
+    const sh = [];
+    // paredão
+    sh.push({ type: "rect", x: 150, y: 60, w: 300, h: 320, color: K("st1"), filled: true });
+    // portal: moldura em degraus (geometria anã) e vão escuro
+    for (let i = 0; i < 4; i++) {
+      const w = 150 - i * 22, h = 230 - i * 22, x = VX - w / 2, y = 120 + i * 14;
+      const top = [[x, y + 50], [x + w * 0.2, y + 18], [x + w / 2, y], [x + w * 0.8, y + 18], [x + w, y + 50], [x + w, 380], [x, 380]].map(([a, b]) => [Math.round(a), Math.round(b)]);
+      sh.push({ type: "polygon", points: top, color: K(["st2", "st1", "st3", "bg2"][i]) });
+    }
+    // runas: faixas horizontais finas na parede
+    for (let y = 80; y < 380; y += 26) sh.push({ type: "line", x1: 150, y1: y, x2: 450, y2: y, color: K("st0") });
+    for (let y = 80; y < 380; y += 26) for (let x = 150 + ((y / 26) % 2) * 20; x < 450; x += 40) sh.push({ type: "line", x1: x, y1: y, x2: x, y2: y + 26, color: K("st0") });
+    draw("parede", sh);
+    draw("parede", [{ type: "gradient", x: 150, y: 60, w: 300, h: 320, colors: [K("st1"), K("st2"), K("st3")], direction: "vertical", dither: "bayer4", suavidade: 0.6, only: K("st1") }]);
+    tf("parede", { op: "haze", color: K(gold ? "bg5" : "bg4"), quantidade: 0.55 });
+  }
+  // colunas em perspectiva: fileiras dos dois lados convergindo para (VX, VY)
+  const column = (cx, w, top, bot, lit) => {
+    const sh = [];
+    const x = Math.round(cx - w / 2);
+    sh.push({ type: "rect", x, y: top, w, h: bot - top, color: K("st2"), filled: true });
+    // face iluminada (lado da luz/da luz do ouro) e face na sombra
+    const lw = Math.max(2, Math.round(w * 0.32));
+    if (lit === "esq") { sh.push({ type: "rect", x, y: top, w: lw, h: bot - top, color: K("st3"), filled: true }); sh.push({ type: "rect", x: x + w - Math.max(1, Math.round(w * 0.2)), y: top, w: Math.max(1, Math.round(w * 0.2)), h: bot - top, color: K("st1"), filled: true }); }
+    else { sh.push({ type: "rect", x: x + w - lw, y: top, w: lw, h: bot - top, color: K("st3"), filled: true }); sh.push({ type: "rect", x, y: top, w: Math.max(1, Math.round(w * 0.2)), h: bot - top, color: K("st1"), filled: true }); }
+    // capitel em degraus e base
+    const cw = Math.round(w * 1.35), ch = Math.max(3, Math.round(w * 0.35));
+    const capY = top + Math.round(w * 1.2);
+    sh.push({ type: "rect", x: Math.round(cx - cw / 2), y: capY, w: cw, h: ch, color: K("st3"), filled: true });
+    sh.push({ type: "rect", x: Math.round(cx - cw / 2), y: capY + ch, w: cw, h: Math.max(1, Math.round(ch / 3)), color: K("st0"), filled: true });
+    sh.push({ type: "rect", x: Math.round(cx - (w * 1.15) / 2), y: capY - ch, w: Math.round(w * 1.15), h: ch, color: K("st2"), filled: true });
+    // sulcos verticais (caneluras) e faixas rúnicas
+    const n = Math.max(1, Math.floor(w / 9));
+    for (let i = 1; i <= n; i++) { const xx = x + Math.round((w * i) / (n + 1)); sh.push({ type: "line", x1: xx, y1: capY + ch + 2, x2: xx, y2: bot, color: K("st1") }); }
+    for (let yy = capY + ch + Math.round(w * 1.5); yy < bot; yy += Math.round(w * 1.6)) sh.push({ type: "rect", x, y: yy, w, h: Math.max(1, Math.round(w / 12)), color: K("st0"), filled: true });
+    return sh;
+  };
+  const colRow = (layer, list) => { const sh = []; for (const c of list) sh.push(...column(...c)); draw(layer, sh); };
+  // longe: estreitas, perto do portal
+  colRow("colunas_longe", [[178, 16, 40, 372, "dir"], [214, 14, 70, 366, "dir"], [392, 14, 70, 366, "esq"], [428, 16, 40, 372, "esq"]]);
+  // arcos entre as colunas de longe
+  draw("colunas_longe", [
+    { type: "polygon", points: [[170, 40], [222, 40], [222, 70], [196, 52], [170, 70]], color: K("st2") },
+    { type: "polygon", points: [[384, 40], [436, 40], [436, 70], [410, 52], [384, 70]], color: K("st2") },
+    { type: "rect", x: 150, y: 20, w: 300, h: 22, color: K("st1"), filled: true },
+  ]);
+  tf("colunas_longe", { op: "haze", color: K(gold ? "bg5" : "bg4"), quantidade: 0.45 });
+  colRow("colunas_meio", [[116, 30, 0, 384, "dir"], [478, 30, 0, 384, "esq"]]);
+  tf("colunas_meio", { op: "haze", color: K(gold ? "bg5" : "bg4"), quantidade: 0.22 });
+  colRow("colunas_perto", [[24, 66, 0, 512, "dir"]]);
+  // o ouro ilumina a base das colunas (luz quente de baixo)
+  for (const l of ["colunas_meio", "colunas_perto"]) draw(l, [{ type: "gradient", x: 0, y: 250, w: W, h: 262, colors: [K("st2"), K("st3"), K("st4"), K("st5")], direction: "vertical", dither: "bayer4", suavidade: 0.7, only: K("st3") }]);
+  tf("colunas_perto", { op: "haze", color: K("bg0"), quantidade: 0.35 });
+
+  // ---------- pilhas de ouro ao longe ----------
+  if (!gold) {
+    const sh = [];
+    const mound = (cx, top, w, base) => { const pts = []; for (let i = 0; i <= 24; i++) { const t = i / 24, x = cx - w / 2 + t * w; pts.push([Math.round(x), Math.round(base - (base - top) * Math.pow(Math.sin(t * Math.PI), 0.8) + (rnd() - 0.5) * 3)]); } return { type: "polygon", points: [...pts, [cx + w / 2, base + 30], [cx - w / 2, base + 30]], color: K("g3") }; };
+    sh.push(mound(150, 330, 260, 392), mound(420, 340, 240, 392), mound(300, 358, 200, 400));
+    draw("ouro_longe", sh);
+    draw("ouro_longe", [{ type: "gradient", x: 0, y: 320, w: W, h: 90, colors: [K("g3"), K("g2"), K("g1")], direction: "vertical", dither: "bayer4", suavidade: 0.6, only: K("g3") }]);
+    draw("ouro_longe", [{ type: "scatter", x: 0, y: 320, w: W, h: 90, colors: [K("g5"), K("g6"), K("g2")], densidade: 0.08, forma: "onda", distancia: 2, seed: 3, only: [K("g3"), K("g4"), K("g2")] }]);
+    tf("ouro_longe", { op: "haze", color: K("bg5"), quantidade: 0.3 });
+  }
+
+  // ---------- raio de luz (janela alta à esquerda) ----------
+  if (!gold) {
+    // raio volumétrico: densidade de dither que cai com a distância da janela e nas bordas do feixe
+    // (ATRITO: gradient com "." preserva o pixel em vez de apagar, então o degradê até transparente é feito aqui)
+    const bg = new Array(W * H).fill(null);
+
+
+    for (let y = 0; y < 430; y++) {
+      const t = y / 430, xl = 70 + (190 - 70) * t, xr = 150 + (380 - 150) * t;
+      for (let x = Math.floor(xl); x <= Math.ceil(xr); x++) {
+        if (x < 0 || x >= W) continue;
+        const u = (x - xl) / (xr - xl), edge = Math.min(1, Math.min(u, 1 - u) * 6);
+        const dens = (0.62 - 0.5 * t) * edge * (0.85 + 0.3 * vnoise(x / 30, y / 50));
+        const b = bayer(x, y);
+        if (b < dens * 0.5) bg[y * W + x] = "beam2";
+        else if (b < dens) bg[y * W + x] = "beam";
+      }
+    }
+    rows("raio", bg);
+  }
+
+  // ---------- dragão ----------
+  const D = buildDragon(v);
+  const grid = shadeDragon(D, v);
+
+  // ---------- montanha de ouro (normal) / rio de ouro derretido (dourado) ----------
+  const HX = (x) => 344 + ((x - 310) / 250) ** 2 * 95 + Math.sin(x * 0.05) * 4;
+  const SURF = 398; // superfície do ouro derretido
+  if (!gold) {
+    const pts = []; for (let x = 0; x <= W; x += 4) pts.push([x, Math.round(HX(x))]);
+    draw("ouro", [{ type: "polygon", points: [...pts, [W, H], [0, H]], color: K("g2") }]);
+    draw("ouro", [{ type: "gradient", x: 0, y: 330, w: W, h: 182, colors: [K("g3"), K("g2"), K("g1")], direction: "vertical", dither: "bayer4", suavidade: 0.8, only: K("g2") }]);
+    // moedas: de trás para frente; o tom depende da luz (raio de luz + sombra do dragão + borda escura)
+    const G = ["g0", "g1", "g2", "g3", "g4", "g5", "g6"];
+    const light = (x, y) => {
+      let l = 0.42 + 0.42 * Math.exp(-(((x - 250) / 130) ** 2) - (((y - 380) / 70) ** 2));
+      l += 0.12 * (1 - Math.abs(x - 300) / 300) + 0.22 * (vnoise(x / 26, y / 11) - 0.5);
+      const dk = y * W + x;
+      const shadowed = D.buf.mat[Math.max(0, dk - 30 * W)] && y > 340;   // sob o corpo do dragão
+      if (shadowed) l -= 0.25;
+      l -= Math.max(0, (y - 470) / 120);
+      return l;
+    };
+    const coins = [];
+    for (let i = 0; i < 5200; i++) {
+      const x = Math.floor(rnd() * W), top = HX(x);
+      const y = Math.floor(top - 2 + Math.pow(rnd(), 1.3) * (H - top + 6));
+      coins.push([x, y]);
+    }
+    coins.sort((a, b) => a[1] - b[1]);
+    const sh = [];
+    for (const [x, y] of coins) {
+      const scale = 0.7 + (y - 330) / 300;
+      const w = Math.max(5, Math.round((7 + rnd() * 4) * scale)), h = Math.max(3, Math.round(w * (0.42 + rnd() * 0.1)));
+      const t = clamp(Math.round(light(x, y) * 6 + (rnd() - 0.5) * 1.4), 1, 5);
+      if (rnd() < 0) { // moeda em pé (de lado) — desligado: virava "grama"
+        sh.push({ type: "ellipse", x, y: y - h * 2, w: Math.max(3, Math.round(h * 0.9)), h: w, color: K(G[t - 1]), filled: true });
+        sh.push({ type: "line", x1: x + 1, y1: y - h * 2 + 1, x2: x + 1, y2: y - h * 2 + w - 2, color: K(G[Math.min(6, t + 1)]) });
+        continue;
+      }
+      sh.push({ type: "ellipse", x, y: y + 1, w, h, color: K(G[Math.max(0, t - 2)]), filled: true });
+      sh.push({ type: "ellipse", x, y, w, h, color: K(G[t]), filled: true });
+      sh.push({ type: "line", x1: x + 1 + Math.floor(w * 0.15), y1: y, x2: x + Math.floor(w * 0.5), y2: y, color: K(G[Math.min(6, t + 1)]) });
+      if (t >= 4) sh.push({ type: "pixels", points: [[x + 1 + Math.floor(w * 0.2), y]], color: K(G[Math.min(6, t + 2)]) });
+    }
+    draw("ouro", sh);
+    // objetos: taças, coroa, espada, escudo, joias
+    const obj = [];
+    const goblet = (x, y, s, t) => {
+      const c = G[t], d = G[t - 2], l = G[Math.min(6, t + 2)];
+      obj.push({ type: "polygon", points: [[x - 7 * s, y - 16 * s], [x + 7 * s, y - 16 * s], [x + 5 * s, y - 8 * s], [x + 1 * s, y - 5 * s], [x + 1 * s, y + 1 * s], [x + 5 * s, y + 3 * s], [x - 5 * s, y + 3 * s], [x - 1 * s, y + 1 * s], [x - 1 * s, y - 5 * s], [x - 5 * s, y - 8 * s]].map(([a, b]) => [Math.round(a), Math.round(b)]), color: K(c) });
+      obj.push({ type: "ellipse", x: Math.round(x - 7 * s), y: Math.round(y - 17 * s), w: Math.round(14 * s), h: Math.round(4 * s), color: K(d), filled: true });
+      obj.push({ type: "line", x1: Math.round(x - 5 * s), y1: Math.round(y - 13 * s), x2: Math.round(x - 3 * s), y2: Math.round(y - 9 * s), color: K(l) });
+      obj.push({ type: "polygon", points: [[x + 3 * s, y - 15 * s], [x + 7 * s, y - 16 * s], [x + 5 * s, y - 8 * s], [x + 2 * s, y - 6 * s]].map(([a, b]) => [Math.round(a), Math.round(b)]), color: K(d) });
+      obj.push({ type: "rect", x: Math.round(x - 2 * s), y: Math.round(y - 12 * s), w: Math.max(2, Math.round(3 * s)), h: Math.max(2, Math.round(3 * s)), color: K("ruby1"), filled: true });
+    };
+    const gem = (x, y, s, kind) => {
+      const [c0, c1, c2] = { r: ["ruby0", "ruby1", "ruby2"], g: ["emer0", "emer1", "emer2"], b: ["saph0", "saph1", "saph2"] }[kind];
+      obj.push({ type: "polygon", points: [[x, y - s], [x + s, y], [x, y + s], [x - s, y]], color: K(c1) });
+      obj.push({ type: "polygon", points: [[x, y], [x + s, y], [x, y + s]], color: K(c0) });
+      obj.push({ type: "polygon", points: [[x - s, y], [x, y - s], [x, y]], color: K(c2) });
+      obj.push({ type: "pixels", points: [[x - Math.round(s / 2), y - Math.round(s / 2)]], color: K("spark") });
+    };
+    goblet(96, 438, 1.4, 4); goblet(352, 470, 1.6, 5); goblet(460, 404, 1.1, 3);
+    // espada fincada no ouro
+    obj.push({ type: "polygon", points: [[60, 330], [65, 330], [70, 410], [62, 412]], color: K("H3") });
+    obj.push({ type: "line", x1: 63, y1: 332, x2: 66, y2: 408, color: K("H4") });
+    obj.push({ type: "rect", x: 50, y: 322, w: 26, h: 5, color: K("g4"), filled: true });
+    obj.push({ type: "rect", x: 58, y: 302, w: 6, h: 20, color: K("g1"), filled: true });
+    obj.push({ type: "ellipse", x: 56, y: 296, w: 9, h: 8, color: K("g5"), filled: true });
+    // escudo redondo inclinado (perspectiva: elipse) à direita
+    obj.push({ type: "ellipse", x: 440, y: 430, w: 64, h: 34, color: K("g1"), filled: true });
+    obj.push({ type: "ellipse", x: 443, y: 431, w: 58, h: 29, color: K("g3"), filled: true });
+    obj.push({ type: "ellipse", x: 454, y: 437, w: 36, h: 17, color: K("g2"), filled: false });
+    obj.push({ type: "ellipse", x: 466, y: 442, w: 12, h: 7, color: K("g5"), filled: true });
+    // coroa
+    obj.push({ type: "polygon", points: [[250, 440], [254, 426], [259, 434], [264, 422], [269, 434], [274, 426], [278, 440]], color: K("g4") });
+    obj.push({ type: "rect", x: 250, y: 438, w: 29, h: 5, color: K("g3"), filled: true });
+    obj.push({ type: "pixels", points: [[264, 432], [256, 440], [272, 440]], color: K("ruby2") });
+    for (let i = 0; i < 26; i++) { const x = 20 + Math.floor(rnd() * 470); const y = Math.round(HX(x) + 6 + rnd() * (H - HX(x) - 12)); if (D.buf.mat[y * W + x]) continue; gem(x, y, 2 + Math.floor(rnd() * 3), "rgb"[i % 3]); }
+    draw("objetos", obj);
+    tf("objetos", { op: "outline", mode: "seletivo" });
+  } else {
+    // rio de ouro derretido: superfície com rampa (mais quente perto), veias escuras de crosta, ondas
+    draw("ouro", [
+      { type: "rect", x: 0, y: SURF, w: W, h: H - SURF, color: K("L3"), filled: true },
+      { type: "gradient", x: 0, y: SURF, w: W, h: H - SURF, colors: [K("L4"), K("L3"), K("L2"), K("L3"), K("L4"), K("L5")], direction: "vertical", dither: "bayer4", suavidade: 0.6, ondas: 6 },
+      { type: "gradient", x: 0, y: SURF - 40, w: W, h: H - SURF + 40, direction: "radial", cx: 300, cy: 470, r: 170, colors: [K("L6"), K("L5"), K("L5"), K("L4"), "."], dither: "bayer4", suavidade: 0.7 },
+    ]);
+    const sh = [];
+    const r2 = prng(5);
+    for (let i = 0; i < 140; i++) {  // veias de crosta escura que boiam, alongadas na horizontal (perspectiva)
+      const y = SURF + 4 + Math.floor(Math.pow(r2(), 0.8) * (H - SURF - 6));
+      const x = Math.floor(r2() * W), len = 6 + Math.floor(r2() * 30 * (0.5 + (y - SURF) / 100));
+      sh.push({ type: "line", x1: x, y1: y, x2: x + len, y2: y + Math.round((r2() - 0.5) * 3), color: K(r2() < 0.5 ? "L1" : "L2") });
+    }
+    for (let i = 0; i < 90; i++) { const y = SURF + 3 + Math.floor(r2() * (H - SURF - 4)), x = Math.floor(r2() * W), len = 3 + Math.floor(r2() * 14); sh.push({ type: "line", x1: x, y1: y, x2: x + len, y2: y, color: K("L6") }); }
+    // ondas concêntricas em volta do dragão (elipses achatadas) onde ele sai do ouro
+    for (const [cx, rw] of [[320, 420], [320, 340], [320, 270]]) sh.push({ type: "ellipse", x: cx - rw / 2, y: SURF - 6 + Math.round(rw / 30), w: rw, h: Math.round(rw / 6), color: K("L2"), filled: false });
+    draw("ouro", sh);
+    // margem escura de pedra ao fundo (antes da superfície) e brilho da borda
+    draw("ouro", [{ type: "rect", x: 0, y: SURF - 1, w: W, h: 2, color: K("L5"), filled: true }]);
+    // margem de pedra ao fundo, contra o brilho do rio, com borda acesa
+    draw("ouro_longe", [
+      { type: "terrain", topo: SURF - 22, amp: 14, rugosidade: 0.55, seed: 8, ate: SURF, color: K("st1") },
+      { type: "gradient", x: 0, y: SURF - 40, w: W, h: 42, colors: [K("st1"), K("st2"), K("st3"), K("st4")], direction: "vertical", dither: "bayer4", suavidade: 0.7, only: K("st1") },
+      { type: "rect", x: 0, y: SURF - 3, w: W, h: 3, color: K("L4"), filled: true },
+    ]);
+    // cascatas de ouro derretido saindo de canais na parede (a forja)
+    const falls = [];
+    for (const [fx, fw, top] of [[84, 9, 96], [452, 7, 120]]) {
+      // bica de pedra do canal, com a boca acesa
+      falls.push({ type: "polygon", points: [[fx - 6, top - 10], [fx + fw * 1.4 + 6, top - 10], [fx + fw * 1.4 + 3, top + 2], [fx - 3, top + 2]], color: K("st3") });
+      falls.push({ type: "rect", x: fx - 1, y: top - 4, w: fw * 1.4 + 2, h: 3, color: K("L4"), filled: true });
+      // jorro que alarga ao cair, com núcleo claro ondulado
+      const pts = [], core = [];
+      for (let yy = top; yy <= SURF; yy += 6) { const t = (yy - top) / (SURF - top), wob = Math.sin(yy / 9 + fx) * 1.2; const ww = fw * (1 + t * 0.8); pts.push([fx + wob - ww * 0.1, yy]); core.push([fx + wob + ww * 0.35, yy]); }
+      falls.push({ type: "polygon", points: [...pts, ...pts.slice().reverse().map(([x, y]) => [x + fw * 1.4, y])], color: K("L3") });
+      falls.push({ type: "polygon", points: [...core, ...core.slice().reverse().map(([x, y]) => [x + Math.max(2, fw * 0.4), y])], color: K("L5") });
+      falls.push({ type: "gradient", x: fx - 30, y: SURF - 24, w: fw + 60, h: 30, direction: "radial", cx: fx + fw / 2, cy: SURF, r: 26, colors: [K("L6"), K("L5"), K("L4"), "."], dither: "bayer4", suavidade: 0.8 });
+    }
+    draw("raio", falls);
+  }
+
+  // normal: o tronco, a coxa e a perna de longe AFUNDAM no ouro (deitado sobre a pilha): corta abaixo de uma
+  // linha de moedas (arcos do tamanho de uma moeda), só nas partes de trás (a pata e a cauda da frente ficam por cima)
+  const FRONT = (x) => 350 + ((x - 330) / 190) ** 2 * 26;
+  const coinBump = (x) => { const c = 9, f = ((x % c) + c) % c / c - 0.5; return 3.2 * Math.sqrt(Math.max(0, 0.25 - f * f)) * 2 + ((Math.floor(x / c) * 7) % 3); };
+  if (!gold) {
+    for (let y = 300; y < H; y++) for (let x = 0; x < W; x++) {
+      const k = y * W + x; if (!grid[k] || !D.buried.has(D.buf.part[k])) continue;
+      if (D.buf.part[k] === D.spine.part && D.buf.u[k] > 520) continue;      // a cauda segue por cima
+      if (y > FRONT(x) - coinBump(x)) grid[k] = null;
+    }
+  }
+  // corta o dragão sob a superfície do ouro derretido (dourado) e desenha
+  if (gold) {
+    for (let y = SURF + 1; y < H; y++) for (let x = 0; x < W; x++) {
+      const k = y * W + x; if (!grid[k]) continue;
+      // a perna da frente e a cauda emergem: só o que está acima de uma linha ondulada
+      const wave = SURF + 2 + Math.sin(x * 0.12) * 1.5;
+      if (y > wave) grid[k] = null;
+    }
+    // onde o corpo encosta no ouro: faixa incandescente (o metal líquido sobe pela pele)
+    for (let x = 0; x < W; x++) for (let y = SURF - 10; y <= SURF + 3; y++) {
+      const k = y * W + x; if (!grid[k]) continue;
+      const dd = SURF + 2 - y + Math.sin(x * 0.4) * 1.5;
+      grid[k] = dd < 2 ? "L6" : dd < 4.5 ? "L5" : dd < 7 && (x + y) % 2 ? "R6" : grid[k];
+    }
+  }
+  if (gold) {
+    // filetes de ouro escorrendo POR CIMA do corpo: começam nas bordas de cima das formas e descem pela pele
+    const r4 = prng(13);
+    for (let n = 0; n < 4000; n++) {
+      const x = 100 + Math.floor(r4() * 400), y0 = 40 + Math.floor(r4() * (SURF - 60)), k0 = y0 * W + x;
+      const memb = D.buf.mat[k0] === MAT.membrana;
+      if (!grid[k0] || (D.buf.mat[k0] !== MAT.pele && !memb) || D.buf.flag[k0] === 3) continue;
+      if (memb && r4() > 0.5) continue;
+      const head = D.buf.u[k0] >= 2000, wingArm = D.buf.u[k0] >= 1500 && D.buf.u[k0] < 2000;
+      if ((head || wingArm) && r4() > 0.12) continue;
+      if (D.buf.ny[k0] < -0.2 && r4() > 0.3) continue;        // nasce mais nas faces laterais, onde escorre
+      if (r4() > 0.018) continue;
+      // filete: fino no começo, engrossa e termina numa gota; acompanha a pele com um leve serpentear
+      const len = 10 + Math.floor(r4() * 26), ph = r4() * 6;
+      let yb = y0, xb = x;
+      for (let j = 0; j < len; j++) {
+        const y = y0 + j, xx = x + Math.round(Math.sin(j / 6 + ph) * 0.8), k = y * W + xx;
+        if (y >= SURF - 1 || !grid[k] || !grid[k + 2] || D.buf.mat[k] !== D.buf.mat[k0]) break;
+        const wide = j > len * 0.45;
+        grid[k] = memb ? "M5" : "R6"; if (wide) { grid[k + 1] = memb ? "M4" : "R5"; grid[k + 2] = memb ? "M2" : "R3"; } else grid[k + 1] = memb ? "M2" : "R3";
+        yb = y; xb = xx;
+      }
+      if (yb - y0 > 6) for (const [dx, dy, c] of [[-1, 1, "R5"], [0, 1, "R6"], [1, 1, "R6"], [2, 1, "R4"], [3, 1, "R3"], [-1, 2, "R4"], [0, 2, "R5"], [1, 2, "R5"], [2, 2, "R4"], [3, 2, "R2"], [0, 3, "R3"], [1, 3, "R4"], [2, 3, "R2"]]) { const k = (yb + dy) * W + xb + dx; if (grid[k]) grid[k] = c; }
+    }
+  }
+  rows("dragao", grid);
+  if (gold) tf("reflexo", { op: "reflect", fonte: ["dragao"], y: SURF, alto: 112, onda: 2, mistura: 0.55, agua: K("L4"), dissolver: 0.35 });
+  tf("dragao", { op: "outline", mode: "seletivo" });
+  tf("dragao", { op: "clean", color: K("R0") });
+
+  // ---------- ouro na frente: moedas que cobrem o pé e a cauda (normal) / gotas e escorridos (dourado) ----------
+  if (!gold) {
+    const sh = [];
+    const G = ["g0", "g1", "g2", "g3", "g4", "g5", "g6"];
+    // moedas na BORDA onde o dragão entra no ouro (corte) e sob as patas: quebram a linha reta
+    const edge = [];
+    for (let y = 300; y < H; y++) for (let x = 1; x < W - 1; x++) {
+      const k = y * W + x;
+      if (grid[k] || !D.buf.mat[k]) continue;                       // pixel cortado (enterrado)
+      if (grid[k - W] || grid[k - 1] || grid[k + 1]) edge.push([x, y]);
+    }
+    for (let x = 0; x < W; x += 3) {                                 // e sob as patas/cauda que ficam por cima
+      let yb = -1; for (let y = H - 1; y > 330; y--) if (grid[y * W + x]) { yb = y; break; }
+      if (yb > 0 && !D.buried.has(D.buf.part[yb * W + x])) edge.push([x, yb - 1]);
+    }
+    const used = new Set();
+    for (const [ex, ey] of edge) {
+      const key = Math.floor(ex / 5) + "," + Math.floor(ey / 4); if (used.has(key)) continue; used.add(key);
+      for (let j = 0; j < 1; j++) {
+        const cx = ex - 3 + Math.floor(rnd() * 3), cy = ey - 1 + Math.floor(rnd() * 3);
+        const w = 6 + Math.floor(rnd() * 4), h = Math.round(w * 0.45);
+        const t = clamp(Math.round(2 + rnd() * 2.5 + (cx < 320 && cx > 150 ? 1 : 0)), 1, 5);
+        sh.push({ type: "ellipse", x: cx, y: cy + 1, w, h, color: K(G[t - 2 < 0 ? 0 : t - 2]), filled: true });
+        sh.push({ type: "ellipse", x: cx, y: cy, w, h, color: K(G[t]), filled: true });
+        sh.push({ type: "pixels", points: [[cx + 2, cy]], color: K(G[Math.min(6, t + 2)]) });
+      }
+    }
+    draw("ouro_frente", sh);
+  } else {
+    // gotas e fios de ouro escorrendo: das bordas de baixo das partes (queixo, asas, barriga)
+    const sh = [];
+    const r3 = prng(9);
+    for (let x = 2; x < W - 2; x += 1) {
+      for (let y = 30; y < SURF - 2; y++) {
+        const k = y * W + x;
+        if (!grid[k] || grid[k + W]) continue;          // borda de baixo de alguma parte
+        // o ouro se junta nos pontos mais BAIXOS do contorno (queixo, pontas, barriga): lá pinga muito, no resto pouco
+        const low = !grid[k + W - 3] && !grid[k + W + 3] && !grid[k + 2 * W - 2] && !grid[k + 2 * W + 2];
+        if (r3() > (low ? 0.45 : 0.03)) continue;
+        const long = r3() < 0.08;
+        const len = long ? 40 + Math.floor(r3() * (SURF - y - 40)) : 4 + Math.floor(Math.pow(r3(), 2) * 30);
+        let yEnd = Math.min(SURF - 1, y + len);
+        for (let yy = y + 2; yy < yEnd; yy++) if (grid[yy * W + x]) { yEnd = yy - 1; break; }   // para ao bater em outra parte
+        if (yEnd - y < 3) continue;
+        const thick = !long && r3() < 0.5;
+        if (thick) { sh.push({ type: "rect", x: x - 1, y, w: 3, h: Math.max(2, Math.round(len * 0.4)), color: K("R4"), filled: true }); sh.push({ type: "line", x1: x - 1, y1: y, x2: x - 1, y2: y + Math.round(len * 0.4) - 1, color: K("R6") }); }
+        sh.push({ type: "line", x1: x, y1: y, x2: x, y2: yEnd, color: K(long ? "L4" : "R5") });
+        if (!long) { sh.push({ type: "ellipse", x: x - 1, y: yEnd - 1, w: 3, h: 4, color: K("R4"), filled: true }); sh.push({ type: "pixels", points: [[x - 1, yEnd]], color: K("R6") }); }
+      }
+    }
+    // respingos e gotas no ar, acima do rio
+    for (let i = 0; i < 70; i++) {
+      const x = 60 + Math.floor(r3() * 400), y = SURF - 6 - Math.floor(Math.pow(r3(), 1.6) * 90);
+      const s = 1 + Math.floor(r3() * 3);
+      sh.push({ type: "ellipse", x, y, w: s + 1, h: s + 2, color: K("L4"), filled: true });
+      sh.push({ type: "pixels", points: [[x, y]], color: K("L6") });
+    }
+    // coroas de respingo na linha da superfície onde o corpo entra no ouro
+    for (let x = 160; x < 500; x += 9) {
+      if (!D.buf.mat[(SURF - 3) * W + x]) continue;
+      sh.push({ type: "polygon", points: [[x - 4, SURF + 1], [x - 2, SURF - 6 - Math.floor(r3() * 6)], [x, SURF - 2], [x + 2, SURF - 5 - Math.floor(r3() * 5)], [x + 4, SURF + 1]], color: K("L5") });
+    }
+    draw("ouro_frente", sh);
+    tf("ouro_frente", { op: "outline", mode: "seletivo" });
+  }
+
+  // ---------- brilhos ----------
+  if (!gold) {
+    draw("brilhos", [
+      { type: "scatter", x: 0, y: 340, w: W, h: 172, colors: [K("spark"), K("g6")], densidade: 0.006, forma: "cruz", distancia: 9, seed: 21, only: [K("g5"), K("g4"), K("g6")] },
+      { type: "scatter", x: 80, y: 20, w: 300, h: 380, colors: [K("dust"), K("beam2")], densidade: 0.003, forma: "pixel", distancia: 6, seed: 8, only: [K("beam"), K("beam2")] },
+    ]);
+  } else {
+    draw("brilhos", [
+      { type: "scatter", x: 0, y: SURF, w: W, h: H - SURF, colors: [K("L6"), K("spark")], densidade: 0.006, forma: "cruz", distancia: 9, seed: 21 },
+      { type: "scatter", x: 100, y: 40, w: 380, h: 340, colors: [K("R6"), K("spark")], densidade: 0.003, forma: "cruz", distancia: 12, seed: 4, only: [K("R5"), K("R6"), K("rim2")] },
+      { type: "scatter", x: 0, y: 150, w: W, h: 240, colors: [K("L4"), K("L5")], densidade: 0.0015, forma: "pixel", distancia: 8, seed: 31 },
+    ]);
+    // fumaça/vapor por RUÍDO (fbm) com dither: colunas que sobem do rio, base iluminada (quente), topo escuro
+    const fbm = (x, y) => vnoise(x, y) * 0.55 + vnoise(x * 2.1, y * 2.1) * 0.3 + vnoise(x * 4.3, y * 4.3) * 0.15;
+    const smokeGrid = (y0, y1, th, seed, front) => {
+      const g = new Array(W * H).fill(null);
+      for (let y = y0; y < y1; y++) for (let x = 0; x < W; x++) {
+        const rise = (y1 - y) / (y1 - y0);                       // 0 embaixo, 1 em cima
+        const col = 0.5 + 0.5 * Math.sin(x / 47 + seed + Math.sin(y / 60) * 1.5);   // colunas que ondulam
+        let d = fbm(x / 38 + seed, y / 26 - seed) * (0.55 + 0.6 * col) * (front ? Math.max(0, 1 - rise * 1.6) : 1 - rise * 0.5);
+        d += (bayer(x, y) - 0.5) * 0.12;
+        if (d < th) continue;
+        const k = y * W + x;
+        if (front && D.buf.mat[k]) { if (d < th + 0.12) continue; }
+        const lit = rise < 0.35 ? 2 : rise < 0.6 ? 1 : 0;
+        g[k] = front ? (d > th + 0.14 ? "L4" : "L3") : d > th + 0.16 ? ["sm1", "sm2", "bg6"][lit] : ["sm0", "sm1", "bg5"][lit];
+      }
+      return g;
+    };
+    rows("fumaca_tras", smokeGrid(10, SURF - 4, 0.4, 3, false));
+    rows("fumaca", smokeGrid(SURF - 80, SURF + 4, 0.46, 7, true));
+  }
+  // vinheta
+  draw("vinheta", [{ type: "gradient", x: 0, y: 0, w: W, h: H, direction: "radial", cx: 290, cy: 290, r: 380, colors: [".", ".", ".", ".", K("bg0")], dither: "bayer4", suavidade: 0.6 }]);
+  cmds.push({ name: "update_layer", input: { layer: "Base", delete: true } });
+  return cmds;
+}
+
+const anima = (...a) => execFileSync("node", [path.join(ROOT, "bin/anima.mjs"), ...a], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 28 });
+for (const v of MODE === "ambos" ? ["normal", "dourado"] : [MODE]) {
+  const name = v === "normal" ? "dragao" : "dragao_dourado";
+  const cmds = build(v);
+  const cmdFile = path.join(DIR, `cmds_${v}.json`);
+  writeFileSync(cmdFile, JSON.stringify(cmds));
+  const proj = path.join(DIR, `${name}.anima.json`);
+  anima("new", proj, `${W}x${H}`, "1");
+  const out = anima("run", proj, cmdFile, "-q");
+  const errs = out.split("\n").filter((l) => /erro|ATENÇÃO/i.test(l));
+  if (errs.length) console.log(errs.slice(0, 8).join("\n"));
+  anima("export", proj, path.join(DIR, `${name}.png`), "--scale", "2", "--frame", "0");
+  unlinkSync(cmdFile);   // os comandos são gerados de novo a cada execução
+  console.log("ok:", proj);
+}
