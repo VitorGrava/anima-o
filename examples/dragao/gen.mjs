@@ -298,6 +298,7 @@ function buildDragon(v) {
   // ---- coxa e canela traseiras: coxa (massa), canela para trás até o jarrete, metatarso, pé com dedos ----
   const coxa = ellipsoid(buf, { cx: 386, cy: 318, rx: 58, ry: 40, rot: -0.8, z: 20, rz: 42 }, MAT.pele, { u0: 600 });
   buried.add(coxa); buf.blocos.add(coxa);
+  ellipsoid(buf, { cx: 382, cy: 298, rx: 42, ry: 26, rot: -0.3, z: 22, rz: 38 }, MAT.pele, { u0: 640, part: coxa });   // massa do quadril
   // joelho = QUEBRA angulosa: dois segmentos retos (a canela muda de direção), sem esfera colada; afunila até o tornozelo
   const can = tube(buf, [[392, 326, 34, 18], [406, 348, 36, 15]], MAT.pele, { u0: 900 }).part;
   tube(buf, [[406, 348, 36, 15], [436, 380, 38, 10]], MAT.pele, { u0: 930, part: can });
@@ -307,8 +308,9 @@ function buildDragon(v) {
   const hum = tube(buf, [[252, 300, 40, 28], [262, 328, 42, 24], [272, 350, 44, 20]], MAT.pele, { u0: 1200, part: spine.part }).part;   // fundido ao peito (só valor, sem contorno)            // úmero
   // bíceps: sem forma própria; a luz em cima e a sombra que entra no membro vêm do próprio tubo do úmero
   ellipsoid(buf, { cx: 274, cy: 350, rx: 13, ry: 12, rot: 0, z: 52, rz: 10 }, MAT.pele, { u0: 1260 });       // cotovelo
-  tube(buf, [[272, 352, 50, 14], [250, 372, 52, 11.5], [228, 389, 54, 9]], MAT.pele, { u0: 1270 });            // antebraço afinando 14 -> 9
-  ellipsoid(buf, { cx: 226, cy: 390, rx: 9, ry: 8, rot: 0, z: 58, rz: 7 }, MAT.pele, { u0: 1290 });           // pulso
+  const ante = tube(buf, [[272, 350, 50, 17], [254, 366, 51, 14], [234, 384, 53, 10]], MAT.pele, { u0: 1270 }).part;  // antebraço: grosso em cima, afinando
+  tube(buf, [[234, 384, 53, 10], [222, 394, 55, 8.5]], MAT.pele, { u0: 1295, part: ante });                        // pulso: o membro muda de direção
+  ellipsoid(buf, { cx: 226, cy: 390, rx: 9, ry: 8, rot: 0, z: 58, rz: 7 }, MAT.pele, { u0: 1290, part: ante });   // pulso (mesmo volume do antebraço, sem contorno próprio)
   foot(buf, 212, 398, 60, -1, 4);
   // ---- asa de PERTO ----
   {
@@ -430,18 +432,20 @@ function shadeDragon(D, v) {
       // a faixa especular varia de espessura ao longo do corpo e é interrompida (não é um friso de cromo idêntico)
       const nb = vnoise(buf.u[k] / 22 + buf.part[k] * 3.7, buf.part[k] * 1.3);
       const seg = vnoise(buf.u[k] / 9 + buf.part[k] * 5.1, 0.5);
-      const sLo = -0.5 - 0.1 * nb, sHi = -0.42 + 0.16 * nb;
+      const sC = -0.47 + 0.09 * Math.sin(buf.u[k] / 38 + buf.part[k]), sW = 0.03 + 0.07 * nb;   // faixa que ondula com o arco e varia de 1 a 3 px
+      const sLo = sC - sW, sHi = sC + sW;
       const isTorso = buf.part[k] === D.spine.part && buf.u[k] > 150 && buf.u[k] < 440;
       const sOn = isTorso ? seg > 0.3 : buf.part[k] % 2 ? seg > 0.38 && nb > 0.2 : seg > 0.8;     // metade dos tubos: faixa em 2–3 segmentos; outra metade: só um ponto de brilho
-      if (ry + d > 0.86) tg = 4;
-      else if (ry + d > 0.62) tg = 3;
-      else if (ry + d > 0.42) nm = "rim1";
-      else if (ry + d > 0.2) tg = 2;
-      else if (ry + d > sHi) tg = rx + d < -0.35 && !isTorso ? 2 : ry > -0.08 || isTorso ? 0 : 1;   // de frente reflete o salão escuro: quase preto (contraste de metal)          // faces voltadas para o filete/forja à esquerda pegam meio-tom dourado
-      else if (ry + d > sLo && sOn) nm = R > 6 ? "R6" : "R5";     // faixa especular curva no topo das formas
-      else tg = ry + d > sLo ? 2 : 1;
+      // 3 zonas largas: topo (dourado médio) -> UMA sombra que cresce para baixo -> reflexo do rio na borda de baixo
+      if (ry > 0.72) tg = 4;
+      else if (ry > 0.5) nm = "rim1";
+      else if (ry > 0.18) tg = 0;
+      else if (ry > -0.12) tg = 1;
+      else if (ry > sHi || ry < sLo || !sOn) tg = 2;
+      else nm = R > 6 ? "R6" : "R5";                          // especular: segmento curvo de 1–3 px
+      if (!nm && tg <= 2 && rx > 0.35 && ry < 0.5) tg = Math.max(0, tg - 1);      // lado direito (oposto à forja): sombra contínua
       // oclusão: perto de uma parte que está NA FRENTE (pata junto à barriga), escurece
-      if (!buf.flag[k]) {
+      if (!buf.flag[k] && buf.part[k] !== D.spine.part) {
         let occ = 0;
         for (const [dx, dy] of [[4, 0], [-4, 0], [0, 4], [0, -4], [3, 3], [-3, 3], [7, 0], [-7, 0], [0, 7]]) {
           const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
@@ -467,6 +471,7 @@ function shadeDragon(D, v) {
         const a = buf.u[k] / ss, j = Math.floor(a), fy = a - j, b = arc / ss + (j & 1) * 0.5, fx = b - Math.floor(b) - 0.5;
         if (Math.abs(fy - (0.5 + 0.5 * Math.sqrt(Math.max(0, 1 - 4 * fx * fx)))) * ss < 0.55) tg -= 1;
       }
+      if (buf.part[k] === D.spine.part && buf.u[k] < 160 && (!buf.mat[k - 1] || !buf.mat[k - 2] || buf.part[k - 2] !== buf.part[k])) nm = "rim1";   // borda esquerda do pescoço: reflexo laranja de 2 px
       const gr = m === MAT.pele ? ["R1", "R2", "R3", "R4", "R5"] : ["R0", "R1", "R3", "R4", "R6"];
       out[k] = nm || gr[clamp(tg, 0, 4)];
       continue;
@@ -505,7 +510,8 @@ function shadeDragon(D, v) {
     }
     if (v === "normal" && tone < 4 && lam > 0.25) {              // o raio da janela acende o que ele cruza (cabeça e peito)
       const t = y / 430, xl = 70 + 120 * t, xr = 150 + 230 * t;
-      if (y < 250 && x > xl + 6 && x < xr - 6) tone += 1;   // só cabeça e pescoço (no tronco a borda reta do feixe virava uma "cunha")
+      const neckOrHead = buf.u[k] >= 2000 || (buf.part[k] === D.spine.part && buf.u[k] < 140);
+      if (neckOrHead && x > xl + 6 && x < xr - 6) tone += 1;   // só cabeça e pescoço, pela parte (sem emenda reta)
     }
     let name = ramp[matName][tone];
     // 1 tom intermediário SÓLIDO na borda de cada placa de luz (sem dither)
@@ -520,7 +526,7 @@ function shadeDragon(D, v) {
     const base = out.slice();
     for (let y = 1; y < H - 8; y++) for (let x = 1; x < W - 1; x++) {
       const k = y * W + x;
-      if (base[k] !== "R6" || base[k + W] === "R6" || hr(x, y) > 0.07) continue;
+      if (base[k] !== "R6" || base[k + W] === "R6" || hr(x, y) > 0.035 || hr(x >> 3, y) > 0.6) continue;
       const len = 3 + Math.floor(hr(y, x) * 5);
       for (let j = 1; j <= len; j++) { const q = (y + j) * W + x; if (buf.mat[q] !== MAT.pele) break; out[q] = j < len ? "R5" : "R4"; if (j > 1 && out[q + 1]) out[q + 1] = "R3"; }
     }
