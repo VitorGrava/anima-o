@@ -416,6 +416,11 @@ function shadeDragon(D, v) {
         db = Math.min(db, Math.hypot(x - w0[0] - vx * tt, y - w0[1] - vy * tt));
       }
       if (db < 9) t += (v === "dourado" ? -0.2 : -0.12) * (1 - db / 9);
+      if (v === "normal" && !(p && p.far)) {
+        t += 0.22 * clamp((db - 10) / 30, 0, 1);                                     // borda livre mais clara/quente
+        const bd = Math.abs((x - 0.55 * y) - 372);                                  // um feixe de luz cruza 1–2 painéis
+        if (bd < 13) t += bd < 9 ? 0.3 : 0.15;
+      }
       if (p && p.far) t = 0.12 + 0.2 * lam + (v === "dourado" ? clamp((y - 100) / 500, 0, 0.2) : 0);
       const tone = clamp(Math.floor(t * 5 + (bayer(x, y) - 0.5) * 0.5), 0, 4);
       out[k] = ramp.membrana[tone];
@@ -437,8 +442,10 @@ function shadeDragon(D, v) {
       const isTorso = buf.part[k] === D.spine.part && buf.u[k] > 150 && buf.u[k] < 440;
       const sOn = isTorso ? seg > 0.3 : buf.part[k] % 2 ? seg > 0.38 && nb > 0.2 : seg > 0.8;     // metade dos tubos: faixa em 2–3 segmentos; outra metade: só um ponto de brilho
       // 3 zonas largas: topo (dourado médio) -> UMA sombra que cresce para baixo -> reflexo do rio na borda de baixo
-      if (ry > 0.72) tg = 4;
-      else if (ry > 0.5) nm = "rim1";
+      if (ry > 0.5) {   // o rio só aparece junto à borda de baixo de cada volume (sem "adesivo" oval no meio)
+        let gp = 0; for (let dd = 1; dd <= 5; dd++) { const q = (y + dd) * W + x; if (y + dd >= H || !buf.mat[q] || buf.part[q] !== buf.part[k]) { gp = dd; break; } }
+        if (gp === 1) nm = "rim2"; else if (gp === 2 || gp === 3) nm = "rim1"; else if (gp) tg = 3; else tg = 0;
+      }
       else if (ry > 0.18) tg = 0;
       else if (ry > -0.12) tg = 1;
       else if (ry > sHi || ry < sLo || !sOn) tg = 2;
@@ -466,7 +473,7 @@ function shadeDragon(D, v) {
       }
       // escamas em 1 tom só na meia-luz (e sugeridas nas bordas)
       const torso = buf.part[k] === D.spine.part && buf.u[k] > 150 && buf.u[k] < 440;
-      if (!nm && buf.part[k] !== D.spine.part && m === MAT.pele && R > 9 && (tg === 2 || nz < 0.5) && tg >= 1) {
+      if (!nm && buf.part[k] !== D.spine.part && buf.u[k] < 2000 && m === MAT.pele && R > 9 && (tg === 2 || nz < 0.5) && tg >= 1) {
         const ss = clamp(R * 0.17, 3, 8), arc = Math.asin(clamp(s, -1, 1)) * R;
         const a = buf.u[k] / ss, j = Math.floor(a), fy = a - j, b = arc / ss + (j & 1) * 0.5, fx = b - Math.floor(b) - 0.5;
         if (Math.abs(fy - (0.5 + 0.5 * Math.sqrt(Math.max(0, 1 - 4 * fx * fx)))) * ss < 0.55) tg -= 1;
@@ -492,11 +499,14 @@ function shadeDragon(D, v) {
 
     // oclusão sob a barriga/peito e dentro das dobras: o tronco ganha volume em vez de faixas
     if (v === "normal" && m === MAT.pele && !buf.flag[k] && ny > 0.4 && y > 300 && y < 380) tone = Math.max(0, tone - 1);
-    const scaleOn = v === "normal" ? tone >= 2 && tone <= 3 && frac >= 0.2 : nz < 0.45 && tone >= 1;   // escamas só na meia-luz   // dourado: a grade some sob o ouro (só sugere nas bordas)
+    const scaleOn = v === "normal" ? tone >= 2 && tone <= 3 && frac >= 0.2 && ny < 0.3 : nz < 0.45 && tone >= 1;   // escamas só na meia-luz   // dourado: a grade some sob o ouro (só sugere nas bordas)
     if (matName === "pele" && R > 5 && scaleOn) {
-      const ss = buf.u[k] >= 2000 ? 3.5 : clamp(R * 0.17, 3, 8);
+      let ss = buf.u[k] >= 2000 ? 3.5 : clamp(R * 0.17, 3, 8);
+      if (buf.part[k] === D.spine.part && buf.u[k] > 150 && buf.u[k] < 1000) ss *= 1 - (buf.u[k] - 150) / 1500;   // menores para a cauda
       const arc = Math.asin(clamp(s, -1, 1)) * R;
-      const a = buf.u[k] / ss, j = Math.floor(a), fy = a - j;
+      // fileiras ARQUEADAS: o anel em volta do cilindro, visto um pouco de cima, curva nas bordas
+      const uu = buf.u[k] + 0.3 * R * (1 - Math.sqrt(Math.max(0, 1 - s * s)));
+      const a = uu / ss, j = Math.floor(a), fy = a - j;
       const b = arc / ss + (j & 1) * 0.5, fx = b - Math.floor(b) - 0.5;
       const edgeY = 0.5 + 0.5 * Math.sqrt(Math.max(0, 1 - 4 * fx * fx));
       const dist = Math.abs(fy - edgeY) * ss;
@@ -568,6 +578,10 @@ function shadeDragon(D, v) {
       }
     }
   }
+  // quebra de ângulo no joelho e no pulso: sombra em CUNHA no lado de dentro da dobra
+  const wedge = (pts) => { const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]); for (let y = Math.min(...ys); y <= Math.max(...ys); y++) for (let x = Math.min(...xs); x <= Math.max(...xs); x++) if (inPoly(x + 0.5, y + 0.5, pts) && res[y * W + x] && buf.mat[y * W + x] === MAT.pele) res[y * W + x] = "R1"; };
+  wedge([[400, 340], [414, 350], [401, 357]]);       // joelho (atrás da dobra)
+  wedge([[226, 388], [240, 385], [230, 397]]);       // pulso (embaixo da dobra)
   // olho: amêndoa grande sob a sobrancelha, íris amarelo->laranja, pupila em fenda, brilho, contorno escuro
   const [ex, ey] = HEAD.olho;
   const EW = 19, EH = 9;
@@ -1016,10 +1030,12 @@ function build(v) {
     }
     // montinho de moedas onde a cauda volta a sair do ouro (esconde o corte da cauda)
     const heap = [];
-    for (let i = 0; i < 160; i++) { const a = rnd() * Math.PI, r = Math.sqrt(rnd()); heap.push([304 + Math.cos(a) * 26 * r, 476 - Math.sin(a) * 16 * r + 4]); }
+    for (let i = 0; i < 120; i++) { const a = rnd() * Math.PI, r = Math.sqrt(rnd()) * (0.75 + 0.45 * vnoise(a * 3, 7)); heap.push([304 + Math.cos(a) * 28 * r, 478 - Math.sin(a) * 15 * r + 4]); }
+    for (const [lx, ly] of [[262, 462], [338, 470], [356, 466]]) heap.push([lx, ly]);   // moedas soltas sobre a cauda
     heap.sort((a, b) => a[1] - b[1]);
     for (const [cx, cy] of heap) {
-      const w = 6 + Math.floor(rnd() * 4), h = Math.round(w * 0.45), t = clamp(Math.round(3 + rnd() * 2 - (cy - 460) / 30), 1, 5);
+      const w = 7 + Math.floor(rnd() * 4), h = Math.round(w * 0.45), edgeD = Math.hypot((cx - 304) / 28, (cy - 478) / 15);
+      const t = clamp(Math.round(2 + rnd() * 2.4 - (edgeD > 0.85 ? 1 : 0)), 1, 5);   // mesma escala/tons do monte; borda na sombra
       sh.push({ type: "ellipse", x: cx, y: cy + 1, w, h, color: K(G[Math.max(0, t - 2)]), filled: true });
       sh.push({ type: "ellipse", x: cx, y: cy, w, h, color: K(G[t]), filled: true });
       sh.push({ type: "pixels", points: [[cx + 2, cy]], color: K(G[Math.min(6, t + 2)]) });
