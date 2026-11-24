@@ -130,27 +130,36 @@ for (const [R, layer, c1, c2] of [[R3, "montanhas3", "s7", "s6"]]) {
 // ---------- lago ----------
 draw("lago", [
   { type: "gradient", x: 0, y: HZ, w: W, h: H - HZ, colors: ["w1", "w2", "w3", "w4", "w5", "wd"].map(K), direction: "vertical", dither: "bayer4", suavidade: 0.45 },
-  { type: "scatter", x: 0, y: HZ + 3, w: W, h: H - HZ - 3, colors: [K("w2"), K("w3")], densidade: 0.04, forma: "onda", distancia: 3, seed: 3 },
-  { type: "scatter", x: 0, y: HZ + 4, w: W, h: 24, colors: [K("s4"), K("s3")], densidade: 0.03, forma: "traco", distancia: 4, seed: 21 },
-  { type: "scatter", x: 0, y: HZ + 20, w: W, h: H - HZ - 20, colors: [K("w4"), K("wd")], densidade: 0.05, forma: "onda", distancia: 3, seed: 9 },
 ]);
 tf("reflexo", { op: "reflect", fonte: ["montanhas3", "montanhas2", "montanhas1", "floresta"], y: HZ, alto: 30, onda: 1.3, mistura: 0.42, agua: K("w3"), dissolver: 0 });
-// ondas: claras perto do horizonte, escuras longe da coluna do sol
-draw("brilho", [
-  { type: "scatter", x: 0, y: HZ + 2, w: W, h: 20, colors: [K("w2"), K("s4")], densidade: 0.045, forma: "onda", distancia: 3, seed: 41 },
-  { type: "scatter", x: 0, y: HZ + 10, w: SX - 16, h: 40, colors: [K("w4"), K("w5"), K("wd")], densidade: 0.06, forma: "onda", distancia: 3, seed: 42 },
-  { type: "scatter", x: SX + 16, y: HZ + 10, w: W - SX - 16, h: 40, colors: [K("w4"), K("w5"), K("wd")], densidade: 0.06, forma: "onda", distancia: 3, seed: 43 },
-]);
-// coluna de luz do sol na água: traços horizontais que se estreitam e se rompem para baixo (sem caixa)
-const rs = prng(91); const col = [];
-for (let y = HZ + 1; y < H; y++) {
-  const t = (y - HZ) / (H - HZ), hw = Math.round(10 - 6 * t), keep = 1.15 - 0.45 * t;
-  for (let x = SX - hw; x <= SX + hw;) {
-    const len = 2 + Math.floor(rs() * 6);
-    if (rs() < keep * (1 - Math.abs(x - SX) / (hw + 4))) col.push({ type: "line", x1: x, y1: y, x2: Math.min(SX + hw, x + len - 1), y2: y, color: K(t < 0.2 ? "sun" : t < 0.5 ? "wl" : "w0") });
-    x += len + 1 + Math.floor(rs() * 2 + t * 4);
+// ondas com DIMINUIÇÃO pela distância: perto do horizonte são pontos curtos e muito juntos; perto de nós, traços longos e espaçados
+const rw = prng(41); const waves = [];
+for (let y = HZ + 2; y < H;) {
+  const t = (y - HZ) / (H - HZ);
+  for (let x = Math.floor(rw() * 6); x < W;) {
+    const len = 1 + Math.round((1 + rw() * 3) * (0.4 + 2.2 * t));
+    if (Math.abs(x - SX) > 4 + 22 * t || rw() < 0.15) {
+      if (t < 0.3 && rw() < 0.55) { x += len + 2; continue; } // ao longe as ondas se fundem: menos contraste e menos traços
+      const c = t < 0.3 ? "w2" : rw() < 0.45 ? "w4" : rw() < 0.6 ? "w2" : "wd";
+      waves.push({ type: "line", x1: x, y1: y, x2: x + len - 1, y2: y, color: K(c) });
+    }
+    x += len + 2 + Math.round(rw() * (3 + 10 * t));
   }
-  if (t > 0.3) y += rs() < 0.35 ? 1 : 0;
+  y += 1 + Math.round(t * 2.2 + rw() * t);
+}
+draw("brilho", waves);
+// coluna de luz do sol na água (perspectiva cônica): nasce num PONTO da linha do horizonte, sob o sol,
+// e ABRE em direção ao observador como os trilhos da apostila; os traços crescem e se espaçam com a proximidade
+const rs = prng(91); const col = [];
+const zOf = (y) => (y - HZ) / (H - HZ); // 0 no horizonte, 1 na borda de baixo (escala de perspectiva)
+for (let y = HZ + 1; y < H;) {
+  const t = zOf(y), hw = Math.round(2 + 20 * t), keep = 1.0 - 0.35 * t;
+  for (let x = SX - hw; x <= SX + hw;) {
+    const len = 1 + Math.floor(rs() * (2 + 6 * t));
+    if (rs() < keep * (1 - Math.abs(x - SX) / (hw + 3))) col.push({ type: "line", x1: x, y1: y, x2: Math.min(SX + hw, x + len - 1), y2: y, color: K(t < 0.15 ? "sun" : t < 0.45 ? "wl" : "w0") });
+    x += len + 1 + Math.floor(rs() * (1 + 3 * t));
+  }
+  y += 1 + (rs() < t * 1.2 ? 1 : 0); // linhas mais próximas perto do horizonte, mais espaçadas perto de nós
 }
 draw("brilho", col);
 
@@ -196,7 +205,11 @@ for (const h of houses) {
   ]);
   // sombra de contato: rente à base e projetada para a esquerda (luz do sol à direita, atrás)
   draw("janelas", [{ type: "line", x1: B.x, y1: B.y, x2: B.x + B.w - 1, y2: B.y, color: K("frL") }]);
-  draw("casas", [{ type: "polygon", points: [[B.x - 1, B.y - 1], [B.x - Math.round(B.w * 0.3), B.y - 1], [B.x - Math.round(B.w * 0.3) + 1, B.y], [B.x - 1, B.y]], color: K("g0") }]);
+  // sombra projetada em perspectiva: o sol está ATRÁS (contraluz), então a sombra vem para a frente, ao longo de raios que
+  // partem do pé do sol na linha do horizonte (SX,HZ) e passam pelos cantos da base (como as linhas azuis da apostila)
+  const ray = (px, py, k) => [Math.round(px + (px - SX) * k), Math.round(py + (py - HZ) * k)];
+  const k = 0.18; // sol baixo: sombra comprida
+  draw("casas", [{ type: "polygon", points: [[B.x, B.y], [B.x + B.w + B.prof, B.y], ray(B.x + B.w + B.prof, B.y, k * 0.6), ray(B.x, B.y, k)], color: K("g0") }]);
   draw("casas", [{ type: "box3d", ...B, frente: K("fr"), lado: K("sd"), telhado: K("rf"), empena: K("gab"), linhas: K("frL"), linhas_telhado: K("rfL") }]);
   const L = (u, v) => paint.pontoLateral({ ...B, frente: 0, lado: 0, telhado: 0, empena: 0 }, u, v).map(Math.round);
   const quad = (u0, u1, v0, v1, c) => ({ type: "polygon", points: [L(u0, v0), L(u1, v0), L(u1, v1), L(u0, v1)], color: K(c) });
@@ -246,9 +259,20 @@ ck.push({ type: "polygon", points: [[dkPoly[1][0] + 1, Y1], [XR + 1, Y0], [XR + 
 ck.push({ type: "line", x1: XR, y1: Y0, x2: dkPoly[1][0], y2: Y1, color: K("dkL") });
 ck.push({ type: "line", x1: XL, y1: Y0, x2: dkPoly[0][0], y2: Y1, color: K("dkD") });
 draw("cais", ck);
-// lampião na ponta do cais (acento quente)
-const lx = dkPoly[1][0];
-draw("cais", [{ type: "rect", x: lx, y: Y1 - 8, w: 1, h: 8, color: K("post"), filled: true }, { type: "rect", x: lx - 1, y: Y1 - 10, w: 3, h: 3, color: K("lamp"), filled: true }, { type: "pixels", points: [[lx, Y1 - 11]], color: K("post") }]);
+// fileira de lampiões no cais com espaçamento IGUAL no mundo (passo constante em z): na tela encolhem e se juntam
+// rumo ao ponto de fuga, como os arcos da arcada da apostila; cada um projeta sombra no deck, vinda do pé do sol
+const lamps = [];
+for (const z of [3, 2.3, 1.7]) {
+  const y = Math.round(HZ + (Y0 - HZ) / z), sc = scale(y), x = Math.round(edgeX(XR, y));
+  const hgt = Math.round(22 * sc), pw = 1, hd = Math.max(2, Math.round(5 * sc));
+  // sombra do poste no deck: segue o raio do pé do sol (SX,HZ) pela base, para a frente e para a esquerda
+  const sl = Math.round(hgt * 0.5), dx = x - SX, dy = y - HZ, n = Math.hypot(dx, dy);
+  lamps.push({ type: "line", x1: x - 1, y1: y, x2: Math.round(x - 1 + (dx / n) * sl), y2: Math.round(y + (dy / n) * sl), color: K("dkD") });
+  lamps.push({ type: "rect", x: x - pw + 1, y: y - hgt, w: pw, h: hgt, color: K("post"), filled: true });
+  lamps.push({ type: "rect", x: x - Math.floor(hd / 2) + (pw > 1 ? 1 : 0), y: y - hgt - hd + 1, w: hd, h: hd, color: K("lamp"), filled: true });
+  lamps.push({ type: "pixels", points: [[x, y - hgt - hd]], color: K("post") }); // chapéu do lampião
+}
+draw("cais", lamps);
 
 // ---------- barco atracado à direita do cais (casco de lado, paralelo ao quadro) ----------
 const BY = 125, BX = 163, S = 1.35; // linha d'água, popa e escala do barco

@@ -194,3 +194,10 @@ Referência: Wooden Treasure Chests (szymon18042, itch.io). Notas do crítico (0
 - Slime 32x32 (refs Pixelsnorf, OpenGameArt): 7 rodadas; atritos corrigidos: `tools <subcomando>`, `rodada --saida`, sombra/efeitos fora do aviso de figura partida.
 - Mago 48x48 (refs mirquiso, Movicx, Calciumtrice): crítico 5 → 5,8 → 6,2 → 6,8 (animação 4 → 7). Descobertas: (1) a folha de frames esconde movimento de 1 px; o `critico` agora gera folha + diff e a nota de animação subiu de 4 para 6 só por o crítico enxergar; (2) "boiling": redesenhar dobras por frame faz a textura tremer, desloque a mesma arte; (3) polish não contorna camadas de efeito (sombra/aura); (4) `avaliar` mecânico dava 91–98 enquanto o crítico dava 5–6,8.
 - Vila 256x144 (refs Life in Pixels Sunset 2D, CraftPix Village landscape): crítico 6,1 → 6,7 após `terrain vale`, reflexo em traços, montanhas baixas. Atritos corrigidos: `only` em lista, `set_palette` até 255 cores, `folga` até 0,95, `terrain vale`.
+
+## vila v5 — perspectiva cônica (apostila "Desenho em Perspectiva", EEEP/CE)
+Regras tiradas das FIGURAS da apostila (trilhos, arcada, cubo de 1 e 2 pontos, sombra do paralelepípedo) aplicadas à vila:
+- coluna de brilho do sol: nasce num ponto da LH sob o sol e abre para o observador (antes era invertida: larga no horizonte);
+- ondas com diminuição: pontos curtos e juntos ao longe, traços longos e espaçados perto (antes tamanho fixo);
+- sombras projetadas pelas casas e postes seguindo raios do pé do sol na LH (contraluz: sombra vem para a frente);
+- fileira de lampiões no cais com passo constante em z: encolhem e se juntam rumo ao ponto de fuga (como a arcada).
