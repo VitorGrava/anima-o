@@ -435,10 +435,7 @@ function shadeDragon(D, v) {
         if (p && p.i <= 2 && buf.mat[k + W] !== MAT.membrana && buf.mat[k + W] !== MAT.pele) { out[k] = "R5"; continue; }
       }
       if (v === "normal" && !(p && p.far)) {
-        t += 0.22 * clamp((db - 10) / 30, 0, 1);                                     // borda livre mais clara/quente
-        const bd = Math.abs((x - 0.55 * y) - 372);                                  // um feixe de luz cruza 1–2 painéis
-        if (bd < 13 && db > 3.5) t += bd < 9 ? 0.3 : 0.15;   // a faixa para no osso...
-        else if (bd < 13) t -= 0.1;                            // ...e o osso projeta 1–2 px de sombra no painel
+        t += 0.32 * clamp((db - 8) / 34, 0, 1);       // cada painel: escuro junto ao osso -> borda livre clara/quente (sem faixa contínua)
       }
       if (p && p.far) t = 0.12 + 0.2 * lam + (v === "dourado" ? clamp((y - 100) / 500, 0, 0.2) : 0.16 * clamp((130 - y) / 110, 0, 1));
       if (p && p.far) t = 0.12 + 0.2 * lam + (v === "normal" ? 0.18 * (Math.hypot(x - 330, y - 20) < 95 ? 1 : 0) : 0);   // 2 tons sólidos com divisa curva
@@ -670,6 +667,19 @@ function shadeDragon(D, v) {
   }
   // narina
   for (const [x, y] of [[116, 131], [117, 131], [118, 131], [117, 132], [118, 132], [119, 132]]) res[y * W + x] = "R0";
+  if (v === "dourado") {
+    for (const [x, y] of [[115, 130], [116, 130], [117, 130], [118, 130], [119, 131], [120, 132], [115, 131]]) if (res[y * W + x]) res[y * W + x] = "R5";   // aro claro da narina
+    for (let a = 3.4; a < 4.9; a += 0.04) {   // especular curvo na bochecha
+      const x = Math.round(206 + Math.cos(a) * 11), y = Math.round(148 + Math.sin(a) * 9), k = y * W + x;
+      if (buf.mat[k] === MAT.pele && buf.u[k] >= 2000) { res[k] = "R6"; if (a > 3.8 && a < 4.5 && res[k + W]) res[k + W] = "R5"; }
+    }
+    // escorrido grosso pendurado no queixo
+    let yb = -1; for (let y = 150; y < 200; y++) if (buf.mat[y * W + 150] === MAT.pele && !buf.mat[(y + 1) * W + 150]) { yb = y; break; }
+    if (yb > 0) {
+      for (let j = 1; j <= 14; j++) { const w = j < 6 ? 4 : j < 11 ? 3 : 2; for (let i = 0; i < w; i++) res[(yb + j) * W + 149 + i] = i === 0 ? "R5" : i === w - 1 ? "R2" : "R4"; }
+      for (const [dx, dy, c] of [[-1, 15, "R4"], [0, 15, "R6"], [1, 15, "R5"], [2, 15, "R3"], [-1, 16, "R3"], [0, 16, "R5"], [1, 16, "R4"], [2, 16, "R2"], [0, 17, "R3"], [1, 17, "R2"]]) res[(yb + dy) * W + 149 + dx] = c;
+    }
+  }
   return res;
 }
 
@@ -1113,6 +1123,7 @@ function build(v) {
         const q0 = sy0 >= 0 ? sy0 * W + x : 0, ub = D.buf.u[q0];
         const isBone = c0 && D.buf.mat[q0] === MAT.pele && ((ub >= 1500 && ub < 1800) || D.buf.flag[q0] === 2);
         const isWing = c0 && (D.buf.mat[q0] === MAT.membrana || isBone);
+        if (isWing) continue;   // o reflexo das asas virava ruído: fica só o do corpo
         if (isWing) {   // asa invertida: faixas de 3 px com folgas de 2 px, quebradas em blocos grandes; ossos em traços claros
           if (dy % 5 >= 3 || vnoise(x / 40 + 3, dy / 12) < 0.25) continue;
           if (isBone) { if (Math.floor(dy / 3) % 2 === 0) rg[y * W + x] = "R4"; continue; }
@@ -1270,6 +1281,8 @@ function build(v) {
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const d = Math.hypot(x - 290, y - 290) + 14 * (vnoise(x / 9, y / 9) - 0.5);
       if (d > 372) vg[y * W + x] = y > 380 ? "g0" : "bg0"; else if (d > 352) vg[y * W + x] = y > 380 ? "g1" : "bg1";
+      const c = Math.hypot(x / 112, y / 118) + 0.06 * (vnoise(x / 7, y / 7) - 0.5);   // canto de cima à esquerda: sombra sólida
+      if (c < 0.86) vg[y * W + x] = "bg0"; else if (c < 1) vg[y * W + x] = vg[y * W + x] || "bg1";
     }
     rows("vinheta", vg);
   } else
