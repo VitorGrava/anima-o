@@ -133,7 +133,7 @@ function catmull(pts, step = 0.8) {
 // buffer do dragão
 function makeBuf() {
   const N = W * H;
-  return { tailSpikes: [], knuckles: [], noSpec: new Set(), prims: [], groups: 0, fuse: [], toSpine: new Map(), fz: new Map(), joined: new Set(), noScale: new Uint8Array(N), hornLen: new Map(), blocos: new Set(), z: new Float32Array(N).fill(-1e9), nx: new Float32Array(N), ny: new Float32Array(N), nz: new Float32Array(N), mat: new Uint8Array(N), part: new Uint8Array(N), u: new Float32Array(N), s: new Float32Array(N), r: new Float32Array(N), flag: new Uint8Array(N) };
+  return { spade: new Set(), tailSpikes: [], knuckles: [], noSpec: new Set(), prims: [], groups: 0, fuse: [], toSpine: new Map(), fz: new Map(), joined: new Set(), noScale: new Uint8Array(N), hornLen: new Map(), blocos: new Set(), z: new Float32Array(N).fill(-1e9), nx: new Float32Array(N), ny: new Float32Array(N), nz: new Float32Array(N), mat: new Uint8Array(N), part: new Uint8Array(N), u: new Float32Array(N), s: new Float32Array(N), r: new Float32Array(N), flag: new Uint8Array(N) };
 }
 const MAT = { pele: 1, barriga: 2, chifre: 3, membrana: 4, boca: 5, garra: 6 };
 let PART = 0;
@@ -474,7 +474,7 @@ function buildDragon(v) {
   // ---- espinha: pescoço + tronco + cauda (um tubo só) ----
   const SP = v === "normal" ? SPINE.slice(0, -4).concat([[236, 470, 60, 9], [206, 465, 58, 7.5], [180, 454, 58, 5], [160, 449, 56, 3], [146, 447, 56, 1.6]]) : SPINE;
   const spine = tube(buf, SP, MAT.pele, { scale: 1 });
-  if (v === "normal") { spike(buf, [156, 448], [133, 444], 7, 70, MAT.chifre, { flag: 4 }); spike(buf, [151, 446], [142, 438], 2.5, 57, MAT.chifre, { flag: 4 }); spike(buf, [151, 450], [142, 457], 2.5, 57, MAT.chifre, { flag: 4 }); }   // pá/leque na ponta
+  if (v === "normal") { const p0s = PART + 1; polygon(buf, [[150, 447], [145, 443], [138, 445], [143, 449]], MAT.pele, 70, [-0.3, -0.6, 0.75]); polygon(buf, [[150, 447], [143, 449], [138, 445], [145, 451]], MAT.pele, 70, [0.2, 0.5, 0.85]); for (let q = p0s; q <= PART; q++) buf.spade.add(q); }   // pá em losango, no vermelho da cauda
   buried.add(spine.part);
   // espinhos dorsais: do lado oposto à barriga, diminuindo para a cauda e para a cabeça
   {
@@ -510,7 +510,7 @@ function buildDragon(v) {
     }
   }
   // ---- ombro/peito (massa) ----
-  const omb = ellipsoid(buf, { cx: 258, cy: 290, rx: 44, ry: 34, rot: -0.6, z: 24, rz: 34 }, MAT.pele, { u0: 1100 });   // ombro: fundido ao peito pelo filete
+  const omb = ellipsoid(buf, { cx: 258, cy: 290, rx: 44, ry: 34, rot: -0.6, z: 24, rz: 34 }, MAT.pele, { u0: 1100 }); buf.ombPart = omb;   // ombro: fundido ao peito pelo filete
   buried.add(omb);
   // ---- coxa e canela traseiras: coxa (massa), canela para trás até o jarrete, metatarso, pé com dedos ----
   const coxa = ellipsoid(buf, { cx: 386, cy: 318, rx: 58, ry: 40, rot: -0.8, z: 20, rz: 42 }, MAT.pele, { u0: 600 });
@@ -525,7 +525,7 @@ function buildDragon(v) {
   const pe2 = foot(buf, 412, 404, 46, -1, 3, 1.35, v);
 
   // ---- perna da frente (perto): úmero grosso, cotovelo PARA TRÁS, antebraço afinando, pulso, mão com dedos ----
-  const hum = tube(buf, [[252, 300, 40, 28], [262, 328, 42, 24], [272, 350, 44, 20]], MAT.pele, { u0: 1200 }).part;
+  const hum = tube(buf, [[252, 300, 40, 28], [262, 328, 42, 24], [272, 350, 44, 20]], MAT.pele, { u0: 1200 }).part; buf.humPart = hum;
    // fundido ao peito (só valor, sem contorno)            // úmero
   // bíceps: sem forma própria; a luz em cima e a sombra que entra no membro vêm do próprio tubo do úmero
   const ante = tube(buf, [[272, 350, 50, 17], [254, 366, 51, 14], [234, 384, 53, 10]], MAT.pele, { u0: 1270 }).part;
@@ -747,6 +747,7 @@ function shadeDragon(D, v) {
       // 3 MASSAS: sombra / meia-luz / luz, com 1 tom de transição só onde a forma vira
       tone = val < 0.3 ? 1 : val < 0.64 ? 2 : 3;
       if (Math.abs(val - 0.3) < 0.03) midT = "Rb"; else if (Math.abs(val - 0.64) < 0.03) midT = "Rc";
+      if (midT && (buf.part[k] === buf.ombPart || buf.part[k] === buf.humPart) && ny < 0.1) midT = null;   // ombro: borda firme, transição só embaixo
       frac = midT ? 0 : 0.5;
     }
     const tone0 = tone;
@@ -880,6 +881,12 @@ function shadeDragon(D, v) {
       const dkh = { R6: "R5", R5: "R4", R4: "R3", Rc: "R3", Rd: "R4", R3: "R2", Rb: "R2", R2: "R1", Ra: "R1" };
       for (let x = Math.ceil(xr + 2); x < Math.min(W, xr + 70); x++) { const k = y * W + x; if (res[k] && buf.mat[k] === MAT.pele && buf.u[k] >= 2000 && dkh[res[k]]) res[k] = dkh[res[k]]; }
     }
+  }
+  if (v === "normal") {
+    for (let k = W; k < W * H; k++) if (buf.spade.has(buf.part[k]) && res[k] && !buf.mat[k - W]) res[k] = "R5";   // pá: borda clara só em cima
+    // contorno laranja-claro contínuo no topo do crânio (da narina à base do chifre) e no chifre esquerdo
+    for (let x = 112; x < 226; x++) { for (let y = 60; y < 170; y++) { const k = y * W + x; if (!res[k]) continue; if (buf.mat[k] === MAT.pele && buf.u[k] >= 2000) res[k] = "R6"; break; } }
+    for (let k = W; k < W * H; k++) { const x = k % W; if (x < 240 && buf.mat[k] === MAT.chifre && buf.hornLen.has(buf.part[k]) && res[k] && !buf.mat[k - W]) res[k] = "H4"; }
   }
   // quebra de ângulo no joelho e no pulso: sombra em CUNHA no lado de dentro da dobra
   const wedge = (pts) => { const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]); for (let y = Math.min(...ys); y <= Math.max(...ys); y++) for (let x = Math.min(...xs); x <= Math.max(...xs); x++) if (inPoly(x + 0.5, y + 0.5, pts) && res[y * W + x] && buf.mat[y * W + x] === MAT.pele && !buf.flag[y * W + x]) res[y * W + x] = "R1";
@@ -1106,7 +1113,8 @@ function build(v) {
     for (const [sx, sy] of [[150, 340], [178, 336], [196, 346], [166, 350]]) pool.push({ type: "pixels", points: [[sx, sy], [sx - 1, sy], [sx + 1, sy], [sx, sy - 1], [sx, sy + 1]], color: K("spark") });
     for (const [cx, cy] of [[134, 343], [146, 338], [161, 334], [178, 337], [195, 341]]) pool.push({ type: "ellipse", x: cx - 3, y: cy, w: 7, h: 4, color: K("g5"), filled: true }, { type: "line", x1: cx - 2, y1: cy + 3, x2: cx + 2, y2: cy + 3, color: K("g2") }, { type: "pixels", points: [[cx - 1, cy], [cx, cy]], color: K("spark") });   // crista irregular com moedas de brilho
     // halo quente do braseiro aceso na parede e no chão
-    pool.push({ type: "gradient", x: 50, y: 270, w: 100, h: 100, direction: "radial", cx: 99, cy: 306, r: 48, colors: [K("air"), K("bg6"), ".", "."], dither: "bayer4", suavidade: 1 });
+    const blob = (cx, cy, rx, ryUp, ryDn, n = 28) => Array.from({ length: n }, (_, i) => { const a = (i / n) * Math.PI * 2, ry = Math.sin(a) < 0 ? ryUp : ryDn; return [Math.round(cx + Math.cos(a) * rx * (1 + 0.08 * Math.sin(a * 3))), Math.round(cy + Math.sin(a) * ry)]; });
+    pool.push({ type: "polygon", points: blob(99, 304, 30, 40, 18), color: K("bg4") }, { type: "polygon", points: blob(99, 304, 17, 24, 10), color: K("bg5") });   // halo do braseiro: 2 anéis sólidos, mais largos para cima
     draw("raio", pool);
     tf("ouro_longe", { op: "haze", color: K("bg5"), quantidade: 0.3 });
   }
@@ -1209,7 +1217,7 @@ function build(v) {
     obj.push({ type: "polygon", points: [[58, 405], [62, 405], [60, 412]], color: K("H2") });
     obj.push({ type: "rect", x: 48, y: 322, w: 24, h: 5, color: K("g4"), filled: true });
     obj.push({ type: "line", x1: 48, y1: 322, x2: 71, y2: 322, color: K("g6") });
-    obj.push({ type: "rect", x: 57, y: 302, w: 6, h: 20, color: K("g1"), filled: true });
+    obj.push({ type: "rect", x: 57, y: 302, w: 6, h: 20, color: K("g1"), filled: true }, { type: "line", x1: 62, y1: 302, x2: 62, y2: 321, color: K("F1") }, { type: "pixels", points: [[63, 299], [63, 300]], color: K("F2") });   // luz do braseiro no punho
     obj.push({ type: "ellipse", x: 55, y: 296, w: 10, h: 8, color: K("g5"), filled: true });
     // escudo redondo inclinado (perspectiva: elipse) à direita
     obj.push({ type: "ellipse", x: 440, y: 430, w: 64, h: 34, color: K("g1"), filled: true });
@@ -1499,7 +1507,7 @@ function build(v) {
     }
     for (let x = 0; x < W; x += 3) {                                 // e sob as patas/cauda que ficam por cima
       let yb = -1; for (let y = H - 1; y > 330; y--) if (grid[y * W + x]) { yb = y; break; }
-      if (yb > 0 && !D.buried.has(D.buf.part[yb * W + x])) edge.push([x, yb - 1]);
+      if (yb > 0 && !D.buried.has(D.buf.part[yb * W + x]) && x > 166) edge.push([x, yb - 1]);
     }
     const used = new Set();
     for (const [ex, ey] of edge) {
@@ -1518,6 +1526,7 @@ function build(v) {
     for (let i = 0; i < 120; i++) { const a = rnd() * Math.PI, r = Math.sqrt(rnd()) * (0.75 + 0.45 * vnoise(a * 3, 7)); heap.push([304 + Math.cos(a) * 28 * r, 478 - Math.sin(a) * 15 * r + 4]); }
     for (const [lx, ly] of [[262, 462], [338, 470], [356, 466], [212, 470], [218, 472], [224, 471], [76, 476], [104, 476]]) heap.push([lx, ly]);   // + moedas cobrindo 2–3 px da ponta da cauda   // moedas soltas sobre a cauda
     heap.sort((a, b) => a[1] - b[1]);
+    for (const [cx, cy] of [[30, 496], [66, 504], [132, 498], [196, 506], [262, 500], [318, 507], [388, 497], [500, 502]]) sh.push({ type: "ellipse", x: cx - 1, y: cy - 1, w: 9, h: 6, color: K("g0"), filled: true }, { type: "ellipse", x: cx, y: cy, w: 7, h: 4, color: K("g5"), filled: true }, { type: "line", x1: cx + 1, y1: cy + 3, x2: cx + 5, y2: cy + 3, color: K("g3") }, { type: "pixels", points: [[cx + 2, cy]], color: K("spark") });   // discos soltos bem marcados
     for (const [cx, cy] of heap) {
       const w = 7 + Math.floor(rnd() * 4), h = Math.round(w * 0.45), edgeD = Math.hypot((cx - 304) / 28, (cy - 478) / 15);
       const t = clamp(Math.round(2 + rnd() * 2.4 - (edgeD > 0.85 ? 1 : 0)), 1, 5);   // mesma escala/tons do monte; borda na sombra
