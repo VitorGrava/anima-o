@@ -108,8 +108,8 @@ function tubePath(g, T) {
 
 /* ---------- paleta ---------- */
 const RED = {
-  deep: [44, 8, 36], shadow: [92, 16, 46], mid: [150, 28, 34], base: [190, 44, 32],
-  light: [228, 86, 48], hi: [255, 150, 90]
+  deep: [38, 6, 34], shadow: [84, 12, 44], mid: [134, 20, 34], base: [172, 30, 30],
+  light: [212, 62, 42], hi: [255, 140, 90]
 };
 const GOLD = [[0, [58, 20, 14]], [0.25, [128, 50, 18]], [0.5, [206, 120, 28]], [0.72, [240, 186, 56]], [0.9, [255, 226, 120]], [1, [255, 248, 210]]];
 const LIGHT_DIR = [-0.62, -0.78]; // luz vem de cima à esquerda
@@ -134,6 +134,14 @@ function shadeVolume(L, o = {}) {
   if (!mask) { mask = layer(); mask.getContext('2d').drawImage(L, 0, 0); }
   // primeiro recorta tudo que vazou da silhueta (screen/multiply pintam fora)
   g.save(); g.globalCompositeOperation = 'destination-in'; g.drawImage(mask, 0, 0); g.restore();
+  // queda de luz: longe do feixe tudo afunda para vinho/roxo
+  g.save(); g.globalCompositeOperation = 'multiply';
+  const fo = o.falloff || [330, 280, 220, 820];
+  const fg = g.createRadialGradient(fo[0], fo[1], fo[2], fo[0], fo[1], fo[3]);
+  fg.addColorStop(0, 'rgb(255,255,255)'); fg.addColorStop(0.5, 'rgb(205,170,190)'); fg.addColorStop(1, 'rgb(120,80,130)');
+  g.fillStyle = fg; g.fillRect(0, 0, S, S);
+  g.globalCompositeOperation = 'destination-in'; g.drawImage(mask, 0, 0);
+  g.restore();
   g.save(); g.globalCompositeOperation = 'source-atop';
   // sombra própria: borda oposta à luz, larga e suave
   const sh = edge(mask, -(o.shadowW || 34), -(o.shadowW || 34) * 0.8);
@@ -314,9 +322,10 @@ function backPilePath(g) {
 }
 
 function coin(g, x, y, r, L, rot) {
-  const c = ramp(GOLD, L), d = ramp(GOLD, L - 0.32), h = ramp(GOLD, L + 0.22);
+  const c = ramp(GOLD, L), d = ramp(GOLD, L - 0.45), h = ramp(GOLD, L + 0.25);
   const ry = r * lerp(0.45, 0.9, rnd());
   g.save(); g.translate(x, y); g.rotate(rot);
+  g.fillStyle = 'rgba(50,14,10,0.35)'; g.beginPath(); g.ellipse(r * 0.15, r * 0.35, r * 1.05, ry * 0.9, 0, 0, Math.PI * 2); g.fill();
   g.fillStyle = rgb(d); g.beginPath(); g.ellipse(0, r * 0.12, r, ry, 0, 0, Math.PI * 2); g.fill();
   g.fillStyle = rgb(c); g.beginPath(); g.ellipse(0, 0, r * 0.94, ry * 0.9, 0, 0, Math.PI * 2); g.fill();
   g.strokeStyle = rgb(d, 0.6); g.lineWidth = Math.max(0.6, r * 0.12);
@@ -347,8 +356,9 @@ function goldLight(topY) {
   return (x, y) => {
     const b = beamLight(x, y);
     const depth = clamp((y - topY) / 340, 0, 1);
-    const side = clamp(Math.abs(x - 500) / 520, 0, 1);
-    return clamp(0.56 + 0.44 * b - 0.18 * depth - 0.26 * side * side, 0, 1);
+    const side = x > 520 ? clamp((x - 520) / 500, 0, 1) : clamp((520 - x) / 700, 0, 1);
+    const wave = 0.08 * Math.sin(x * 0.02 + y * 0.013) * Math.sin(y * 0.031); // ondulação do monte
+    return clamp(0.6 + 0.42 * b - 0.16 * depth - 0.26 * side * side + wave, 0, 1);
   };
 }
 
@@ -363,7 +373,7 @@ function drawGoldMound(g) {
   gr.addColorStop(0, 'rgba(255,220,120,0.7)'); gr.addColorStop(1, 'rgba(255,200,100,0)');
   g.fillStyle = gr; g.fillRect(0, 600, S, 424);
   seed = 99;
-  scatterCoins(g, moundPath, 9000, (x, y) => lerp(4, 13, clamp((y - 680) / 344, 0, 1)), goldLight(690), [0, 680, S, S]);
+  scatterCoins(g, moundPath, 11000, (x, y) => lerp(4, 15, Math.pow(clamp((y - 680) / 344, 0, 1), 1.3)), goldLight(690), [0, 680, S, S]);
   // sombreamento da curvatura do monte
   g.globalCompositeOperation = 'multiply';
   gr = g.createLinearGradient(0, 0, S, 0);
@@ -568,7 +578,7 @@ function drawDragonBody(g) {
   for (let i = NECK.C.length - 1; i >= 0; i--) { const c = NECK.C[i], [nx, ny] = NECK.N[i], w = NECK.W[i]; d.lineTo(c[0] - nx * w * 1.1, c[1] - ny * w * 1.1); }
   d.closePath(); d.clip();
   gr = d.createLinearGradient(360, 300, 520, 640);
-  gr.addColorStop(0, '#f0a868'); gr.addColorStop(0.5, '#d9784a'); gr.addColorStop(1, '#8a3a34');
+  gr.addColorStop(0, '#e89660'); gr.addColorStop(0.5, '#c86440'); gr.addColorStop(1, '#7a2a32');
   d.fillStyle = gr; d.fillRect(0, 0, S, S);
   // placas ventrais
   for (let i = 4; i < NECK.C.length - 4; i += 4) {
@@ -619,7 +629,7 @@ function drawDragonBody(g) {
   d.save(); d.globalCompositeOperation = 'source-atop';
   d.beginPath(); jawPath(d);
   gr = d.createLinearGradient(0, 306, 0, 366);
-  gr.addColorStop(0, '#e2683e'); gr.addColorStop(0.45, '#b23a2c'); gr.addColorStop(1, '#5a1030');
+  gr.addColorStop(0, '#d65a38'); gr.addColorStop(0.45, '#a02a2a'); gr.addColorStop(1, '#4a0c2c');
   d.fillStyle = gr; d.fill();
   d.save(); d.clip();
   for (let x = 262; x < 450; x += 13) { // placas sob o queixo
@@ -629,7 +639,7 @@ function drawDragonBody(g) {
   d.restore();
   d.beginPath(); headPath(d);
   gr = d.createLinearGradient(330, 176, 350, 300);
-  gr.addColorStop(0, '#f38a50'); gr.addColorStop(0.4, '#d9512f'); gr.addColorStop(0.8, '#a42a2c'); gr.addColorStop(1, '#6a1430');
+  gr.addColorStop(0, '#e86e44'); gr.addColorStop(0.4, '#c63a2a'); gr.addColorStop(0.8, '#94202c'); gr.addColorStop(1, '#5a1030');
   d.fillStyle = gr; d.fill();
   d.save(); d.clip();
   // sombra para a nuca (fora da luz) e luz no focinho
@@ -673,7 +683,7 @@ function drawDragonBody(g) {
   crease([[430, 340], [350, 345], [275, 340]], 10, 'rgba(70,10,36,0.4)', 8);               // sob a mandíbula
   crease([[440, 330], [470, 300], [480, 262]], 10, 'rgba(50,8,32,0.4)', 6);               // músculo da mandíbula
   d.restore();
-  shadeVolume(L, { mask, shadowW: 46, shadowA: 0.8, rimW: 7, rimA: 0.5, rimFocus: [360, 300, 560], litA: 0.3 });
+  shadeVolume(L, { mask, shadowW: 46, shadowA: 0.95, rimW: 7, rimA: 0.5, rimFocus: [360, 300, 560], litA: 0.3 });
   // cabeça: detalhes
   d.save(); d.globalCompositeOperation = 'source-atop';
   // sobrancelha saliente e sulco do focinho
@@ -839,6 +849,13 @@ function drawTail(g) {
   }
   d.restore();
   scalesAlong(d, TAIL, { cols: 10, step: 2 });
+  const band = (k, col, wdt, blur, from) => {
+    d.filter = `blur(${blur}px)`; d.strokeStyle = col; d.lineWidth = wdt; d.lineCap = 'round'; d.beginPath();
+    for (let i = from; i < TAIL.C.length; i++) { const c = TAIL.C[i], [nx, ny] = TAIL.N[i], w = TAIL.W[i]; const px = c[0] + nx * w * k, py = c[1] + ny * w * k; i > from ? d.lineTo(px, py) : d.moveTo(px, py); }
+    d.stroke(); d.filter = 'none';
+  };
+  band(0.45, 'rgba(255,140,90,0.35)', 8, 4, 50);
+  band(-0.7, 'rgba(50,8,32,0.5)', 10, 5, 40);
   d.restore();
   shadeVolume(L, { mask, shadowW: 22, shadowA: 0.6, shadowBlur: 12, rimW: 5, rimA: 0.45, rimFocus: [360, 700, 520] });
   // a base da cauda se funde ao corpo
@@ -872,8 +889,8 @@ function drawSword(g) {
   // lâmina fincada (some no ouro)
   let gr = g.createLinearGradient(112, 0, 128, 0);
   gr.addColorStop(0, '#5a5560'); gr.addColorStop(0.45, '#e8e4ea'); gr.addColorStop(0.55, '#9a96a4'); gr.addColorStop(1, '#3a3640');
-  g.fillStyle = gr; g.beginPath(); g.moveTo(111, 650); g.lineTo(129, 650); g.lineTo(127, 800); g.lineTo(113, 800); g.fill();
-  g.fillStyle = 'rgba(40,30,40,0.5)'; g.fillRect(119, 655, 2, 140);
+  g.fillStyle = gr; g.beginPath(); g.moveTo(111, 650); g.lineTo(129, 650); g.lineTo(127, 822); g.lineTo(113, 822); g.fill();
+  g.fillStyle = 'rgba(40,30,40,0.5)'; g.fillRect(119, 655, 2, 160);
   // guarda
   gr = g.createLinearGradient(0, 640, 0, 656);
   gr.addColorStop(0, '#ffe08a'); gr.addColorStop(1, '#8a5018');
@@ -887,6 +904,13 @@ function drawSword(g) {
   g.fillStyle = gr; g.beginPath(); g.arc(120, 592, 12, 0, Math.PI * 2); g.fill();
   g.fillStyle = '#c0182a'; g.beginPath(); g.arc(120, 645, 4, 0, Math.PI * 2); g.fill();
   g.restore();
+  // moedas amontoadas em volta da lâmina fincada
+  seed = 808;
+  for (let i = 0; i < 70; i++) {
+    const x = 120 + rr(-46, 46), k = 1 - Math.pow((x - 120) / 46, 2);
+    const y = 812 + rr(-10, 4) * k + rr(0, 18) + (1 - k) * 12;
+    coin(g, x, y, rr(4, 7), clamp(goldLight(690)(x, y) + rr(-0.15, 0.1), 0, 1), rr(-0.5, 0.5));
+  }
 }
 
 function drawCrown(g, x, y, s, rot) {
@@ -967,7 +991,7 @@ function dragonShadowOnGold(g) {
 function burying(g) {
   seed = 777;
   const L = goldLight(690);
-  const put = (x, y) => coin(g, x, y, lerp(5, 11, clamp((y - 680) / 344, 0, 1)) * rr(0.8, 1.2), L(x, y) - 0.05 + rr(-0.12, 0.1), rr(-0.5, 0.5));
+  const put = (x, y) => coin(g, x, y, lerp(4, 10, clamp((y - 680) / 344, 0, 1)) * rr(0.8, 1.2), L(x, y) - 0.05 + rr(-0.12, 0.1), rr(-0.5, 0.5));
   // dedos cravados: moedas sobre a base das garras
   for (const [cx, cy, rx] of [[420, 840, 58], [562, 836, 34], [826, 850, 50]]) {
     for (let i = 0; i < rx * 1.6; i++) {
@@ -980,7 +1004,7 @@ function burying(g) {
   for (let i = Math.round(M * 0.3); i < M; i++) {
     const c = T.C[i], [nx, ny] = T.N[i], w = T.W[i];
     const sink = 0.5 + 0.5 * Math.sin(i * 0.21) * Math.sin(i * 0.07 + 1);
-    const nCoins = rnd() < 0.35 ? 0 : 1 + Math.round(sink * 3 * rnd());
+    const nCoins = rnd() < 0.55 ? 0 : 1 + Math.round(sink * 2 * rnd());
     for (let k = 0; k < nCoins; k++) {
       const d = w * (1 - sink * 0.9) + rr(-2, 10);
       put(c[0] - nx * d + rr(-6, 6), c[1] - ny * d + rr(-2, 6));
@@ -1014,14 +1038,14 @@ function render() {
   // asa de trás (mais escura, vista por trás)
   drawWing(g, {
     S: [600, 540], E: [545, 330], W: [610, 60], tips: [[480, 110], [478, 250], [520, 410]], attach: [590, 520],
-    scallop: 0.28, reach: 420, memIn: [90, 18, 34], memOut: [130, 34, 40], alpha: 0.95, glow: [200, 60, 50], glowA: 0.25,
+    scallop: 0.28, reach: 420, memIn: [70, 12, 32], memOut: [110, 24, 38], alpha: 0.95, glow: [200, 60, 50], glowA: 0.25,
     vein: [40, 6, 20], fold: [40, 6, 24], bone: 7, boneC: [120, 26, 34], boneHi: [220, 90, 70], seed: 3, rimA: 0.35
   });
   // asa da frente (grande, à direita)
   drawWing(g, {
     S: [640, 545], E: [800, 395], W: [705, 175], tips: [[835, 28], [1002, 112], [1018, 322], [972, 520]], attach: [900, 575],
-    scallop: 0.2, reach: 560, memIn: [120, 24, 34], memOut: [196, 70, 46], alpha: 0.96, glow: [255, 120, 60], glowA: 0.3,
-    vein: [70, 10, 30], fold: [70, 10, 34], bone: 9, boneC: [170, 40, 34], boneHi: [255, 140, 90], seed: 9, rimA: 0.5
+    scallop: 0.2, reach: 560, memIn: [92, 14, 34], memOut: [168, 46, 42], alpha: 0.97, glow: [240, 100, 56], glowA: 0.28,
+    vein: [70, 10, 30], fold: [70, 10, 34], bone: 9, boneC: [150, 30, 34], boneHi: [240, 120, 80], seed: 9, rimA: 0.5
   });
   drawGoldMound(g);
   drawSword(g);
@@ -1072,9 +1096,9 @@ function render() {
     [160, 880, 6, '#e02040'], [70, 965, 6, '#3070ff'], [120, 990, 5, '#e02040'], [270, 955, 6, '#e02040'], [600, 760, 5, '#3070ff'], [960, 900, 6, '#3070ff'], [900, 955, 5, '#20c060']]) gem(g, x, y, r, c);
   // brilhos em estrela fixos
   seed = 31;
-  for (let i = 0; i < 46; i++) {
+  for (let i = 0; i < 90; i++) {
     const x = rr(20, 1000), y = rr(700, 1010); const L = goldLight(690)(x, y);
-    if (L > 0.55) sparkle(g, x, y, rr(1.5, 4) * L, 0.8);
+    if (L > 0.6) sparkle(g, x, y, rr(1.5, 4) * L, 0.8);
   }
   // feixe na frente (névoa) + névoa quente baixa
   drawBeam(g, 0.35);
@@ -1087,7 +1111,7 @@ function render() {
   gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(10,2,8,0.75)');
   g.fillStyle = gr; g.fillRect(0, 0, S, S);
   // gradação de cor quente
-  g.save(); g.globalCompositeOperation = 'soft-light'; g.fillStyle = 'rgba(255,150,80,0.18)'; g.fillRect(0, 0, S, S); g.restore();
+  g.save(); g.globalCompositeOperation = 'soft-light'; g.fillStyle = 'rgba(255,140,80,0.1)'; g.fillRect(0, 0, S, S); g.restore();
 }
 
 render();
