@@ -1059,8 +1059,8 @@ function build(v) {
     }
     draw("ouro_longe", crest);
     // poça de luz onde o feixe toca o ouro: moedas mais claras + brilhos em estrela
-    const pool = [{ type: "ellipse", x: 132, y: 334, w: 76, h: 22, color: K("g4"), filled: true }, { type: "ellipse", x: 146, y: 338, w: 46, h: 12, color: K("g5"), filled: true }];
-    for (let i = 0; i < 26; i++) { const a = i * 2.39, r = Math.sqrt(i / 26); const cx = Math.round(170 + Math.cos(a) * 34 * r), cy = Math.round(345 + Math.sin(a) * 9 * r); pool.push({ type: "ellipse", x: cx - 2, y: cy, w: 5, h: 2, color: K(i % 3 ? "g5" : "g6"), filled: true }, { type: "pixels", points: [[cx - 2, cy + 2], [cx + 1, cy + 2]], color: K("g3") }); }
+    const pool = [];
+    for (let i = 0; i < 44; i++) { const a = i * 2.39, r = Math.sqrt(i / 44); const cx = Math.round(170 + Math.cos(a) * 34 * r), cy = Math.round(345 + Math.sin(a) * 9 * r); pool.push({ type: "ellipse", x: cx - 2, y: cy, w: 5, h: 2, color: K(i % 3 ? "g5" : "g6"), filled: true }, { type: "pixels", points: [[cx - 2, cy + 2], [cx + 1, cy + 2]], color: K("g3") }); }
     for (const [sx, sy] of [[150, 340], [178, 336], [196, 346], [166, 350]]) pool.push({ type: "pixels", points: [[sx, sy], [sx - 1, sy], [sx + 1, sy], [sx, sy - 1], [sx, sy + 1]], color: K("spark") });
     draw("ouro_longe", pool);
     tf("ouro_longe", { op: "haze", color: K("bg5"), quantidade: 0.3 });
