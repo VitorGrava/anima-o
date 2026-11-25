@@ -99,10 +99,10 @@ function tubePath(g, T) {
   T.L.forEach(p => g.lineTo(p[0], p[1]));
   // ponta arredondada
   const e = T.C[T.C.length - 1], we = T.W[T.W.length - 1], ne = T.N[T.N.length - 1];
-  g.arc(e[0], e[1], Math.max(0.5, we), Math.atan2(ne[1], ne[0]), Math.atan2(ne[1], ne[0]) + Math.PI * (1), false);
+  g.arc(e[0], e[1], Math.max(0.5, we), Math.atan2(ne[1], ne[0]), Math.atan2(ne[1], ne[0]) - Math.PI, true);
   for (let i = T.R.length - 1; i >= 0; i--) g.lineTo(T.R[i][0], T.R[i][1]);
   const s = T.C[0], ws = T.W[0], ns = T.N[0];
-  g.arc(s[0], s[1], Math.max(0.5, ws), Math.atan2(-ns[1], -ns[0]), Math.atan2(-ns[1], -ns[0]) + Math.PI, false);
+  g.arc(s[0], s[1], Math.max(0.5, ws), Math.atan2(-ns[1], -ns[0]), Math.atan2(-ns[1], -ns[0]) - Math.PI, true);
   g.closePath();
 }
 
@@ -348,7 +348,7 @@ function goldLight(topY) {
     const b = beamLight(x, y);
     const depth = clamp((y - topY) / 340, 0, 1);
     const side = clamp(Math.abs(x - 500) / 520, 0, 1);
-    return clamp(0.5 + 0.48 * b - 0.22 * depth - 0.3 * side * side, 0, 1);
+    return clamp(0.56 + 0.44 * b - 0.18 * depth - 0.26 * side * side, 0, 1);
   };
 }
 
@@ -615,6 +615,59 @@ function drawDragonBody(g) {
   scalesAlong(d, NECK, { rows: 0, cols: 12, step: 3 });
   d.restore();
   d.restore();
+  // cabeça e mandíbula pintadas por cima (cobrem as placas do pescoço), com volume próprio
+  d.save(); d.globalCompositeOperation = 'source-atop';
+  d.beginPath(); jawPath(d);
+  gr = d.createLinearGradient(0, 306, 0, 366);
+  gr.addColorStop(0, '#e2683e'); gr.addColorStop(0.45, '#b23a2c'); gr.addColorStop(1, '#5a1030');
+  d.fillStyle = gr; d.fill();
+  d.save(); d.clip();
+  for (let x = 262; x < 450; x += 13) { // placas sob o queixo
+    d.strokeStyle = 'rgba(70,10,30,0.4)'; d.lineWidth = 1.5;
+    d.beginPath(); d.moveTo(x, 340); d.quadraticCurveTo(x + 4, 352, x + 2, 366); d.stroke();
+  }
+  d.restore();
+  d.beginPath(); headPath(d);
+  gr = d.createLinearGradient(330, 176, 350, 300);
+  gr.addColorStop(0, '#f38a50'); gr.addColorStop(0.4, '#d9512f'); gr.addColorStop(0.8, '#a42a2c'); gr.addColorStop(1, '#6a1430');
+  d.fillStyle = gr; d.fill();
+  d.save(); d.clip();
+  // sombra para a nuca (fora da luz) e luz no focinho
+  gr = d.createLinearGradient(220, 0, 490, 0);
+  gr.addColorStop(0, 'rgba(255,170,100,0.25)'); gr.addColorStop(0.55, 'rgba(255,170,100,0)'); gr.addColorStop(1, 'rgba(60,8,36,0.55)');
+  d.fillStyle = gr; d.fillRect(200, 160, 300, 160);
+  // plano do focinho (aresta lateral)
+  d.globalCompositeOperation = 'multiply';
+  d.fillStyle = 'rgba(150,60,80,0.45)';
+  d.beginPath(); d.moveTo(222, 268); d.quadraticCurveTo(300, 258, 380, 262); d.quadraticCurveTo(440, 268, 486, 260); d.lineTo(486, 320); d.lineTo(210, 300); d.closePath(); d.fill();
+  d.globalCompositeOperation = 'source-atop';
+  // escamas pequenas na cabeça
+  seed = 61;
+  for (let y = 180; y < 300; y += 9) for (let x = 230 + ((y / 9) % 2) * 6; x < 490; x += 12) {
+    const sz = 4 + (x - 220) / 60;
+    d.strokeStyle = `rgba(60,8,30,${0.18 + 0.12 * (y - 180) / 120})`; d.lineWidth = 1;
+    d.beginPath(); d.arc(x + rr(-1, 1), y + rr(-1, 1), sz, 0.15 * Math.PI, 0.85 * Math.PI); d.stroke();
+  }
+  // placas da sobrancelha e do focinho
+  for (const [x, y, r] of [[300, 222, 9], [318, 214, 10], [338, 208, 10], [360, 200, 11], [250, 244, 8], [272, 236, 8]]) {
+    gr = d.createRadialGradient(x - 3, y - 3, 1, x, y, r);
+    gr.addColorStop(0, 'rgba(255,180,120,0.55)'); gr.addColorStop(1, 'rgba(255,150,100,0)');
+    d.fillStyle = gr; d.beginPath(); d.arc(x, y, r, 0, Math.PI * 2); d.fill();
+  }
+  d.restore();
+  d.restore();
+  // vincos: separam coxa, ombro e cotovelo da massa do corpo
+  d.save(); d.globalCompositeOperation = 'source-atop'; d.lineCap = 'round';
+  const crease = (pts, wdt, col, blur) => { d.filter = `blur(${blur}px)`; d.strokeStyle = col; d.lineWidth = wdt; d.beginPath(); smooth(d, pts, false); d.stroke(); d.filter = 'none'; };
+  crease([[770, 560], [748, 620], [760, 690], [800, 735]], 14, 'rgba(50,8,32,0.55)', 6);   // frente da coxa
+  crease([[790, 560], [770, 615], [780, 680]], 8, 'rgba(255,130,80,0.35)', 4);            // luz na borda da coxa
+  crease([[960, 620], [940, 690], [905, 740]], 18, 'rgba(50,8,32,0.6)', 8);               // trás da coxa
+  crease([[590, 560], [600, 620], [570, 690], [535, 740]], 14, 'rgba(50,8,32,0.5)', 6);   // trás do ombro
+  crease([[450, 560], [440, 630], [452, 700]], 10, 'rgba(255,140,90,0.25)', 5);            // luz na frente do ombro
+  crease([[440, 355], [360, 364], [270, 350]], 16, 'rgba(50,8,32,0.75)', 6);
+  crease([[430, 340], [350, 345], [275, 340]], 10, 'rgba(70,10,36,0.4)', 8);               // sob a mandíbula
+  crease([[440, 330], [470, 300], [480, 262]], 10, 'rgba(50,8,32,0.4)', 6);               // músculo da mandíbula
+  d.restore();
   shadeVolume(L, { mask, shadowW: 46, shadowA: 0.8, rimW: 7, rimA: 0.5, rimFocus: [360, 300, 560], litA: 0.3 });
   // cabeça: detalhes
   d.save(); d.globalCompositeOperation = 'source-atop';
@@ -783,7 +836,7 @@ function drawTail(g) {
   shadeVolume(L, { mask, shadowW: 22, shadowA: 0.6, shadowBlur: 12, rimW: 5, rimA: 0.45, rimFocus: [360, 700, 520] });
   // a base da cauda se funde ao corpo
   d.save(); d.globalCompositeOperation = 'destination-in';
-  gr = d.createRadialGradient(935, 640, 20, 935, 640, 70);
+  gr = d.createRadialGradient(935, 640, 1, 935, 640, 2);
   gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,1)');
   d.fillStyle = gr; d.fillRect(0, 0, S, S); d.restore();
   // sombra projetada no ouro
@@ -883,10 +936,10 @@ function gem(g, x, y, r, col) {
 function drawChest(g, x, y) {
   g.save(); g.translate(x, y);
   let gr = g.createLinearGradient(0, -40, 0, 30);
-  gr.addColorStop(0, '#6a3a20'); gr.addColorStop(1, '#2a120c');
+  gr.addColorStop(0, '#9a5a30'); gr.addColorStop(1, '#4a2014');
   g.fillStyle = gr; g.beginPath(); g.roundRect(-46, -20, 92, 56, 4); g.fill();
   gr = g.createLinearGradient(0, -48, 0, -18);
-  gr.addColorStop(0, '#8a5028'); gr.addColorStop(1, '#3a1a10');
+  gr.addColorStop(0, '#b87038'); gr.addColorStop(1, '#5a2a16');
   g.fillStyle = gr; g.beginPath(); g.moveTo(-46, -18); g.quadraticCurveTo(0, -52, 46, -18); g.closePath(); g.fill();
   g.fillStyle = '#d8a038';
   for (const bx of [-34, 30]) g.fillRect(bx, -40, 6, 76);
@@ -920,7 +973,7 @@ function burying(g) {
   for (let i = Math.round(M * 0.3); i < M; i++) {
     const c = T.C[i], [nx, ny] = T.N[i], w = T.W[i];
     const sink = 0.5 + 0.5 * Math.sin(i * 0.21) * Math.sin(i * 0.07 + 1);
-    const nCoins = 2 + Math.round(sink * 3);
+    const nCoins = rnd() < 0.35 ? 0 : 1 + Math.round(sink * 3 * rnd());
     for (let k = 0; k < nCoins; k++) {
       const d = w * (1 - sink * 0.9) + rr(-2, 10);
       put(c[0] - nx * d + rr(-6, 6), c[1] - ny * d + rr(-2, 6));
@@ -975,14 +1028,16 @@ function render() {
   // espinhos do dorso (atrás da silhueta)
   spinesEdge(g, NECK, 1, -1, 0.12, 0.98, 11, t => lerp(22, 13, t));
   spinesEdge(g, BODY, -1, 1, 0.12, 0.95, 9, t => 20 + 6 * Math.sin(t * Math.PI));
+  spinesEdge(g, TAIL, -1, 1, 0.1, 0.32, 6, t => lerp(20, 12, t));
+  drawTail(g);
+  // chifres (a base fica atrás do crânio)
+  drawHorn(g, [440, 205], [478, 150], [575, 128], 32);
+  drawHorn(g, [400, 205], [420, 130], [505, 92], 30);
   drawMouth(g);
   const body = drawDragonBody(g);
   g.save(); g.filter = 'blur(14px)'; g.globalAlpha = 0.4; g.drawImage(tint(body, 'rgb(30,5,20)', 0), 6, 10); g.restore();
   g.drawImage(body, 0, 0);
   drawTeeth(g);
-  // chifres
-  drawHorn(g, [420, 196], [450, 120], [540, 70], 30);
-  drawHorn(g, [380, 196], [390, 110], [460, 70], 28);
   // espinhos da bochecha
   for (const [x, y, a] of [[452, 300, 0.4], [462, 270, 0.0], [438, 330, 0.9], [470, 240, -0.3]]) {
     g.save(); g.translate(x, y); g.rotate(a);
@@ -999,8 +1054,6 @@ function render() {
     { tube: [[482, 705], [470, 760], [446, 800], [430, 818]], w: t => lerp(86, 54, t), scales: true },
     { ell: [424, 826, 50, 19, -0.08] }
   ], [[388, 828, 2.25, 30], [408, 836, 1.95, 34], [434, 840, 1.65, 30], [458, 834, 1.35, 24]], { box: [390, 700, 520, 840], drop: true, fade: [700, 735], rimA: 0.35 });
-  spinesEdge(g, TAIL, -1, 1, 0.03, 0.3, 7, t => lerp(20, 12, t));
-  drawTail(g);
   burying(g);
   // tesouros
   drawCrown(g, 520, 868, 0.8, -0.08);
