@@ -482,6 +482,15 @@ function buildDragon(v) {
     for (const sm of spine) {
       if (sm.u < next) continue;
       const t = sm.u;
+      if (v === "normal" && t > 430) {   // cauda: poucos espinhos, decrescendo, espaçamento irregular
+        const f = clamp((t - 430) / 400, 0, 1), hT = 7 - 5 * f, gap = 30 + ((Math.sin(t * 3.7) * 43758.5) % 1 + 1) * 9;
+        next = t + gap;
+        if (sm.x > 300 && sm.x < 440 && sm.y < 320) continue;
+        const fl = t > 560, px = fl ? -sm.ty : sm.ty, py = fl ? sm.tx : -sm.tx;
+        const bx = sm.x + px * sm.r * 0.95, by = sm.y + py * sm.r * 0.95;
+        spike(buf, [bx, by], [sm.x + px * (sm.r + hT) - sm.tx * hT * 0.5, sm.y + py * (sm.r + hT) - sm.ty * hT * 0.5], Math.max(1.4, hT * 0.45), sm.z - 4, MAT.chifre, { flag: 4 });
+        continue;
+      }
       const h = t < 170 ? Math.max(5 + 6 * (t / 170), t > 90 ? 8.5 : 0) : clamp(sm.r * 0.5, 3, 20);   // pescoço: 5 -> 11 px, crescendo para o dorso   // pescoço: 4 -> 9 px, crescendo para o dorso
       next = t + Math.max(6, h * 1.05);
       if (sm.x > 300 && sm.x < 440 && sm.y < 320) continue;          // coberto pela asa / raiz da asa
@@ -572,6 +581,7 @@ function buildDragon(v) {
     // espinhos da bochecha e do queixo, varrendo para trás
     spike(buf, [220, 140], [252, 148], 5, 30, MAT.chifre);
     spike(buf, [214, 158 + jawDrop], [240, 174 + jawDrop], 4.5, 30, MAT.chifre);
+    if (v === "normal") spike(buf, [203, 163], [212, 176], 3, 32, MAT.chifre);   // espinho na mandíbula
     // placas/chifrinhos sob o queixo, diminuindo para a frente
     for (const [x, y, l] of [[194, 164, 9], [178, 169, 7], [162, 173, 6], [146, 177, 5]]) spike(buf, [x, y + jawDrop], [x + l * 0.7, y + l + jawDrop], l * 0.35, 28, MAT.chifre);
     spike(buf, [236, 100], [264, 98], 4.5, 40, MAT.chifre);
@@ -581,6 +591,7 @@ function buildDragon(v) {
   }
   renderSDF(buf);
   smoothNormals(buf, 3);
+  if (v === "normal") buf.toSpine.set(spine.part, 0.7);
   spineCoords(buf, spine);
   if (process.env.DBG) console.log("PART max", PART, "prims", buf.prims.length, "grupos", buf.groups);
   return { buf, wingInfo, spine, buried };
@@ -744,7 +755,7 @@ function shadeDragon(D, v) {
     if (v === "normal" && m === MAT.pele && !buf.flag[k] && ny > 0.4 && y > 300 && y < 380) tone = Math.max(0, tone - 1);
     const scaleOn = v === "normal" ? tone === 2 && !midT && ny < 0.05 && !(buf.part[k] === D.spine.part && y > 306 && buf.u[k] < 440) : nz < 0.45 && tone >= 1;   // escamas só na meia-luz   // dourado: a grade some sob o ouro (só sugere nas bordas)
     if (matName === "pele" && R > 5 && scaleOn && !buf.noScale[k]) {
-      let ss = buf.u[k] >= 2000 ? 3.5 : clamp(R * 0.17, 3, 8);
+      let ss = buf.u[k] >= 2380 && buf.u[k] < 2440 ? 5.5 : buf.u[k] >= 2000 ? 3.5 : clamp(R * 0.17, 3, 8);   // bochecha: escamas maiores
       if (buf.part[k] === D.spine.part && buf.u[k] > 150 && buf.u[k] < 1000) ss *= 1 - 0.32 * clamp((buf.u[k] - 220) / 200, 0, 1) - 0.15 * clamp((buf.u[k] - 420) / 300, 0, 1);   // ~30% menores perto do quadril/cauda
       if (buf.blocos.has(buf.part[k])) ss *= 0.7;                                                                          // coxa: escamas menores
       const arc = Math.asin(clamp(s, -1, 1)) * R;
@@ -847,10 +858,12 @@ function shadeDragon(D, v) {
     for (let y = 60; y < 340; y++) {
       const t = y / 430, xl = 70 + 120 * t, xr = 150 + 230 * t;
       for (let x = Math.ceil(xl + 4); x < xr - 4; x++) {
-        const k = y * W + x; if (!res[k] || buf.mat[k] !== MAT.pele) continue;
+        const k = y * W + x; if (!res[k]) continue;
+        if (buf.mat[k] === MAT.chifre && buf.hornLen.has(buf.part[k])) { if (!buf.mat[k - W] || !buf.mat[k - 1]) res[k] = "H4"; continue; }
+        if (buf.mat[k] !== MAT.pele) continue;
         const neckHead = buf.u[k] >= 2000 || (buf.part[k] === D.spine.part && buf.u[k] < 112);
         if (!neckHead) continue;
-        if (!buf.mat[k - 1] || !buf.mat[k - 2] || !buf.mat[k - W]) res[k] = "R6";
+        if (!buf.mat[k - 1] || !buf.mat[k - 2] || !buf.mat[k - W] || !buf.mat[k - 2 * W]) res[k] = "R6";
       }
     }
   }
@@ -867,6 +880,9 @@ function shadeDragon(D, v) {
   }
   wedge([[421, 368], [428, 369], [424, 373]]);       // jarrete: cunha curta dentro da perna (joelho só pela quebra do contorno)
   wedge([[222, 388], [242, 385], [232, 400]]);       // pulso (embaixo da dobra)
+  if (v === "normal") for (const [px0, py0, w0] of [[150, 117, 9], [166, 110, 10], [186, 103, 9]]) {   // placas ósseas: borda clara em cima, sombra embaixo
+    for (let i = 0; i < w0; i++) { const x = px0 + i, yt = py0 + Math.round(i * -0.35); const k1 = yt * W + x, k2 = (yt + 3) * W + x; if (res[k1] && buf.mat[k1] === MAT.pele) res[k1] = "R5"; if (res[k2] && buf.mat[k2] === MAT.pele) res[k2] = "R1"; }
+  }
   if (v === "normal") for (const [kx, ky] of buf.knuckles) for (const [dx, dy] of [[0, 0], [1, 0]]) { const q = (ky + dy) * W + kx + dx; if (res[q] && buf.mat[q] === MAT.pele) res[q] = "R5"; }   // calo claro em cada nó
   // olho: amêndoa grande sob a sobrancelha, íris amarelo->laranja, pupila em fenda, brilho, contorno escuro
   const [ex, ey] = HEAD.olho;
@@ -886,11 +902,11 @@ function shadeDragon(D, v) {
   for (let ii = 1; ii < 11; ii++) { const q = (ey - 4) * W + ex - 6 + ii; if (res[q] && buf.mat[q] === MAT.pele) res[q] = "R1"; }   // sombra da crista
   // dentes: de cima descem da borda do focinho, de baixo sobem da mandíbula (marfim, luz à esquerda)
   const tooth = (x, y0, len, dir) => { const w0 = len >= 8 ? 4 : 3; for (let j = 0; j < len; j++) { const wdt = j < len * 0.5 ? w0 : j < len * 0.8 ? w0 - 1 : 1; for (let i = 0; i < wdt; i++) { const k = (y0 + dir * j) * W + x + i; res[k] = i === 0 ? "H4" : i < wdt - 1 ? "H3" : "H2"; } } };
-  for (const [x, len] of [[123, 6], [131, 5], [140, 11], [151, 5], [161, 6], [171, 4], [185, 9], [194, 4]]) {
+  for (const [x, len] of v === "normal" ? [[123, 4], [130, 3], [140, 13], [150, 3], [158, 5], [167, 3], [175, 4], [185, 11], [195, 3]] : [[123, 6], [131, 5], [140, 11], [151, 5], [161, 6], [171, 4], [185, 9], [194, 4]]) {
     let yt = -1; for (let y = 120; y < 185; y++) if (D.buf.mat[y * W + x] === MAT.boca) { yt = y; break; }
     if (yt >= 0) tooth(x, yt, len, 1);
   }
-  for (const [x, len] of [[128, 5], [146, 8], [158, 4], [176, 7], [190, 4]]) {
+  for (const [x, len] of v === "normal" ? [[128, 3], [146, 7], [156, 3], [170, 4], [178, 6], [190, 3]] : [[128, 5], [146, 8], [158, 4], [176, 7], [190, 4]]) {
     let yb = -1; for (let y = 185; y > 120; y--) if (D.buf.mat[y * W + x] === MAT.boca) { yb = y; break; }
     if (yb >= 0) tooth(x, yb, len, -1);
   }
@@ -1082,7 +1098,7 @@ function build(v) {
     // moedas: de trás para frente; o tom depende da luz (raio de luz + sombra do dragão + borda escura)
     const G = ["g0", "g1", "g2", "g3", "g4", "g5", "g6"];
     const light = (x, y) => {
-      let l = 0.42 + 0.42 * Math.exp(-(((x - 250) / 130) ** 2) - (((y - 380) / 70) ** 2));
+      let l = 0.42 + 0.42 * Math.exp(-(((x - 250) / 130) ** 2) - (((y - 380) / 70) ** 2)) + 0.45 * Math.exp(-(((x - 170) / 42) ** 2) - (((y - 356) / 22) ** 2));   // + poça de luz onde o feixe toca o ouro
       l += 0.12 * (1 - Math.abs(x - 300) / 300) + 0.22 * (vnoise(x / 26, y / 11) - 0.5);
       const dk = y * W + x;
       const shadowed = D.buf.mat[Math.max(0, dk - 30 * W)] && y > 340;   // sob o corpo do dragão
@@ -1107,8 +1123,10 @@ function build(v) {
         sh.push({ type: "line", x1: x + 1, y1: y - h * 2 + 1, x2: x + 1, y2: y - h * 2 + w - 2, color: K(G[Math.min(6, t + 1)]) });
         continue;
       }
-      sh.push({ type: "ellipse", x, y: y + 1, w, h, color: K(G[Math.max(0, t - 2)]), filled: true });
+      const front = y > 466;
+      sh.push({ type: "ellipse", x, y: y + 1, w, h, color: K(G[Math.max(0, t - (front ? 3 : 2))]), filled: true });
       sh.push({ type: "ellipse", x, y, w, h, color: K(G[t]), filled: true });
+      if (front) { sh.push({ type: "ellipse", x, y, w, h, color: K(G[Math.max(0, t - 2)]), filled: false }); sh.push({ type: "pixels", points: [[x + 2, y + 1]], color: K("spark") }); }
       sh.push({ type: "line", x1: x + 1 + Math.floor(w * 0.15), y1: y, x2: x + Math.floor(w * 0.5), y2: y, color: K(G[Math.min(6, t + 1)]) });
       if (t >= 4) sh.push({ type: "pixels", points: [[x + 1 + Math.floor(w * 0.2), y]], color: K(G[Math.min(6, t + 2)]) });
     }
@@ -1157,7 +1175,13 @@ function build(v) {
       obj.push({ type: "pixels", points: P([[-3, -7], [3, -7], [-6, -2], [-5, -2]]), color: K("spark") });
       obj.push({ type: "rect", x: Math.round(cx - 1 * s), y: Math.round(cy + 1 * s), w: Math.max(2, Math.round(2 * s)), h: Math.max(2, Math.round(2 * s)), color: K("ruby1"), filled: true });
     };
-    crown(264, 432, 1.4); crown(446, 494, 1.0);
+    crown(264, 432, 1.0); crown(446, 494, 1.0);
+    for (const [gx, gy, gc] of [[258, 433, "emer1"], [270, 433, "saph1"]]) obj.push({ type: "rect", x: gx, y: gy, w: 2, h: 2, color: K(gc), filled: true });
+    // baú meio enterrado: tampa curva, cintas douradas, fechadura
+    obj.push({ type: "rect", x: 418, y: 474, w: 34, h: 18, color: K("B1"), filled: true }, { type: "rect", x: 418, y: 474, w: 34, h: 3, color: K("B2"), filled: true });
+    obj.push({ type: "ellipse", x: 416, y: 464, w: 38, h: 16, color: K("B2"), filled: true }, { type: "ellipse", x: 418, y: 465, w: 30, h: 8, color: K("B3"), filled: true });
+    obj.push({ type: "rect", x: 424, y: 466, w: 3, h: 26, color: K("g4"), filled: true }, { type: "rect", x: 443, y: 466, w: 3, h: 26, color: K("g4"), filled: true }, { type: "line", x1: 424, y1: 466, x2: 424, y2: 491, color: K("g6") });
+    obj.push({ type: "rect", x: 432, y: 476, w: 6, h: 6, color: K("g5"), filled: true }, { type: "pixels", points: [[434, 478], [434, 479]], color: K("g0") }, { type: "pixels", points: [[433, 476]], color: K("spark") });
     // moedas em pé / rolando na frente
     for (const [cx, cy] of [[150, 486], [372, 500]]) { obj.push({ type: "ellipse", x: cx, y: cy - 8, w: 4, h: 9, color: K("g2"), filled: true }, { type: "ellipse", x: cx + 1, y: cy - 8, w: 3, h: 9, color: K("g4"), filled: true }, { type: "line", x1: cx + 2, y1: cy - 6, x2: cx + 2, y2: cy - 2, color: K("g6") }, { type: "pixels", points: [[cx + 2, cy - 7]], color: K("spark") }); }
     // elmo de anão: cúpula, aba, protetor de nariz, chifrinhos
@@ -1534,7 +1558,13 @@ function build(v) {
     rows("vinheta", vg);
     // entalhe geométrico anão na rocha do canto: losangos e runas de 1 px (2 tons), aresta acesa pelo feixe
     const ent = [];
-    for (let y = 14; y < 96; y += 14) for (let x = 6 + ((y / 14) % 2) * 7; x < 96 - y * 0.55; x += 14) {
+    // friso em zigue-zague, uma runa grande, uma rachadura; losangos com falhas (desgaste)
+    for (let x = 0; x < 92; x += 6) ent.push({ type: "line", x1: x, y1: 62, x2: x + 3, y2: 58, color: K("st3") }, { type: "line", x1: x + 3, y1: 58, x2: x + 6, y2: 62, color: K("st3") });
+    ent.push({ type: "line", x1: 0, y1: 56, x2: 96, y2: 56, color: K("bg2") }, { type: "line", x1: 0, y1: 64, x2: 90, y2: 64, color: K("bg2") });
+    ent.push({ type: "line", x1: 22, y1: 14, x2: 22, y2: 46, color: K("st4") }, { type: "line", x1: 22, y1: 22, x2: 36, y2: 14, color: K("st4") }, { type: "line", x1: 22, y1: 30, x2: 36, y2: 22, color: K("st4") }, { type: "line", x1: 23, y1: 15, x2: 23, y2: 46, color: K("bg3") });
+    ent.push({ type: "line", x1: 74, y1: 0, x2: 66, y2: 20, color: K("bg0") }, { type: "line", x1: 66, y1: 20, x2: 70, y2: 34, color: K("bg0") }, { type: "line", x1: 70, y1: 34, x2: 61, y2: 52, color: K("bg0") });
+    for (let y = 70; y < 104; y += 14) for (let x = 6 + ((y / 14) % 2) * 7; x < 96 - y * 0.55; x += 14) {
+      if (((x * 13 + y * 7) % 5) === 0) continue;
       ent.push({ type: "polygon", points: [[x, y + 5], [x + 5, y], [x + 10, y + 5], [x + 5, y + 10]], color: K("bg2") });
       ent.push({ type: "line", x1: x + 5, y1: y, x2: x + 10, y2: y + 5, color: K("st3") });
     }
