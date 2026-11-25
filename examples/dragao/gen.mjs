@@ -396,6 +396,7 @@ function spineCoords(buf, spine) {
   for (const sm of spine) { const key = Math.floor(sm.x / cell) + "," + Math.floor(sm.y / cell); if (!grid.has(key)) grid.set(key, []); grid.get(key).push(sm); }
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const k = y * W + x; if (buf.mat[k] !== MAT.pele || buf.flag[k] || buf.u[k] >= 1500) continue;
+    if (buf.keepThigh && buf.blocos.has(buf.part[k])) continue;   // (normal) coxa: escamas seguem a curva da própria coxa
     let best = null, bd = 1e9;
     const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
     for (let gy = cy - 3; gy <= cy + 3; gy++) for (let gx = cx - 3; gx <= cx + 3; gx++) {
@@ -595,7 +596,7 @@ function buildDragon(v) {
     spike(buf, [sm.x + px * (D - 1.5), sm.y + py * (D - 1.5)], [sm.x + px * (D + hT) - sm.tx * hT * 0.5, sm.y + py * (D + hT) - sm.ty * hT * 0.5], Math.max(1.8, hT * 0.5), sm.z, MAT.chifre, { flag });
   }
   smoothNormals(buf, 3);
-  if (v === "normal") buf.toSpine.set(spine.part, 0.7);
+  if (v === "normal") { buf.toSpine.set(spine.part, 0.7); buf.keepThigh = true; }
   spineCoords(buf, spine);
   if (process.env.DBG) { let c5 = 0, c6 = 0; for (let k = 0; k < W * H; k++) { if (buf.flag[k] === 5) c5++; if (buf.flag[k] === 6) c6++; } console.log("PART max", PART, "flag5", c5, "flag6", c6); }
   return { buf, wingInfo, spine, buried };
@@ -891,18 +892,21 @@ function shadeDragon(D, v) {
     // placas ósseas: miolo 1 tom mais claro, borda clara de 1 px em cima, sombra de 1 px embaixo
     const plate = (px0, py0, w0, h0, sl) => { for (let i = 0; i < w0; i++) { const x = px0 + i, yt = py0 + Math.round(i * sl); for (let j = 0; j <= h0; j++) { const k = (yt + j) * W + x; if (!res[k] || buf.mat[k] !== MAT.pele) continue; res[k] = j === 0 ? "R6" : j === h0 ? "R0" : "R5"; } } };
     // placas em escudo (6–7 px) sobre o topo da cabeça, quebrando a silhueta: topo claro 1 px, corpo médio, sombra 1 px embaixo
-    for (const [cx0] of [[160], [174], [189]]) {
+    for (const [cx0] of [[156], [170], [185]]) {
       let ytop = -1; for (let y = 60; y < 140; y++) if (buf.mat[y * W + cx0] === MAT.pele && buf.u[y * W + cx0] >= 2000) { ytop = y; break; }
       if (ytop < 0) continue;
 
-      const rowsP = [[0, 0, "R0", "R0", "R0", 0, 0, 0], [0, "R0", "R6", "R6", "R6", "R0", 0, 0], ["R0", "R6", "R5", "R5", "R5", "R4", "R0", 0], ["R0", "R5", "R5", "R5", "R4", "R4", "R2", "R0"], [0, "R5", "R5", "R4", "R4", "R2", "R0", 0], [0, 0, "R4", "R4", "R2", "R0", 0, 0], [0, 0, 0, "R1", "R1", 0, 0, 0]];
+      // placa alongada (9 px) inclinada para trás, ponta aguda atrás: borda clara em cima, sombra 1 px embaixo, fundida à crista
+      for (let ii = 0; ii < 10; ii++) { const yo = ytop - 2 + Math.round(-ii * 0.35), hgt = ii < 7 ? 3 : ii < 9 ? 2 : 1; for (let jj = 0; jj <= hgt; jj++) { const k = (yo + jj) * W + cx0 - 3 + ii; res[k] = jj === 0 ? "R6" : jj === hgt ? (ii < 8 ? "R1" : "R4") : "R4"; } }
 
-      rowsP.forEach((row, j) => row.forEach((c, i) => { if (c) res[(ytop - 4 + j) * W + cx0 - 4 + i] = c; }));
+
     }
     for (const [a, b, w0] of [[124, 130, 6], [133, 126, 7], [143, 122, 7]]) plate(a, b, w0, 2, -0.4);                 // fileira no focinho
     const dk = { R6: "R5", R5: "R4", R4: "R3", Rc: "R3", R3: "R2", Rb: "R2", R2: "R1", Ra: "R1" }, lt = { R1: "R2", Ra: "R2", R2: "R3", Rb: "R3", R3: "R4", Rc: "R4", R4: "R5" };
     // sombra em arco da caixa torácica sob o dorso
     for (let x = 250; x <= 380; x++) { const ya = Math.round(296 + 8 * Math.sin((Math.PI * (x - 250)) / 130)); for (const y of [ya, ya + 1, ya + 2, ya + 3, ya + 4].filter((yy) => yy < ya + 3 + Math.round(2 * Math.sin((Math.PI * (x - 250)) / 130)))) { const k = y * W + x; if (res[k] && buf.part[k] === D.spine.part && dk[res[k]]) res[k] = dk[res[k]]; } }
+    // dobra coxa/barriga: sombra
+    for (let y = 298; y < 332; y++) for (let x = 380; x < 398; x++) { const k = y * W + x, cx = 387 + (y - 298) * 0.15; if (Math.abs(x - cx) < 3 + (y - 298) / 12 && res[k] && buf.mat[k] === MAT.pele && dk[res[k]]) res[k] = dk[res[k]]; }
     // quadril: elipse de luz própria
     for (let y = 272; y < 310; y++) for (let x = 388; x < 434; x++) { const k = y * W + x, e = ((x - 411) / 21) ** 2 + ((y - 290) / 17) ** 2; if (e < 0.75 && res[k] && buf.blocos.has(buf.part[k]) && lt[res[k]]) res[k] = lt[res[k]]; }
   }
@@ -925,20 +929,20 @@ function shadeDragon(D, v) {
   for (let ii = 1; ii < 11; ii++) { const q = (ey - 4) * W + ex - 6 + ii; if (res[q] && buf.mat[q] === MAT.pele) res[q] = "R1"; }   // sombra da crista
   // dentes: de cima descem da borda do focinho, de baixo sobem da mandíbula (marfim, luz à esquerda)
   const toothN = (x, y0, len, dir, curve = 0) => {   // cunha: base larga afinando, marfim com sombra de 1 px no lado de trás
-    const w0 = len >= 9 ? 4 : len >= 5 ? 3 : 2;
+    const w0 = len >= 11 ? 5 : len >= 9 ? 4 : len >= 5 ? 3 : 2;
     for (let j = 0; j < len; j++) {
       const wdt = Math.max(1, Math.round(w0 * (1 - j / len) + 0.4)), ox = Math.round(curve * (j * j) / len);
       for (let i = 0; i < wdt; i++) { const k = (y0 + dir * j) * W + x + i + ox; res[k] = wdt === 1 ? "H3" : i === wdt - 1 ? "H2" : i === 0 && j < len - 2 ? "H4" : "H3"; }
     }
   };
   const tooth = (x, y0, len, dir, sl = 0) => { const w0 = len >= 8 ? 4 : 3; for (let j = 0; j < len; j++) { const wdt = j < len * 0.5 ? w0 : j < len * 0.8 ? w0 - 1 : 1, ox = Math.round(j * sl); for (let i = 0; i < wdt; i++) { const k = (y0 + dir * j) * W + x + i + ox; res[k] = i === 0 ? "H4" : i < wdt - 1 ? "H3" : "H2"; } } };
-  for (const [x, len, sl] of v === "normal" ? [[124, 3, 0.2], [130, 4, -0.15], [139, 13, 0], [150, 2, 0], [156, 4, 0.25], [164, 3, -0.2], [172, 4, 0.15], [184, 11, 0], [195, 2, 0.3]] : [[123, 6], [131, 5], [140, 11], [151, 5], [161, 6], [171, 4], [185, 9], [194, 4]]) {
+  for (const [x, len, sl] of v === "normal" ? [[124, 3, 0.2], [130, 4, -0.15], [138, 15, 0], [150, 2, 0], [156, 4, 0.25], [164, 3, -0.2], [172, 4, 0.15], [182, 3, 0], [190, 4, 0.2], [196, 2, 0.3]] : [[123, 6], [131, 5], [140, 11], [151, 5], [161, 6], [171, 4], [185, 9], [194, 4]]) {
     let yt = -1; for (let y = 120; y < 185; y++) if (D.buf.mat[y * W + x] === MAT.boca) { yt = y; break; }
     if (yt >= 0) { if (v === "normal") toothN(x, yt, len, 1, len >= 9 ? 0.35 : sl || 0); else tooth(x, yt, len, 1, sl || 0); }
   }
-  for (const [x, len] of v === "normal" ? [[128, 3], [145, 5], [156, 2], [168, 4], [178, 4], [190, 2]] : [[128, 5], [146, 8], [158, 4], [176, 7], [190, 4]]) {
+  for (const [x, len] of v === "normal" ? [[128, 3], [147, 3], [156, 2], [166, 3], [175, 3], [183, 13], [193, 2]] : [[128, 5], [146, 8], [158, 4], [176, 7], [190, 4]]) {
     let yb = -1; for (let y = 185; y > 120; y--) if (D.buf.mat[y * W + x] === MAT.boca) { yb = y; break; }
-    if (yb >= 0) { if (v === "normal") toothN(x, yb, len, -1, 0.15); else tooth(x, yb, len, -1); }
+    if (yb >= 0) { if (v === "normal") toothN(x, yb, len, -1, len >= 9 ? 0.3 : 0.15); else tooth(x, yb, len, -1); }
   }
   // narina
   for (const [x, y] of [[116, 131], [117, 131], [118, 131], [117, 132], [118, 132], [119, 132]]) res[y * W + x] = "R0";
@@ -1162,7 +1166,7 @@ function build(v) {
       const tf2 = front ? Math.max(t, 3) : t;
       sh.push({ type: "ellipse", x, y: y + 1, w, h, color: K(G[Math.max(0, tf2 - (front ? 3 : 2))]), filled: true });
       sh.push({ type: "ellipse", x, y, w, h, color: K(G[tf2]), filled: true });
-      if (front) { sh.push({ type: "ellipse", x, y, w, h, color: K("g1"), filled: false }); sh.push({ type: "pixels", points: [[x + 2, y + 1]], color: K("spark") }); }
+      if (front) { sh.push({ type: "ellipse", x, y, w, h, color: K("g1"), filled: false }); if (((x * 7 + y * 13) % 20) === 0) sh.push({ type: "pixels", points: [[x + 2, y + 1]], color: K("spark") }); }
       sh.push({ type: "line", x1: x + 1 + Math.floor(w * 0.15), y1: y, x2: x + Math.floor(w * 0.5), y2: y, color: K(G[Math.min(6, t + 1)]) });
       if (t >= 4) sh.push({ type: "pixels", points: [[x + 1 + Math.floor(w * 0.2), y]], color: K(G[Math.min(6, t + 2)]) });
     }
@@ -1213,18 +1217,20 @@ function build(v) {
       obj.push({ type: "pixels", points: P([[-3, -7], [3, -7], [-6, -2], [-5, -2]]), color: K("spark") });
       obj.push({ type: "rect", x: Math.round(cx - 1 * s), y: Math.round(cy + 1 * s), w: Math.max(2, Math.round(2 * s)), h: Math.max(2, Math.round(2 * s)), color: K("ruby1"), filled: true });
     };
-    crown(264, 432, 1.0); crown(446, 494, 1.0);
+    crown(264, 432, 1.0); crown(444, 497, 0.95);
     for (const [gx, gy, gc] of [[258, 433, "emer1"], [270, 433, "saph1"]]) obj.push({ type: "rect", x: gx, y: gy, w: 2, h: 2, color: K(gc), filled: true });
-    // baú meio enterrado: tampa curva, cintas douradas, fechadura
-    // baú (~24 px) meio enterrado, tampa entreaberta com o brilho do ouro dentro e moedas transbordando
-    obj.push({ type: "polygon", points: [[414, 470], [440, 470], [446, 452], [420, 450]], color: K("B2") }, { type: "line", x1: 420, y1: 450, x2: 446, y2: 452, color: K("B3") });   // tampa aberta
-    obj.push({ type: "rect", x: 414, y: 468, w: 26, h: 5, color: K("g5"), filled: true }, { type: "line", x1: 415, y1: 468, x2: 438, y2: 468, color: K("g6") }, { type: "pixels", points: [[420, 468], [430, 469]], color: K("spark") });   // brilho dentro
-    obj.push({ type: "rect", x: 412, y: 472, w: 30, h: 16, color: K("B1"), filled: true }, { type: "rect", x: 412, y: 472, w: 30, h: 2, color: K("B3"), filled: true });
-    obj.push({ type: "rect", x: 417, y: 472, w: 3, h: 16, color: K("g4"), filled: true }, { type: "rect", x: 434, y: 472, w: 3, h: 16, color: K("g4"), filled: true }, { type: "line", x1: 417, y1: 472, x2: 417, y2: 487, color: K("g6") });
-    obj.push({ type: "rect", x: 425, y: 476, w: 5, h: 5, color: K("g5"), filled: true }, { type: "pixels", points: [[427, 478]], color: K("g0") }, { type: "pixels", points: [[425, 476]], color: K("spark") });
-    obj.push({ type: "line", x1: 412, y1: 487, x2: 441, y2: 487, color: K("g0") }, { type: "line", x1: 441, y1: 472, x2: 441, y2: 487, color: K("g0") }, { type: "line", x1: 434, y1: 472, x2: 434, y2: 487, color: K("g6") }, { type: "line", x1: 412, y1: 472, x2: 412, y2: 487, color: K("B3") });
-    obj.push({ type: "line", x1: 413, y1: 471, x2: 440, y2: 471, color: K("g6") }, { type: "pixels", points: [[416, 471], [424, 471], [433, 471]], color: K("spark") });   // fresta de luz dourada
-    for (const [cx, cy] of [[410, 470], [442, 471], [446, 476], [407, 476]]) obj.push({ type: "ellipse", x: cx, y: cy, w: 6, h: 3, color: K("g5"), filled: true }, { type: "pixels", points: [[cx + 1, cy]], color: K("g6") });
+    // baú em perspectiva (~26 px): face da frente + face lateral + boca vista de cima cheia de ouro, tampa entreaberta
+    const CX = 452, CY = 484;
+    obj.push({ type: "polygon", points: [[CX + 24, CY], [CX + 30, CY - 6], [CX + 30, CY + 8], [CX + 24, CY + 14]], color: K("B0") });                       // lateral (sombra)
+    obj.push({ type: "polygon", points: [[CX + 6, CY - 6], [CX + 30, CY - 6], [CX + 32, CY - 19], [CX + 8, CY - 20]], color: K("B2") });                    // tampa entreaberta
+    obj.push({ type: "line", x1: CX + 8, y1: CY - 20, x2: CX + 32, y2: CY - 19, color: K("B3") }, { type: "line", x1: CX + 15, y1: CY - 20, x2: CX + 14, y2: CY - 6, color: K("g4") }, { type: "line", x1: CX + 25, y1: CY - 19, x2: CX + 24, y2: CY - 6, color: K("g4") });
+    obj.push({ type: "polygon", points: [[CX, CY], [CX + 24, CY], [CX + 30, CY - 6], [CX + 6, CY - 6]], color: K("g5") });                                 // boca cheia de ouro
+    obj.push({ type: "line", x1: CX + 6, y1: CY - 6, x2: CX + 30, y2: CY - 6, color: K("g6") }, { type: "pixels", points: [[CX + 10, CY - 4], [CX + 18, CY - 3], [CX + 25, CY - 5], [CX + 14, CY - 2]], color: K("spark") });   // fresta de luz
+    obj.push({ type: "rect", x: CX, y: CY, w: 24, h: 14, color: K("B1"), filled: true }, { type: "line", x1: CX, y1: CY, x2: CX + 23, y2: CY, color: K("B3") });  // frente
+    obj.push({ type: "line", x1: CX, y1: CY + 5, x2: CX + 23, y2: CY + 5, color: K("B0") }, { type: "line", x1: CX, y1: CY + 10, x2: CX + 23, y2: CY + 10, color: K("B0") });   // tábuas
+    obj.push({ type: "rect", x: CX + 4, y: CY, w: 2, h: 14, color: K("g4"), filled: true }, { type: "rect", x: CX + 18, y: CY, w: 2, h: 14, color: K("g4"), filled: true }, { type: "line", x1: CX + 4, y1: CY, x2: CX + 4, y2: CY + 13, color: K("g6") }, { type: "line", x1: CX + 18, y1: CY, x2: CX + 18, y2: CY + 13, color: K("g6") });
+    obj.push({ type: "rect", x: CX + 10, y: CY + 3, w: 4, h: 5, color: K("g5"), filled: true }, { type: "pixels", points: [[CX + 11, CY + 5]], color: K("g0") }, { type: "pixels", points: [[CX + 10, CY + 3]], color: K("spark") });
+    for (const [cx, cy] of [[CX - 4, CY - 2], [CX - 7, CY + 4], [CX - 3, CY + 9], [CX + 26, CY + 12], [CX + 2, CY - 8], [CX + 20, CY - 9]]) obj.push({ type: "ellipse", x: cx, y: cy, w: 6, h: 3, color: K("g5"), filled: true }, { type: "line", x1: cx, y1: cy + 3, x2: cx + 5, y2: cy + 3, color: K("g2") }, { type: "pixels", points: [[cx + 1, cy]], color: K("g6") });   // moedas transbordando
     // moedas em pé / rolando na frente
     for (const [cx, cy] of [[150, 486], [372, 500]]) { obj.push({ type: "ellipse", x: cx, y: cy - 8, w: 4, h: 9, color: K("g2"), filled: true }, { type: "ellipse", x: cx + 1, y: cy - 8, w: 3, h: 9, color: K("g4"), filled: true }, { type: "line", x1: cx + 2, y1: cy - 6, x2: cx + 2, y2: cy - 2, color: K("g6") }, { type: "pixels", points: [[cx + 2, cy - 7]], color: K("spark") }); }
     // elmo de anão: cúpula, aba, protetor de nariz, chifrinhos
@@ -1238,7 +1244,7 @@ function build(v) {
     obj.push({ type: "line", x1: 78, y1: 468, x2: 103, y2: 468, color: K("g6") });
     obj.push({ type: "rect", x: 90, y: 468, w: 3, h: 8, color: K("H1"), filled: true });
     obj.push({ type: "polygon", points: [[80, 462], [72, 452], [76, 462]], color: K("H3") }, { type: "polygon", points: [[102, 462], [110, 452], [106, 462]], color: K("H2") });
-    for (let i = 0; i < 26; i++) { const x = 20 + Math.floor(rnd() * 470); const y = Math.round(HX(x) + 6 + rnd() * (H - HX(x) - 12)); if (D.buf.mat[y * W + x]) continue; gem(x, y, 2 + Math.floor(rnd() * 3), "rgb"[i % 3]); }
+    for (let i = 0; i < 26; i++) { const x = 20 + Math.floor(rnd() * 470); const y = Math.round(HX(x) + 6 + rnd() * (H - HX(x) - 12)); if (D.buf.mat[y * W + x] || (x > 432 && x < 490 && y > 456 && y < 506)) continue; gem(x, y, 2 + Math.floor(rnd() * 3), "rgb"[i % 3]); }
     // sombra de contato sob cada pata/garra: 2–3 px escuros nas moedas logo abaixo
     const shadowPx = { g0: [], g1: [] };
     for (let x = 150; x < 470; x++) {
@@ -1499,7 +1505,7 @@ function build(v) {
     // montinho de moedas onde a cauda volta a sair do ouro (esconde o corte da cauda)
     const heap = [];
     for (let i = 0; i < 120; i++) { const a = rnd() * Math.PI, r = Math.sqrt(rnd()) * (0.75 + 0.45 * vnoise(a * 3, 7)); heap.push([304 + Math.cos(a) * 28 * r, 478 - Math.sin(a) * 15 * r + 4]); }
-    for (const [lx, ly] of [[262, 462], [338, 470], [356, 466], [212, 470], [218, 472], [224, 471], [76, 476], [104, 476], [438, 500], [450, 501], [458, 499]]) heap.push([lx, ly]);   // + moedas cobrindo 2–3 px da ponta da cauda   // moedas soltas sobre a cauda
+    for (const [lx, ly] of [[262, 462], [338, 470], [356, 466], [212, 470], [218, 472], [224, 471], [76, 476], [104, 476]]) heap.push([lx, ly]);   // + moedas cobrindo 2–3 px da ponta da cauda   // moedas soltas sobre a cauda
     heap.sort((a, b) => a[1] - b[1]);
     for (const [cx, cy] of heap) {
       const w = 7 + Math.floor(rnd() * 4), h = Math.round(w * 0.45), edgeD = Math.hypot((cx - 304) / 28, (cy - 478) / 15);
@@ -1558,7 +1564,7 @@ function build(v) {
   // ---------- brilhos ----------
   if (!gold) {
     draw("brilhos", [
-      { type: "scatter", x: 0, y: 340, w: W, h: 172, colors: [K("spark"), K("g6")], densidade: 0.006, forma: "cruz", distancia: 9, seed: 21, only: [K("g5"), K("g4"), K("g6")] },
+      { type: "scatter", x: 0, y: 340, w: W, h: 126, colors: [K("spark"), K("g6")], densidade: 0.004, forma: "cruz", distancia: 9, seed: 21, only: [K("g5"), K("g4"), K("g6")] },
       { type: "scatter", x: 80, y: 20, w: 300, h: 380, colors: [K("dust"), K("beam2")], densidade: 0.003, forma: "pixel", distancia: 6, seed: 8, only: [K("beam"), K("beamM")] },
     ]);
   } else {
