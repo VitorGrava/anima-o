@@ -483,7 +483,7 @@ function buildDragon(v) {
       if (sm.u < next) continue;
       const t = sm.u;
       if (v === "normal" && t > 430) {   // cauda: poucos espinhos, decrescendo, espaçamento irregular
-        const f = clamp((t - 430) / 400, 0, 1), hT = 7 - 5 * f, gap = 30 + ((Math.sin(t * 3.7) * 43758.5) % 1 + 1) * 9;
+        const f = clamp((t - 430) / 400, 0, 1), hT = 9 - 6 * f, gap = 30 + ((Math.sin(t * 3.7) * 43758.5) % 1 + 1) * 9;
         next = t + gap;
         if (sm.x > 300 && sm.x < 440 && sm.y < 320) continue;
         const fl = t > 560, px = fl ? -sm.ty : sm.ty, py = fl ? sm.tx : -sm.tx;
@@ -1058,6 +1058,11 @@ function build(v) {
       }
     }
     draw("ouro_longe", crest);
+    // poça de luz onde o feixe toca o ouro: moedas mais claras + brilhos em estrela
+    const pool = [{ type: "ellipse", x: 132, y: 334, w: 76, h: 22, color: K("g4"), filled: true }, { type: "ellipse", x: 146, y: 338, w: 46, h: 12, color: K("g5"), filled: true }];
+    for (let i = 0; i < 26; i++) { const a = i * 2.39, r = Math.sqrt(i / 26); const cx = Math.round(170 + Math.cos(a) * 34 * r), cy = Math.round(345 + Math.sin(a) * 9 * r); pool.push({ type: "ellipse", x: cx - 2, y: cy, w: 5, h: 2, color: K(i % 3 ? "g5" : "g6"), filled: true }, { type: "pixels", points: [[cx - 2, cy + 2], [cx + 1, cy + 2]], color: K("g3") }); }
+    for (const [sx, sy] of [[150, 340], [178, 336], [196, 346], [166, 350]]) pool.push({ type: "pixels", points: [[sx, sy], [sx - 1, sy], [sx + 1, sy], [sx, sy - 1], [sx, sy + 1]], color: K("spark") });
+    draw("ouro_longe", pool);
     tf("ouro_longe", { op: "haze", color: K("bg5"), quantidade: 0.3 });
   }
 
@@ -1168,7 +1173,9 @@ function build(v) {
     // coroas legíveis: aro com faixa escura, 3 pontas, rubi, especular
     const crown = (cx, cy, s) => {
       const P = (pts) => pts.map(([a, b]) => [Math.round(cx + a * s), Math.round(cy + b * s)]);
-      obj.push({ type: "polygon", points: P([[-8, 4], [-8, -4], [-5, -1], [-3, -8], [0, -2], [3, -8], [5, -1], [8, -4], [8, 4]]), color: K("g4") });
+      const outlinePts = P([[-9, 5], [-9, -5], [-5, -2], [-3, -9], [0, -3], [3, -9], [5, -2], [9, -5], [9, 5]]);
+      obj.push({ type: "polygon", points: outlinePts, color: K("g0") });   // contorno escuro (a coroa não some no ouro)
+      obj.push({ type: "polygon", points: P([[-8, 4], [-8, -4], [-5, -1], [-3, -8], [0, -2], [3, -8], [5, -1], [8, -4], [8, 4]]), color: K("g5") });
       obj.push({ type: "polygon", points: P([[3, -8], [5, -1], [8, -4], [8, 4], [4, 4]]), color: K("g3") });
       obj.push({ type: "rect", x: Math.round(cx - 8 * s), y: Math.round(cy + 1 * s), w: Math.round(16 * s), h: Math.max(2, Math.round(3 * s)), color: K("g2"), filled: true });
       obj.push({ type: "line", x1: Math.round(cx - 7 * s), y1: Math.round(cy - 3 * s), x2: Math.round(cx - 7 * s), y2: Math.round(cy + 0 * s), color: K("g6") });
