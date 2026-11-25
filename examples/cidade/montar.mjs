@@ -2,7 +2,7 @@
 // amplia 6x sem suavizar (1080x1920) e põe a narração do vídeo original.
 // Uso: node examples/cidade/montar.mjs <video_original.mp4>  →  examples/cidade/cidade_pixel.mp4
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { W, H, FPS, ROOT } from "./lib/comum.mjs";
 
@@ -35,9 +35,18 @@ CENAS.forEach((c, i) => {
   const q = path.join(DIR, "cenas", c, "quadros");
   const files = existsSync(q) ? readdirSync(q).filter((f) => f.endsWith(".png")).sort() : [];
   if (files.length !== QUADROS[i]) console.warn(`aviso: ${c} tem ${files.length} quadros (esperado ${QUADROS[i]})`);
+  let fonte = files.map((f) => path.join(q, f));
+  if (files.length !== QUADROS[i]) {
+    // provisório: cena ainda não pronta -> trecho do original reduzido a 180x320 (pixelado), para a prévia não ter buraco
+    const t0 = QUADROS.slice(0, i).reduce((a, b) => a + b, 0) / FPS, fb = path.join(tmp, "prov", c);
+    mkdirSync(fb, { recursive: true });
+    execFileSync("ffmpeg", ["-v", "error", "-ss", String(t0), "-i", original, "-frames:v", String(QUADROS[i]), "-vf", `fps=${FPS},scale=${W}:${H}:flags=area`, path.join(fb, "p_%04d.png")]);
+    fonte = readdirSync(fb).sort().map((f) => path.join(fb, f));
+    console.warn(`  ${c}: usando o ORIGINAL pixelado (provisório)`);
+  }
   for (let k = 0; k < QUADROS[i]; k++) {
-    const src = files.length ? path.join(q, files[Math.min(k, files.length - 1)]) : null;
-    if (src) symlinkSync(src, path.join(tmp, "seq", `f_${String(n).padStart(5, "0")}.png`));
+    const src = fonte.length ? fonte[Math.min(k, fonte.length - 1)] : null;
+    if (src) copyFileSync(src, path.join(tmp, "seq", `f_${String(n).padStart(5, "0")}.png`));
     n++;
   }
 });
