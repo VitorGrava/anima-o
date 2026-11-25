@@ -50,7 +50,26 @@ function sceneFindings(p: Project, f: number, flat: Uint8Array): Omit<Finding, "
   const rowColor = (y: number) => { const c = new Map<number, number>(); for (let x = 0; x < W; x++) c.set(flat[y * W + x], (c.get(flat[y * W + x]) ?? 0) + 1); const [k, n] = [...c].sort((a, b) => b[1] - a[1])[0]; return n >= 0.92 * W ? k : -1; };
   let bands = 0, last = -2;
   for (let y = 0; y < H; y++) { const c = rowColor(y); if (c !== -1 && c !== last) { if (last !== -2) bands++; last = c; } else if (c === -1) last = -2; }
-  if (bands >= 3) add("paradigmas", "aviso", "degrade_em_faixas", `${bands} faixas horizontais de cor única com troca reta (céu/água/chão "de papel"). Degradês em pixel art usam dithering (xadrez/Bayer) na transição entre os tons, e a borda de cada faixa deve ondular.`, "draw_shapes type gradient (dithering entre os tons da rampa)");
+  if (bands >= 3) add("paradigmas", "aviso", "degrade_em_faixas", `${bands} faixas horizontais de cor única com troca reta (céu/água/chão "de papel"). Degradês em pixel art usam dithering (xadrez/Bayer) só numa faixa ESTREITA (2–6 px) na transição entre os tons, e a borda de cada faixa deve ondular.`, "draw_shapes type gradient (dithering entre os tons da rampa)");
+  // 1b) xadrez grosso: áreas grandes de dither 50% (pixel a pixel alternado) leem como "tela de mosquiteiro";
+  //     o dither deve ficar só na faixa estreita de transição entre dois tons sólidos
+  {
+    const T = 8, tiles: number[] = [];
+    let dense = 0;
+    for (let ty = 0; ty + T <= H; ty += T) for (let tx = 0; tx + T <= W; tx += T) {
+      let n = 0;
+      for (let y = ty; y < ty + T - 1; y++) for (let x = tx; x < tx + T - 1; x++) {
+        const k = y * W + x, a = flat[k], b = flat[k + 1];
+        if (a !== b && a === flat[k + W + 1] && b === flat[k + W] && a !== 0 && b !== 0) n++;
+      }
+      if (n >= 0.4 * (T - 1) * (T - 1)) { dense++; tiles.push(tx, ty); }
+    }
+    const frac = (dense * T * T) / (W * H);
+    if (W * H >= 96 * 96 && dense >= 6 && frac > 0.015) {
+      const ex = tiles.slice(0, 6).reduce((acc: string[], v, i, a) => (i % 2 ? acc : [...acc, `(${a[i]},${a[i + 1]})`]), []).join(" ");
+      add("paradigmas", "aviso", "xadrez_grosso", `${Math.round(frac * 100)}% da imagem é dither em xadrez 50% (${dense} blocos de 8x8, ex.: ${ex}): em área grande lê como tela/mosquiteiro, não como tom.`, "troque por 2 tons SÓLIDOS (ou um tom intermediário na paleta) e deixe o dither só numa faixa de 2–6 px na divisa; em gradient use suavidade baixa ou dither nenhum");
+    }
+  }
   // 2) áreas chapadas grandes
   const seen = new Uint8Array(W * H);
   let flatArea = 0;

@@ -23,7 +23,7 @@ node bin/anima.mjs show projeto.anima.json all            # todos os frames lado
 node bin/anima.mjs check projeto.anima.json [--efeito]    # defeitos, movimento e tempos (--efeito: brilho, chama, fumaça)
 node bin/anima.mjs import projeto.anima.json ref.png --cores 24   # traz um PNG para a grade (detecta o pixel, tira o fundo, quantiza a paleta)
 node bin/anima.mjs rodada projeto.anima.json --ref ref.png --nota 7   # UMA chamada por rodada de revisão (imagem, medidas, comparação, snapshot, aviso se piorou); `restaurar <proj> <n>` volta; `critico` gera o pedido para um crítico independente
-# dicas: transform shade forma=volume (bloco de luz/sombra); set_frame_timing duration_ms=auto (slow in/out); a ÚLTIMA camada criada fica por cima
+# dicas: transform shade forma=volume (bloco de luz/sombra); draw_shapes type=corpo (criatura grande num volume só, sem emendas); set_frame_timing duration_ms=auto (slow in/out); a ÚLTIMA camada criada fica por cima; xadrez só na faixa de transição
 node bin/anima.mjs tools                                  # comandos e parâmetros
 ```
 

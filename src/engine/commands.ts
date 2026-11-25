@@ -9,6 +9,7 @@ import { z } from "zod";
 import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.ts";
 import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
+import { drawBody } from "./body.ts";
 import { autoShade, autoShadeVolume, cleanCorners, detailColors, selectiveOutline } from "./polish.ts";
 import { drawBox3d, drawCurve, drawForest, drawGradient, drawTerrain, fillPolygon, scatter } from "./paint.ts";
 import { BG_LAYER, EFFECT_LAYER, evaluateBeauty, formatCritique, unionBox } from "./critique.ts";
@@ -1414,6 +1415,24 @@ const shape = z.discriminatedUnion("type", [
     cores: z.array(colorRef).min(1).max(6).describe("tons sorteados por árvore (variação evita o efeito de carimbo)"),
     tipo: z.enum(["pinheiro", "redonda", "mista"]).default("pinheiro"),
   }).describe("BOSQUE: muitas árvores de alturas, larguras e tons variados numa linha de base (pinheiros em camadas ou copas redondas). Duas chamadas com bases e cores diferentes dão profundidade."),
+  z.object({
+    type: z.literal("corpo"),
+    partes: z.array(z.object({
+      nome: z.string().min(1).max(30),
+      pontos: z.array(z.array(z.number()).length(4)).min(1).max(64).optional().describe("TUBO: pontos [x, y, z, raio] ao longo do eixo (spline suave); z = profundidade, maior = mais perto do observador"),
+      elipse: z.object({ cx: z.number(), cy: z.number(), z: z.number().default(0), rx: z.number().min(0.5), ry: z.number().min(0.5), rz: z.number().min(0.5), rot: z.number().default(0).describe("rotação em radianos") }).optional().describe("ELIPSOIDE (ombro, quadril, cabeça, barriga)"),
+    })).min(1).max(40),
+    unir: z.array(z.tuple([z.string(), z.string(), z.number().min(0).max(40)])).optional().describe("pares [parte, parte, k] que se FUNDEM (k = raio da fusão em px: 10–16 ombro/quadril/pescoço, 4 juntas finas). Sem a lista, TODAS as partes se fundem com `fusao`; com a lista, as outras só se sobrepõem (contorno de oclusão entre elas)"),
+    fusao: z.number().min(0).max(40).default(8),
+    luz: z.union([z.enum(["cima-esquerda", "cima", "cima-direita", "esquerda", "direita", "baixo", "frente"]), z.array(z.number()).length(3)]).default("cima-esquerda").describe("direção da luz (ou vetor [x, y, z] na tela: y para baixo, z para o observador)"),
+    rampa: z.array(colorRef).min(2).max(8).describe("tons do material do ESCURO para o CLARO (3–5 com mudança de matiz)"),
+    ambiente: z.number().min(0).max(0.9).default(0.15).describe("luz mínima (0 = sombra chapada no tom mais escuro)"),
+    contorno: z.union([colorRef, z.literal("seletivo")]).optional().describe("contorno na silhueta e onde uma parte passa NA FRENTE de outra; \"seletivo\" usa o tom mais escuro da rampa"),
+    borda_luz: z.object({ cor: colorRef, dir: z.enum(["esquerda", "direita", "cima", "baixo", "cima-esquerda", "cima-direita"]) }).optional().describe("luz de contorno (contraluz, rio de lava, feixe) na borda da silhueta voltada para dir"),
+    especular: colorRef.optional().describe("brilho especular duro (metal, ouro, pele úmida)"),
+    escamas: z.object({ cor: colorRef, tamanho: z.number().min(3).max(24).default(6) }).optional().describe("escamas em arco que seguem o tubo, só na meia-luz"),
+    dither: z.boolean().default(false).describe("dither de Bayer só na transição entre tons (padrão: tons sólidos, que leem melhor)"),
+  }).describe("CORPO 3D ÚNICO (criatura, animal, personagem volumoso): tubos e elipsoides unidos por fusão suave num só volume, com luz pela normal, rampa de cor, contorno só na silhueta/oclusão, escamas e brilho opcionais. Evita a cara de 'peças coladas'. Desenhe chifres, garras, membranas e detalhes por cima em outras camadas."),
   z.object({ type: z.literal("fill"), x: z.number().int(), y: z.number().int(), color: colorRef }).describe("Balde de tinta a partir de (x, y)"),
 ]);
 
@@ -1495,7 +1514,7 @@ const drawShapes = def({
       const onlyComposto = (cor: ColorRefT | ColorRefT[], soCamada = false) => { const flat = soCamada ? s.data : flattenFrame(p, f), idxs = new Set((Array.isArray(cor) ? cor : [cor]).map((c) => colorIndex(p, c))); return (x: number, y: number) => idxs.has(flat[y * p.width + x]); };
       const onlyFirst = (cor: ColorRefT | ColorRefT[]) => colorIndex(p, Array.isArray(cor) ? cor[0] : cor);
       for (const sh of i.shapes) {
-        const c = sh.type === "blob" || sh.type === "capsule" || sh.type === "gradient" || sh.type === "scatter" || sh.type === "box3d" || sh.type === "terrain" || sh.type === "forest" ? 0 : colorIndex(p, sh.color);
+        const c = sh.type === "blob" || sh.type === "capsule" || sh.type === "gradient" || sh.type === "scatter" || sh.type === "box3d" || sh.type === "terrain" || sh.type === "forest" || sh.type === "corpo" ? 0 : colorIndex(p, sh.color);
         switch (sh.type) {
           case "pixels":
             for (const pt of sh.points) { const [x, y] = Array.isArray(pt) ? pt : [pt.x, pt.y]; draw.setPixel(s, x!, y!, c); }
@@ -1522,6 +1541,22 @@ const drawShapes = def({
             const ci = (k?: string) => (k === undefined ? 0 : colorIndex(p, k));
             if (sh.y - sh.h - sh.rise < 0) avisos.push(`box3d: o topo do telhado fica em y=${sh.y - sh.h - sh.rise}, fora do quadro. Lembre: y é a BASE (chão) da parede da frente, não o topo; o telhado sobe ${sh.h + sh.rise} px a partir dela.`);
             drawBox3d(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, prof: sh.prof, xv: sh.xv, yh: sh.yh, rise: sh.rise, frente: ci(sh.frente), lado: ci(sh.lado), telhado: ci(sh.telhado ?? sh.frente), empena: ci(sh.empena ?? sh.frente), linhas: sh.linhas ? ci(sh.linhas) : undefined, linhasTelhado: sh.linhas_telhado ? ci(sh.linhas_telhado) : undefined, espaco: sh.espaco });
+            break;
+          }
+          case "corpo": {
+            const dirs: Record<string, [number, number, number]> = { "cima-esquerda": [-0.6, -0.7, 0.6], cima: [0, -0.8, 0.6], "cima-direita": [0.6, -0.7, 0.6], esquerda: [-0.9, -0.2, 0.5], direita: [0.9, -0.2, 0.5], baixo: [0, 0.85, 0.5], frente: [-0.2, -0.3, 1] };
+            const d2: Record<string, [number, number]> = { esquerda: [-1, 0], direita: [1, 0], cima: [0, -1], baixo: [0, 1], "cima-esquerda": [-0.7, -0.7], "cima-direita": [0.7, -0.7] };
+            const rampa = sh.rampa.map((k) => colorIndex(p, k));
+            const n = drawBody(s, {
+              partes: sh.partes.map((pt) => ({ nome: pt.nome, pontos: pt.pontos as [number, number, number, number][] | undefined, elipse: pt.elipse })),
+              unir: sh.unir, fusao: sh.fusao, luz: typeof sh.luz === "string" ? dirs[sh.luz] : (sh.luz as [number, number, number]),
+              rampa, ambiente: sh.ambiente, dither: sh.dither,
+              contorno: sh.contorno === undefined ? undefined : sh.contorno === "seletivo" ? rampa[0] : colorIndex(p, sh.contorno), seletivo: sh.contorno === "seletivo",
+              bordaLuz: sh.borda_luz ? { cor: colorIndex(p, sh.borda_luz.cor), dir: d2[sh.borda_luz.dir] } : undefined,
+              especular: sh.especular ? colorIndex(p, sh.especular) : undefined,
+              escamas: sh.escamas ? { cor: colorIndex(p, sh.escamas.cor), tamanho: sh.escamas.tamanho } : undefined,
+            });
+            if (!n) avisos.push("corpo não pintou nada (partes fora do canvas ou raios zero?)");
             break;
           }
           case "terrain":

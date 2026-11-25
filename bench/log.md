@@ -208,3 +208,10 @@ Lições: ouro líquido = reflexão do ambiente em 3 zonas largas + especular cu
 dither em xadrez grosso lê como "mosquiteiro" (troque por tons sólidos); conferir no zoom quando crítico e artista discordam
 (o crítico errou 3 vezes, o artista 3 vezes). Engine: arredonda coordenadas decimais, raio até 128, `anima avaliar`,
 scatter densidade ≥0.0001, `only_camada` em gradient/scatter (o only olhava a imagem composta e vazava dither).
+
+## dragão v1 × v30 → engine
+Comparando a 1ª versão com a final: o ganho veio de (1) corpo num volume só com luz pela normal, (2) tons sólidos no
+lugar do xadrez 50%, (3) repetição com variação. (1) virou `draw_shapes type=corpo` (src/engine/body.ts: tubos e
+elipsoides, smooth-min por par, marcha de raio, rampa, contorno seletivo de silhueta/oclusão, escamas, especular, luz de
+borda); (2) virou o achado `xadrez_grosso` do avaliar (acusa a v1, não acusa a final); (3) e as demais lições foram
+para `reference processo`, o prompt e o CLAUDE.md. Exemplo em examples/corpo/.
