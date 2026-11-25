@@ -1513,7 +1513,7 @@ const drawShapes = def({
   schema: z.object({
     frames: framesSel.optional().describe("Padrão: frame 0"),
     layer: layerSel,
-    shapes: z.array(shape).min(1).max(200),
+    shapes: z.array(shape).min(1).max(2000),
     preview: previewFlag,
   }),
   run(p, i) {
@@ -2425,6 +2425,10 @@ function describeIssues(name: string, error: z.ZodError, input?: unknown): strin
 export function runCommand(p: Project, name: string, input: unknown): CommandResult & { ok: boolean } {
   const cmd = byName.get(name);
   if (!cmd) return { ok: false, changed: false, text: `Comando desconhecido: ${name}` };
+  // `preview` em comando que não desenha (set_palette, add_layer...): ignora em vez de recusar o lote
+  if (input && typeof input === "object" && "preview" in (input as object) && unknownKeys(cmd.schema, { preview: false })) {
+    const { preview: _p, ...rest } = input as Record<string, unknown>; void _p; input = rest;
+  }
   const unknown = unknownKeys(cmd.schema, input);
   if (unknown) return { ok: false, changed: false, text: `Entrada inválida para ${name}: ${unknown}` };
   let parsed = cmd.schema.safeParse(input ?? {});

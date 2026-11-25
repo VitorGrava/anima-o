@@ -385,3 +385,11 @@ describe("only_camada", () => {
     expect(cel[5 * 20 + 15]).not.toBe(0);
   });
 });
+
+describe("preview em comando que não desenha", () => {
+  it("set_palette aceita preview:false (ignorado)", () => {
+    const p = createProject({ width: 8, height: 8 });
+    const r = runCommand(p, "set_palette", { colors: [{ key: "a", hex: "#112233", name: "x" }], preview: false });
+    expect(r.ok, r.text).toBe(true);
+  });
+});
