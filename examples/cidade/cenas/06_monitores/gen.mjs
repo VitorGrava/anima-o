@@ -80,23 +80,27 @@ for (let q = 0; q < N; q++) {
 
   // vigia de costas (silhueta) em primeiro plano, à esquerda — um pouco mais de zoom (paralaxe)
   const kv = 1 + 0.3 * ease(q / (N - 1));
-  const V = (x, y) => [Math.round(30 + (x - 30) * kv), Math.round(236 + (y - 236) * kv)];
-  const [hx, hy] = V(26, 186), rh = Math.round(13 * kv);
+  const V = (x, y) => [Math.round(20 + (x - 20) * kv), Math.round(250 + (y - 250) * kv)];
+  const [hx, hy] = V(20, 196), rh = Math.round(9 * kv);
   const VG = [];
-  const [sx0, sy0] = V(-30, 206), [sx1] = V(78, 206);
-  VG.push({ type: "ellipse", x: sx0, y: sy0, w: sx1 - sx0, h: Math.round(80 * kv), color: "O", filled: true });
-  VG.push({ type: "ellipse", x: sx0 + 6, y: sy0 + 2, w: sx1 - sx0 - 12, h: Math.round(20 * kv), color: "I", filled: true });
-  VG.push({ type: "ellipse", x: sx0, y: sy0 + 6, w: sx1 - sx0, h: Math.round(80 * kv), color: "O", filled: true });
-  VG.push(rect(hx - Math.round(6 * kv), hy + rh - 4, Math.round(12 * kv), Math.round(12 * kv), "4"));
-  VG.push({ type: "ellipse", x: hx - rh, y: hy - rh, w: 2 * rh + 1, h: Math.round(2.1 * rh) + 1, color: "4", filled: true });
-  VG.push({ type: "ellipse", x: hx - rh, y: hy - rh - 1, w: 2 * rh + 1, h: Math.round(1.3 * rh), color: "5", filled: true });
-  // luz das telas no contorno da cabeça e do ombro (lado direito)
-  VG.push({ type: "ellipse", x: hx - rh + 2, y: hy - rh + 1, w: 2 * rh + 1, h: Math.round(2.1 * rh) - 1, color: ".", filled: false });
+  const [sx0, sy0] = V(-34, 212), [sx1] = V(66, 212);
+  // ombros e costas (uniforme escuro)
+  VG.push({ type: "ellipse", x: sx0, y: sy0, w: sx1 - sx0, h: Math.round(34 * kv), color: "O", filled: true });
+  VG.push({ type: "polygon", points: [[sx0, sy0 + Math.round(17 * kv)], [sx1, sy0 + Math.round(17 * kv)], [sx1 + 8, H], [sx0 - 8, H]], color: "O" });
+  // costura/gola e dobra do tecido
+  VG.push(line(hx - Math.round(6 * kv), sy0 + 2, hx + Math.round(7 * kv), sy0 + 2, "I"), line(hx + Math.round(16 * kv), sy0 + Math.round(20 * kv), hx + Math.round(14 * kv), sy0 + Math.round(48 * kv), "0"));
+  // pescoço e cabeça (pele escura, cabelo curto)
+  VG.push(rect(hx - Math.round(4 * kv), hy + rh - 3, Math.round(9 * kv), Math.round(9 * kv), "4"));
+  VG.push({ type: "ellipse", x: hx - rh, y: hy - rh, w: 2 * rh + 1, h: Math.round(2.2 * rh) + 1, color: "4", filled: true });
+  VG.push({ type: "ellipse", x: hx - rh, y: hy - rh - 1, w: 2 * rh + 1, h: Math.round(1.2 * rh), color: "5", filled: true });
+  // luz fria das telas no contorno direito da cabeça e no ombro
   const rim = [];
-  for (let a = -1.2; a <= 0.6; a += 0.08) rim.push([Math.round(hx + Math.cos(a) * rh), Math.round(hy + 2 + Math.sin(a) * rh)]);
-  VG.push(px(rim, "Y"));
-  VG.push(line(sx1 - 14, sy0 + 3, sx1 - 4, sy0 + 10, "J"));
-  c.push(shapes("vigia", q, VG.filter((s) => s.type !== "ellipse" || s.filled)));
+  for (let a = -1.3; a <= 0.7; a += 0.07) rim.push([Math.round(hx + Math.cos(a) * rh), Math.round(hy + 1 + Math.sin(a) * rh)]);
+  VG.push(px(rim, "N"));
+  const ombro = [];
+  for (let a = -1.3; a <= 0; a += 0.04) ombro.push([Math.round(sx0 + (sx1 - sx0) / 2 + Math.cos(a) * (sx1 - sx0) / 2), Math.round(sy0 + 17 * kv + Math.sin(a) * 17 * kv)]);
+  VG.push(px(ombro, "I"));
+  c.push(shapes("vigia", q, VG));
 }
 
 gerar({ nome: ID, comandos: c.flat(), quadros: N, saida: `examples/cidade/cenas/${ID}` });
