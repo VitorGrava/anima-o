@@ -10,6 +10,7 @@ import { analyze, analyzeFrame, formatAnalysis, formatIssues } from "./analyze.t
 import { celToRows, cropRows, drawRows, frameToRows, joinBlocks, withRuler } from "./ascii.ts";
 import * as draw from "./draw.ts";
 import { drawBody } from "./body.ts";
+import { drawText } from "./pixelfont.ts";
 import { autoShade, autoShadeVolume, cleanCorners, detailColors, selectiveOutline } from "./polish.ts";
 import { drawBox3d, drawCurve, drawForest, drawGradient, drawTerrain, fillPolygon, scatter } from "./paint.ts";
 import { BG_LAYER, EFFECT_LAYER, evaluateBeauty, formatCritique, unionBox } from "./critique.ts";
@@ -1433,6 +1434,16 @@ const shape = z.discriminatedUnion("type", [
     escamas: z.object({ cor: colorRef, tamanho: z.number().min(3).max(24).default(6) }).optional().describe("escamas em arco que seguem o tubo, só na meia-luz"),
     dither: z.boolean().default(false).describe("dither de Bayer só na transição entre tons (padrão: tons sólidos, que leem melhor)"),
   }).describe("CORPO 3D ÚNICO (criatura, animal, personagem volumoso): tubos e elipsoides unidos por fusão suave num só volume, com luz pela normal, rampa de cor, contorno só na silhueta/oclusão, escamas e brilho opcionais. Evita a cara de 'peças coladas'. Desenhe chifres, garras, membranas e detalhes por cima em outras camadas."),
+  z.object({
+    type: z.literal("texto"),
+    texto: z.string().min(1).max(200),
+    x: z.number().int(), y: z.number().int().describe("topo do CORPO das letras (acentos ocupam as 2 linhas acima)"),
+    color: colorRef,
+    escala: z.number().int().min(1).max(8).default(1).describe("1 = letras 3x5 px; 2 = 6x10..."),
+    espaco: z.number().int().min(0).max(4).default(1).describe("px entre letras (em escala 1)"),
+    alinhar: z.enum(["esquerda", "centro", "direita"]).default("esquerda").describe("x é a borda esquerda, o centro ou a borda direita do texto"),
+    sombra: colorRef.optional().describe("sombra/contorno de 1 px (direita-baixo) para ler sobre fundo movimentado"),
+  }).describe("TEXTO em fonte de pixel 3x5 (maiúsculas, dígitos, pontuação e acentos do português: Á Ã Ç É Ê Í Ó Õ Ú). Placas, letreiros, títulos e legendas. Largura = (3+espaco)*n - espaco, vezes a escala."),
   z.object({ type: z.literal("fill"), x: z.number().int(), y: z.number().int(), color: colorRef }).describe("Balde de tinta a partir de (x, y)"),
 ]);
 
@@ -1543,6 +1554,9 @@ const drawShapes = def({
             drawBox3d(s, { x: sh.x, y: sh.y, w: sh.w, h: sh.h, prof: sh.prof, xv: sh.xv, yh: sh.yh, rise: sh.rise, frente: ci(sh.frente), lado: ci(sh.lado), telhado: ci(sh.telhado ?? sh.frente), empena: ci(sh.empena ?? sh.frente), linhas: sh.linhas ? ci(sh.linhas) : undefined, linhasTelhado: sh.linhas_telhado ? ci(sh.linhas_telhado) : undefined, espaco: sh.espaco });
             break;
           }
+          case "texto":
+            if (!drawText(s, sh.texto, sh.x, sh.y, c, sh.escala, sh.espaco, sh.alinhar, sh.sombra ? colorIndex(p, sh.sombra) : undefined)) avisos.push(`texto "${sh.texto}" ficou fora do canvas`);
+            break;
           case "corpo": {
             const dirs: Record<string, [number, number, number]> = { "cima-esquerda": [-0.6, -0.7, 0.6], cima: [0, -0.8, 0.6], "cima-direita": [0.6, -0.7, 0.6], esquerda: [-0.9, -0.2, 0.5], direita: [0.9, -0.2, 0.5], baixo: [0, 0.85, 0.5], frente: [-0.2, -0.3, 1] };
             const d2: Record<string, [number, number]> = { esquerda: [-1, 0], direita: [1, 0], cima: [0, -1], baixo: [0, 1], "cima-esquerda": [-0.7, -0.7], "cima-direita": [0.7, -0.7] };

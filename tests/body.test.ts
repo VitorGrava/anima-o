@@ -72,3 +72,19 @@ describe("avaliar: xadrez grosso", () => {
     expect(mk(false)).not.toMatch(/xadrez_grosso/);
   });
 });
+
+describe("texto em fonte de pixel", () => {
+  it("desenha letras, acentos e cedilha, centralizado", () => {
+    const p = createProject({ width: 64, height: 16 });
+    ok(p, "set_palette", { colors: [{ key: "a", hex: "#ffffff", name: "branco" }] });
+    ok(p, "draw_shapes", { shapes: [{ type: "texto", texto: "AÇÃO", x: 32, y: 4, color: "a", alinhar: "centro" }] });
+    const cel = p.frames[0].cels[p.layers[0].id];
+    const lit = (x: number, y: number) => cel[y * 64 + x] !== 0;
+    // largura 4 letras = 4*3+3 = 15 -> começa em 32-8 = 24 (arredondado 25)
+    let minX = 64, maxX = 0, minY = 16, maxY = 0;
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 64; x++) if (lit(x, y)) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+    expect(maxX - minX).toBe(14);
+    expect(minY).toBe(2);   // til acima do corpo
+    expect(maxY).toBe(9);   // cedilha abaixo do corpo
+  });
+});
