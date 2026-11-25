@@ -134,8 +134,8 @@ for (let q = 0; q < ZQ; q++) c.push(shapes("gente", F(q), camera(T0(q), 1)));
 const LX = 245.5, LY = 105;
 for (let q = ZQ; q < N; q++) {
   const t = (q - ZQ) / (N - 1 - ZQ);
-  const k = q < 50 ? 1 + 1.3 * ease((q - ZQ) / 12) : 2.3 + 4.2 * ease(Math.min(1, (q - 50) / 7));
-  const u = Math.min(1, (q - ZQ) / 20);
+  const k = q < 50 ? 1.8 + 0.5 * ((q - ZQ) / 12) : 2.3 + 4.2 * ease(Math.min(1, (q - 50) / 7));
+  const u = Math.min(1, 0.6 + (q - ZQ) / 30);
   const fx = 245.5 - PAN + (100 - (245.5 - PAN)) * ease(u), fy = 105 + (118 - 105) * ease(u);
   const T = (x, y) => [fx + (x - LX) * k, fy + (y - LY) * k];
   const R = (x0, y0, w, h, color) => { const [a, b] = T(x0, y0), [cc, d] = T(x0 + w, y0 + h); return rect(Math.round(a), Math.round(b), Math.round(cc) - Math.round(a), Math.round(d) - Math.round(b), color); };

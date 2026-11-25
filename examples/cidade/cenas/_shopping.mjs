@@ -175,3 +175,89 @@ export function sentada({ dir = 1, pele = "2", cabelo = "5", blusa = "A", calca 
 export const passo = (q, fase = 0, cad = 3) => Math.floor(q / cad + fase) % 4;
 
 export { pessoa };
+
+/**
+ * Figura humana procedural de perfil em QUALQUER altura A (px), desenhada em resolução nativa
+ * (discos e segmentos grossos), para planos mais fechados (ex.: catraca). Olha para a direita (dir -1 espelha).
+ * pose: "andar" (frame 0..3), "parado", "barrar" (braço da frente estendido). Pés na última linha.
+ * cores: pele, cabelo, blusa, calca, sapato, tras (tom dos membros de trás), sacola, bone (cor do boné).
+ */
+export function figura({ A = 64, pose = "andar", frame = 0, dir = 1, pele = "2", cabelo = "5", blusa = "R", calca = "8", sapato = "i", tras = null, trasPerna = null, sacola = null, bone = null, cabeloLongo = false, coque = false } = {}) {
+  const Wd = Math.ceil(A * 0.75), Hd = A + 1, g = grid(Wd, Hd);
+  const cx = Math.round(Wd / 2);
+  const rad = (d) => (d * Math.PI) / 180;
+  const put = (x, y, c) => { x = Math.round(x); y = Math.round(y); if (y >= 0 && y < Hd && x >= 0 && x < Wd) g[y][x] = c; };
+  const disco = (x, y, r, c) => { for (let yy = Math.floor(y - r); yy <= Math.ceil(y + r); yy++) for (let xx = Math.floor(x - r); xx <= Math.ceil(x + r); xx++) if ((xx - x) ** 2 + (yy - y) ** 2 <= r * r + 0.25) put(xx, yy, c); };
+  const osso = (x1, y1, x2, y2, r, c) => { const n = Math.ceil(Math.hypot(x2 - x1, y2 - y1)) + 1; for (let i = 0; i <= n; i++) disco(x1 + ((x2 - x1) * i) / n, y1 + ((y2 - y1) * i) / n, r, c); };
+  // poses: [quadrilF, joelhoF, quadrilT, joelhoT, ombroF, cotoveloF, ombroT, cotoveloT, sobe]
+  const P = {
+    contato: [26, 4, -22, 14, -24, 10, 24, 18, 0],
+    passagem: [2, 6, -6, 62, 4, 12, -6, 14, -1],
+    parado: [3, 0, -3, 0, 4, 8, -4, 8, 0],
+    barrar: [4, 0, -4, 0, 86, 4, -4, 8, 0],
+    barrar_meio: [4, 0, -4, 0, 44, 30, -4, 8, 0],
+  };
+  let p, troca = false;
+  if (pose === "andar") { const f = ((frame % 4) + 4) % 4; p = f % 2 === 0 ? P.contato : P.passagem; troca = f >= 2; }
+  else p = P[pose] ?? P.parado;
+  let [hF, kF, hT, kT, sF, eF, sT, eT, sobe] = p;
+  if (troca) [hF, kF, hT, kT, sF, eF, sT, eT] = [hT, kT, hF, kF, sT, eT, sF, eF];
+  const chao = A, coxa = A * 0.25, canela = A * 0.24, rPerna = Math.max(1.2, A * 0.042);
+  // altura do quadril: perna mais "esticada" toca o chão
+  const alturaPerna = (h, k) => coxa * Math.cos(rad(h)) + canela * Math.cos(rad(h - k));
+  const hipY = chao - 1 - Math.max(alturaPerna(hF, kF), alturaPerna(hT, kT)) - rPerna * 0.3 + sobe;
+  const hipX = cx - A * 0.02;
+  const perna = (h, k, cor, cSap) => {
+    const kx = hipX + coxa * Math.sin(rad(h)), ky = hipY + coxa * Math.cos(rad(h));
+    const ax = kx + canela * Math.sin(rad(h - k)), ay = ky + canela * Math.cos(rad(h - k));
+    osso(hipX, hipY, kx, ky, rPerna, cor); osso(kx, ky, ax, ay, rPerna * 0.9, cor);
+    osso(ax - rPerna * 0.3, ay, ax + A * 0.07, ay + 0.4, Math.max(0.8, rPerna * 0.75), cSap);
+  };
+  const ombroY = hipY - A * 0.31, ombroX = hipX + A * 0.01;
+  const braco = A * 0.17, ante = A * 0.16, rBr = Math.max(1, A * 0.034);
+  const membroBraco = (s, e, cor, mao) => {
+    const ex = ombroX + braco * Math.sin(rad(s)), ey = ombroY + braco * Math.cos(rad(s));
+    const hx = ex + ante * Math.sin(rad(s + e)), hy = ey + ante * Math.cos(rad(s + e));
+    osso(ombroX, ombroY + 1, ex, ey, rBr * 1.15, cor); osso(ex, ey, hx, hy, rBr, mao === "manga" ? cor : pele);
+    disco(hx, hy, rBr * 1.15, pele);
+    return [hx, hy];
+  };
+  const corT = trasPerna ?? calca;
+  // membros de trás
+  membroBraco(sT, eT, tras ?? blusa, "pele");
+  perna(hT, kT, corT, sapato);
+  // tronco
+  const tw = A * 0.1;
+  osso(ombroX, ombroY + tw * 0.4, hipX, hipY - tw * 0.3, tw, blusa);
+  osso(hipX, hipY - tw * 0.9, hipX, hipY - 1, tw * 0.8, calca);
+  perna(hF, kF, calca, sapato);
+  // pescoço e cabeça
+  const rC = A * 0.072, hcx = ombroX + A * 0.02, hcy = ombroY - A * 0.035 - rC;
+  osso(ombroX, ombroY, hcx, hcy + rC * 0.6, A * 0.028, pele);
+  disco(hcx, hcy, rC, pele);
+  disco(hcx + rC * 0.95, hcy + rC * 0.15, Math.max(0.6, A * 0.012), pele); // nariz
+  if (bone) {
+    for (let yy = Math.floor(hcy - rC - 1); yy <= hcy - rC * 0.15; yy++) for (let xx = Math.floor(hcx - rC - 1); xx <= hcx + rC + 1; xx++) if ((xx - hcx) ** 2 + (yy - hcy) ** 2 <= (rC + 0.8) ** 2) put(xx, yy, bone);
+    osso(hcx + rC * 0.4, hcy - rC * 0.2, hcx + rC * 1.6, hcy - rC * 0.15, Math.max(0.5, A * 0.012), bone);
+  } else {
+    // cabelo: metade de cima e nuca
+    for (let yy = Math.floor(hcy - rC - 1); yy <= hcy + rC; yy++) for (let xx = Math.floor(hcx - rC - 1); xx <= hcx + rC + 1; xx++) {
+      const d2 = (xx - hcx) ** 2 + (yy - hcy) ** 2;
+      if (d2 > (rC + 0.9) ** 2) continue;
+      if (yy < hcy - rC * 0.35 || xx < hcx - rC * 0.25 + (yy - hcy) * 0.1) put(xx, yy, cabelo);
+    }
+    if (cabeloLongo) osso(hcx - rC * 0.7, hcy, hcx - rC * 0.8, hcy + rC * 2.2, rC * 0.5, cabelo);
+    if (coque) disco(hcx - rC * 0.9, hcy - rC * 0.6, rC * 0.5, cabelo);
+  }
+  put(hcx + rC * 0.45, hcy - rC * 0.05, "i"); // olho
+  // braço da frente
+  const [mx, my] = membroBraco(sF, eF, blusa, "pele");
+  if (sacola) {
+    const bw = Math.round(A * 0.13), bh = Math.round(A * 0.16);
+    osso(mx, my, mx, my + A * 0.04, 0.5, "i");
+    for (let yy = Math.round(my + A * 0.04); yy < my + A * 0.04 + bh; yy++) for (let xx = Math.round(mx - bw / 2); xx < mx + bw / 2; xx++) put(xx, yy, sacola);
+  }
+  let out = g.map((r) => r.join(""));
+  if (dir < 0) out = out.map((r) => [...r].reverse().join(""));
+  return out;
+}
