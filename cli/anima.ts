@@ -12,7 +12,8 @@
  *              [--region x,y,w,h] [--grid] [--diff a,b] [--onion] [--bones] [--scale N]
  *   anima check <projeto> [--symmetric] [--efeito] [--ignorar camada,camada] [--png saida.png]
  *   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
- *   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N] [--fundo #hex] [--margem N] [--sombra] [--vai-e-volta] [--meta]   (sem --scale a escala é automática; --meta grava <saida>.json com posição e duração de cada frame da folha)
+ *   anima export <projeto> <pasta> --todos [--scale N]           um PNG por quadro (f_0000.png …), para vídeo
+  anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N] [--fundo #hex] [--margem N] [--sombra] [--vai-e-volta] [--meta]   (sem --scale a escala é automática; --meta grava <saida>.json com posição e duração de cada frame da folha)
   anima compare <projeto> <ref.png> [--frame N] [--png saida.png] [--fundo auto|nenhum|#hex]   (compara o desenho com uma referência na mesma grade: silhueta, erro de cor, painel lado a lado)
   anima rodada <projeto> [--frame N] [--ref ref.png] [--nota N] [--saida pasta]   (UMA chamada por rodada de revisão: exporta a imagem (e a folha), mede, compara com a rodada anterior e com a referência, guarda um snapshot; avisa se PIOROU)
   anima restaurar <projeto> <n>   (volta o projeto ao estado da rodada n)
@@ -100,6 +101,7 @@ const USAGE = `anima — engine de animação pixel art
                                          defeitos da arte e da animação (--max-cores: limite de cores do estilo, ex. 16 para retrô) (--efeito: brilho, chama, fumaça; --tipo rotacao: moeda girando)
   anima reference <tópico> [--height N] [--style realista|estilizado|chibi] [--color #hex]
   anima export <projeto> <saida.gif|.png|.json> [--scale N] [--columns N] [--frame N] [--fundo #hex] [--margem N] [--sombra] [--vai-e-volta] [--meta]   (.gif = animação; .png = folha de todos os frames; .png com --frame N = só esse frame; sem --scale a escala é automática)
+  anima export <projeto> <pasta> --todos [--scale N]   um PNG por quadro (f_0000.png …) num processo só, para montar vídeo
   anima guide [--completo]               guia do animador (curto; --completo = o guia inteiro)
   anima tools                            lista os comandos e parâmetros (JSON Schema)`;
 
@@ -401,10 +403,18 @@ export async function main(argv: string[]): Promise<number> {
       const sombra = boolFlag(args, "sombra");
       const vaiEVolta = boolFlag(args, "vai-e-volta") || boolFlag(args, "vai_e_volta");
       const meta = boolFlag(args, "meta");
+      const todos = boolFlag(args, "todos");
       rejectUnknownFlags(args, "export");
       const [file, out] = args;
       if (!file || !out) break;
       await store.open(file);
+      if (todos) {
+        // um PNG por quadro numa pasta (f_0000.png …), num processo só: para montar vídeo com ffmpeg
+        await mkdir(out, { recursive: true });
+        for (let i = 0; i < store.project.frames.length; i++) await exportToFile(store.project, { format: "frame_png", path: path.join(out, `f_${String(i).padStart(4, "0")}.png`), scale, frame: i, fundo });
+        console.log(`Exportados ${store.project.frames.length} quadros em ${out}`);
+        return 0;
+      }
       const format = out.endsWith(".gif") ? "gif" : out.endsWith(".json") ? "json" : frame !== undefined ? "frame_png" : "spritesheet_png";
       const done = await exportToFile(store.project, {
         format, path: out, scale, columns: columns ? Number(columns) : undefined, frame: Number(frame ?? 0), fundo, margem: margem ? Number(margem) : undefined, sombra, vaiEVolta, meta,

@@ -63,7 +63,7 @@ export function gerar({ nome, comandos, quadros, saida, escalaPreview = 2 }) {
   const fr = path.join(dir, "quadros");
   rmSync(fr, { recursive: true, force: true });
   mkdirSync(fr, { recursive: true });
-  for (let i = 0; i < quadros; i++) anima("export", proj, path.join(fr, `f_${String(i).padStart(4, "0")}.png`), "--scale", "1", "--frame", String(i));
+  anima("export", proj, fr, "--todos", "--scale", "1");
   anima("export", proj, path.join(dir, `${nome}.gif`), "--scale", String(escalaPreview));
   return proj;
 }

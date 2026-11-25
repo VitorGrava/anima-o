@@ -177,8 +177,8 @@ const setCanvas = def({
     "Define nome, tamanho (em pixels) e velocidade (fps) da animação. Redimensionar recorta/expande a partir do canto superior esquerdo. Tamanhos típicos de pixel art: 16x16, 32x32, 48x48, 64x64.",
   schema: z.object({
     name: z.string().max(80).optional(),
-    width: z.number().int().min(1).max(512).optional(),
-    height: z.number().int().min(1).max(512).optional(),
+    width: z.number().int().min(1).max(1024).optional(),
+    height: z.number().int().min(1).max(1024).optional(),
     fps: z.number().min(1).max(60).optional(),
   }),
   run(p, i) {
@@ -349,7 +349,7 @@ const addFrames = def({
   description:
     "Insere frames na timeline. Com `copy_from`, os novos frames começam como cópia daquele frame (o jeito normal de animar: copie e depois altere só o que muda). ORDEM: desenhe o que é igual em todos os frames (fundo, chão, corpo base) no frame 0 ANTES de add_frames com copy_from, ou depois use frames:\"all\" para desenhar em todos.",
   schema: z.object({
-    count: z.number().int().min(1).max(64).default(1),
+    count: z.number().int().min(1).max(512).default(1),
     copy_from: z.number().int().min(0).optional().describe("Índice do frame a copiar. Omitido = frames vazios."),
     at: z.number().int().min(0).optional().describe("Posição de inserção. Padrão: no fim."),
   }),
@@ -443,7 +443,7 @@ const drawRowsCmd = def({
     layer: layerSel,
     x: z.number().int().default(0).describe("Coluna do canto superior esquerdo"),
     y: z.number().int().default(0).describe("Linha do canto superior esquerdo"),
-    rows: z.array(z.string().max(512)).min(1).max(512),
+    rows: z.array(z.string().max(1024)).min(1).max(1024),
     mirror: z
       .enum(["none", "horizontal"])
       .default("none")
@@ -490,7 +490,7 @@ const drawFramesCmd = def({
           frame: z.number().int().min(0),
           x: z.number().int().default(0),
           y: z.number().int().default(0),
-          rows: z.array(z.string().max(512)).min(1).max(512),
+          rows: z.array(z.string().max(1024)).min(1).max(1024),
           mirror: z.enum(["none", "horizontal"]).default("none").describe("horizontal: escreva só a metade esquerda (com a coluna do meio por último); a engine espelha."),
         }),
       )
